@@ -15,6 +15,7 @@ WORKDIR /build
 
 COPY rust/Cargo.toml rust/Cargo.lock ./
 COPY rust/src ./src
+COPY legal/published /legal/published
 COPY rust/migrations ./migrations
 COPY rust/policy.json rust/policy.dev.json rust/policy.staging.json rust/policy.prod.json ./
 

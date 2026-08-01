@@ -48,7 +48,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
-jsonwebtoken = "10.4.0"
+jsonwebtoken = "11.0.0"
 once_cell = "1"
 
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls"] }
@@ -58,7 +58,7 @@ sha2 = "0.10"
 hex = "0.4"
 hmac = "0.13.0"
 subtle = "2.6"
-base64 = "0.22"
+base64 = "0.23"
 urlencoding = "2.1"
 ed25519-dalek = { version = "3", features = ["pkcs8"] }
 governor = "0.10.4"
@@ -72,5 +72,5 @@ hex = "0.4"
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"
-base64 = "0.22"
+base64 = "0.23"
 rand = "0.10.1"
