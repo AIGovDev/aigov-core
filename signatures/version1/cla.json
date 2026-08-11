@@ -1,3 +1,12 @@
 {
-   "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "SwapanRaj04",
+      "id": 145488304,
+      "comment_id": 5253888750,
+      "created_at": "2026-08-11T13:34:59Z",
+      "repoId": 1246441108,
+      "pullRequestNo": 184
+    }
+  ]
 }
