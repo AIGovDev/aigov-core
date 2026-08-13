@@ -22,3 +22,12 @@ The evidence-pack logic also failed when a valid release promotion contained no 
 ```bash
 git diff --check
 python3 -m pytest -q python/tests/test_compliance_workflow_contract.py
+
+
+## Evaluation gate
+
+The staging → main release promotion continues to run core verification and artifact validation.
+
+## Human approval gate
+
+The release promotion still requires the existing GitHub branch protection and pull request approval flow.
