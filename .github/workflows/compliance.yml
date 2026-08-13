@@ -110,6 +110,17 @@ jobs:
             RUN_ARTIFACT_GATE="true"
           fi
 
+          # staging -> main is a release promotion of changes already reviewed
+          # on staging. Keep verification and artifact gates enabled, but do not
+          # require a duplicate docs/reports/*.md change in the promotion PR.
+          IS_RELEASE_PROMOTION="false"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] \
+            && [ "${{ github.base_ref }}" = "main" ] \
+            && [ "${{ github.head_ref }}" = "staging" ]; then
+            IS_RELEASE_PROMOTION="true"
+            NEEDS_REPORT="false"
+          fi
+
           is_dependency_manifest_path() {
             case "$1" in
               rust/Cargo.lock|rust/Cargo.toml|Cargo.lock|Cargo.toml) return 0 ;;
@@ -435,6 +446,12 @@ jobs:
           )"
           c="$(printf '%s\n' "${SORTED_UNIQ}" | awk 'NF' | wc -l | tr -d '[:space:]')"
           if [ "${c}" -eq 0 ]; then
+            if [ "${is_release_promotion}" = "true" ]; then
+              # Release promotion may contain no new report because the
+              # underlying changes were already reviewed on staging.
+              echo "run_id=release-promotion-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "${OUT}"
+              exit 0
+            fi
             echo "::error::Artefact-bound gate required but no docs/reports/*.md basename was found in this change set."
             echo "::error::Core-affecting changes require exactly one docs/reports/*.md change per PR (except staging→main release promotion)."
             exit 1
