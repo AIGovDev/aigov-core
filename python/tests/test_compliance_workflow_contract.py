@@ -80,6 +80,27 @@ def test_release_promotion_emit_run_id_stays_unique_per_workflow_run() -> None:
     assert "echo \"run_id=release-promotion-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\"" in body
 
 
+def test_staging_to_main_release_promotion_skips_duplicate_report_requirement() -> None:
+    """Release promotion stays verified but must not require a duplicate audit report."""
+    lines = _compliance_yml().splitlines()
+    body = _workflow_job_declaration_body(lines, "changes")
+    assert 'IS_RELEASE_PROMOTION="false"' in body
+    assert '[ "${{ github.base_ref }}" = "main" ]' in body
+    assert '[ "${{ github.head_ref }}" = "staging" ]' in body
+    assert 'IS_RELEASE_PROMOTION="true"' in body
+    assert 'NEEDS_REPORT="false"' in body
+    assert 'RUN_ARTIFACT_GATE="true"' in body
+
+
+def test_release_promotion_without_new_report_emits_release_run_id() -> None:
+    """staging -> main promotion can legitimately have zero new report files."""
+    lines = _compliance_yml().splitlines()
+    body = _workflow_job_declaration_body(lines, "evidence_pack")
+    assert 'if [ "${c}" -eq 0 ]; then' in body
+    assert 'if [ "${is_release_promotion}" = "true" ]; then' in body
+    assert 'echo "run_id=release-promotion-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"' in body
+
+
 def test_dependabot_dependency_only_pr_skips_report_and_artifact_gate() -> None:
     """Lockfile-only Dependabot PRs must not require docs/reports or evidence_pack artefacts."""
     lines = _compliance_yml().splitlines()
