@@ -19,11 +19,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Gitleaks CLI
+        run: |
+          GOBIN="${RUNNER_TEMP}/bin" go install github.com/gitleaks/gitleaks/v8@v8.30.1
+
       - name: gitleaks (secret scanning)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          "${RUNNER_TEMP}/bin/gitleaks" git --redact --verbose .
 
   dependency-scan:
     runs-on: ubuntu-latest
