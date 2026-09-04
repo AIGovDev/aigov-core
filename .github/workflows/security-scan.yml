@@ -24,8 +24,13 @@ jobs:
           GOBIN="${RUNNER_TEMP}/bin" go install github.com/zricethezav/gitleaks/v8@v8.30.1
 
       - name: gitleaks (secret scanning)
+        shell: bash
         run: |
-          "${RUNNER_TEMP}/bin/gitleaks" git --redact --verbose .
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            "${RUNNER_TEMP}/bin/gitleaks" git               --redact               --verbose               --log-opts="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"               .
+          else
+            "${RUNNER_TEMP}/bin/gitleaks" git               --redact               --verbose               --log-opts="-1"               .
+          fi
 
   dependency-scan:
     runs-on: ubuntu-latest
