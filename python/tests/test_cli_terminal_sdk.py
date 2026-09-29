@@ -214,7 +214,7 @@ def test_compliance_summary_main_mocked(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_verify_json_mocked_requests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Minimal repo layout + mocked verify-log HTTP."""
+    """Minimal repo layout + mocked /verify/{run_id} HTTP."""
     monkeypatch.chdir(tmp_path)
     root = tmp_path
     (root / "docs" / "audit").mkdir(parents=True)

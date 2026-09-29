@@ -14,10 +14,21 @@ def _utc_now_iso() -> str:
 
 def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    headers = {"Content-Type": "application/json"}
+
+    api_key = os.environ.get("GOVAI_API_KEY", "").strip()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    project = os.environ.get("GOVAI_PROJECT", "").strip()
+    if project:
+        headers["X-GovAI-Project"] = project
+
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:

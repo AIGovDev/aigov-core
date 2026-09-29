@@ -80,7 +80,7 @@ def verify(run_id: str, *, as_json: bool = False) -> int:
     ledger_derived = isinstance(evidence, dict) and bool(evidence.get("log_path"))
     try:
         r = requests.get(
-            f"{endpoint}/verify-log",
+            f"{endpoint}/verify/{run_id}",
             headers=_audit_request_headers(),
             timeout=15,
         )
@@ -90,8 +90,8 @@ def verify(run_id: str, *, as_json: bool = False) -> int:
             human("OK   governance hash chain verified")
             checks.append({"id": "governance_chain", "ok": True, "message": "hash chain verified", "detail": verdict})
         else:
-            human(f"FAIL governance verify-log returned: {verdict}")
-            checks.append({"id": "governance_chain", "ok": False, "message": "verify-log not ok", "detail": verdict})
+            human(f"FAIL governance verify returned: {verdict}")
+            checks.append({"id": "governance_chain", "ok": False, "message": "verify not ok", "detail": verdict})
             ok = False
     except Exception as e:
         if ledger_derived:

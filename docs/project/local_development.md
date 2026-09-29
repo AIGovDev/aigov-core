@@ -311,12 +311,15 @@ python -m pytest
 
 If you run `python3 -m pytest python/tests` from the repo root **without** the venv, collection may fail on missing optional deps — use the venv from step 2.
 
-## 8. Optional: audit binary in background (Makefile)
+## 8. Optional: run the audit binary locally (Makefile)
+
+AIGov Core does not background-manage this service — `make audit_bg` / `audit_stop` intentionally exit with guidance instead. Run it in the foreground, in its own terminal:
 
 ```bash
-make audit_bg      # builds and runs rust/src binary; waits for GET /ready
-make audit_stop    # when finished
+make run-audit      # builds and runs the rust/ binary; Ctrl+C when finished
 ```
+
+In a second terminal, confirm it's up with `curl -fsS http://127.0.0.1:8088/health` (or `GET /ready` once Postgres/migrations are configured).
 
 ## Canonical references
 

@@ -44,6 +44,28 @@ def test_ai_discovery_completed_emits_expected_event(monkeypatch: pytest.MonkeyP
     assert p["source"] == "local_flow"
 
 
+def test_ai_discovery_completed_sends_bearer_auth_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test: the evidence POST must authenticate against API-key-protected servers."""
+    monkeypatch.setenv("RUN_ID", "r-auth")
+    monkeypatch.setenv("AIGOV_AUDIT_URL", "http://127.0.0.1:8088")
+    monkeypatch.setenv("GOVAI_API_KEY", "secret-key")
+    monkeypatch.setenv("GOVAI_PROJECT", "my-project")
+
+    import aigov_py.ai_discovery_completed as mod
+
+    fake_resp = MagicMock()
+    fake_resp.read.return_value = b'{"ok":true,"record_hash":"h"}'
+    fake_resp.__enter__.return_value = fake_resp
+    fake_resp.__exit__.return_value = False
+
+    with patch("aigov_py.ai_discovery_completed.urllib.request.urlopen", return_value=fake_resp) as urlopen:
+        mod.main()
+
+    req = urlopen.call_args[0][0]
+    assert req.get_header("Authorization") == "Bearer secret-key"
+    assert req.get_header("X-govai-project") == "my-project"
+
+
 def test_ai_discovery_completed_is_idempotent_on_duplicate_409(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
