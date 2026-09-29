@@ -40,3 +40,19 @@ Changed files:
 
 - `rust/Cargo.lock`
 - `docs/reports/rustsec-2026-0285-rustls-remediation.md`
+
+## Evaluation gate
+
+The remediation was validated with:
+
+- `cargo check --all-targets`
+- `cargo test --all-targets`
+- `cargo audit`
+
+The targeted RUSTSEC-2026-0285 vulnerability is no longer reported after upgrading `rustls` to `0.23.45`.
+
+## Human approval gate
+
+This dependency remediation requires normal pull-request review and explicit human approval before merge into `staging`.
+
+No automatic merge is authorized by this report.
