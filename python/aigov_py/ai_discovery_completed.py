@@ -2,33 +2,14 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict
+
+from ._evidence_http import post_evidence_json
 
 
 def _utc_now_iso() -> str:
     return "1970-01-01T00:00:00Z"
-
-
-def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        # The ledger rejects duplicate event_id for a run_id with HTTP 409.
-        # Treat this as an idempotent retry: desired evidence is already present.
-        if int(getattr(e, "code", 0) or 0) == 409:
-            return {"ok": True, "idempotent": True, "status_code": 409}
-        raise
 
 
 def main() -> None:
@@ -75,7 +56,7 @@ def main() -> None:
         "payload": payload,
     }
 
-    out = _post_json(url, ev)
+    out = post_evidence_json(url, ev, treat_409_as_idempotent=True)
     if not isinstance(out, dict) or not out.get("ok"):
         raise SystemExit(f"ai_discovery_completed emission failed: {out}")
 

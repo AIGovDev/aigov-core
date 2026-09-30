@@ -31,7 +31,6 @@ preset: trust-controls
 | Cryptographic signing and verification | [immutable-trust-chain.md](immutable-trust-chain.md), [evidence-signing.md](evidence-signing.md), [verification-workflows.md](verification-workflows.md) |
 | Key lifecycle and HSM practices | [key-rotation.md](key-rotation.md), [private-key-governance.md](private-key-governance.md) |
 | Vendor and auditor handoff | [cross-organization-attestation.md](cross-organization-attestation.md), [supply-chain-integrity.md](supply-chain-integrity.md) |
-| Machine-readable profiles (repo root) | [`../../trust/README.md`](../../trust/README.md) |
 
 ## Contact
 

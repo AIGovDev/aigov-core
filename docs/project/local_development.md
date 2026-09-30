@@ -274,10 +274,10 @@ catalog: ci
 ```bash
 export GOVAI_AUDIT_BASE_URL=http://127.0.0.1:8088
 export GOVAI_API_KEY=test-key   # must match root docker-compose.yml
-make fail-closed-demo            # scripts/run_fail_closed_demo.py — BLOCKED contract, JSON on stdout
+bash examples/blocked_deployment.sh   # BLOCKED contract, asserts `govai check` exit code 3
 ```
 
-Read-only vs fail-closed semantics and exit codes: **`examples/local-demo/CONTRACT.md`**. Public docs preview: run the **`dashboard/`** dev server (`cd dashboard && npm ci && npm run dev`) and open **`/docs`** / **`/help`** (content is read from **`../docs/`** at build/runtime).
+Read-only vs fail-closed semantics and exit codes: **`examples/local-demo/CONTRACT.md`**. There is no public docs/help dashboard preview in AIGov Core — `dashboard/` has no Next.js app committed in this repo (see [ARCHITECTURE.md](../../ARCHITECTURE.md#dashboard-dashboard)).
 
 ### Local audit read-only demo (optional)
 
@@ -311,12 +311,15 @@ python -m pytest
 
 If you run `python3 -m pytest python/tests` from the repo root **without** the venv, collection may fail on missing optional deps — use the venv from step 2.
 
-## 8. Optional: audit binary in background (Makefile)
+## 8. Optional: run the audit binary locally (Makefile)
+
+AIGov Core does not background-manage this service — `make audit_bg` / `audit_stop` intentionally exit with guidance instead. Run it in the foreground, in its own terminal:
 
 ```bash
-make audit_bg      # builds and runs rust/src binary; waits for GET /ready
-make audit_stop    # when finished
+make run-audit      # builds and runs the rust/ binary; Ctrl+C when finished
 ```
+
+In a second terminal, confirm it's up with `curl -fsS http://127.0.0.1:8088/health` (or `GET /ready` once Postgres/migrations are configured).
 
 ## Canonical references
 

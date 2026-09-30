@@ -1,0 +1,37 @@
+{
+  "schema_version": "1",
+  "catalog_kind": "govai_marketplace_manifest",
+  "summary": "Curated, machine-readable list of in-repo example policy pack directories under examples/marketplace/. Entries here must also appear in registry/policy-pack-catalog.json with a matching id and path.",
+  "packs": [
+    {
+      "id": "eu-ai-act-basic",
+      "name": "EU AI Act - basic Annex III alignment",
+      "path": "examples/marketplace/eu-ai-act-basic"
+    },
+    {
+      "id": "financial-services-ai",
+      "name": "Financial services AI model risk",
+      "path": "examples/marketplace/financial-services-ai"
+    },
+    {
+      "id": "healthcare-ai",
+      "name": "Healthcare AI clinical safety",
+      "path": "examples/marketplace/healthcare-ai"
+    },
+    {
+      "id": "internal-model-risk",
+      "name": "Internal model risk inventory",
+      "path": "examples/marketplace/internal-model-risk"
+    },
+    {
+      "id": "vendor-evaluation",
+      "name": "Third-party AI vendor evaluation",
+      "path": "examples/marketplace/vendor-evaluation"
+    },
+    {
+      "id": "vendor-risk",
+      "name": "Ongoing AI vendor risk monitoring",
+      "path": "examples/marketplace/vendor-risk"
+    }
+  ]
+}

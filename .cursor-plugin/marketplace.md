@@ -61,4 +61,4 @@ Follow [`publication/screenshot-plan.md`](publication/screenshot-plan.md). Asset
 
 ## Submission checklist
 
-See [`publication/release-checklist.md`](publication/release-checklist.md) and [`../docs/commercial/marketplace-submission-checklist.md`](../docs/commercial/marketplace-submission-checklist.md).
+See [`publication/release-checklist.md`](publication/release-checklist.md).

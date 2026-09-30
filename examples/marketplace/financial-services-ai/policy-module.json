@@ -1,0 +1,31 @@
+{
+  "schema_version": "govai.standards.governance_policy_module.v1",
+  "policy": {
+    "id": "pol.financial-services-ai",
+    "name": "Financial services AI model risk",
+    "version": "1.0.0"
+  },
+  "requirements": [
+    {
+      "code": "model_risk_management",
+      "required_evidence": [
+        "model_validation_report",
+        "independent_review"
+      ]
+    },
+    {
+      "code": "robustness",
+      "required_evidence": [
+        "adversarial_test_report",
+        "stress_test_results"
+      ]
+    },
+    {
+      "code": "traceability",
+      "required_evidence": [
+        "decision_log",
+        "audit_trail"
+      ]
+    }
+  ]
+}

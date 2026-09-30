@@ -3,7 +3,7 @@
     {
       "run_id": "abr-valid_co-0001",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_00_abr-valid_co-0001",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_00_abr-valid_co-0001",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -11,7 +11,7 @@
     {
       "run_id": "abr-valid_co-0002",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_01_abr-valid_co-0002",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_01_abr-valid_co-0002",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -19,7 +19,7 @@
     {
       "run_id": "abr-valid_co-0003",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_02_abr-valid_co-0003",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_02_abr-valid_co-0003",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -27,7 +27,7 @@
     {
       "run_id": "abr-valid_co-0004",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_03_abr-valid_co-0004",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_03_abr-valid_co-0004",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -35,7 +35,7 @@
     {
       "run_id": "abr-valid_co-0005",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_04_abr-valid_co-0005",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_04_abr-valid_co-0005",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -43,7 +43,7 @@
     {
       "run_id": "abr-valid_co-0006",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_05_abr-valid_co-0006",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_05_abr-valid_co-0006",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -51,7 +51,7 @@
     {
       "run_id": "abr-valid_co-0007",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_06_abr-valid_co-0007",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_06_abr-valid_co-0007",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -59,7 +59,7 @@
     {
       "run_id": "abr-valid_co-0008",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_07_abr-valid_co-0008",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_07_abr-valid_co-0008",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -67,7 +67,7 @@
     {
       "run_id": "abr-valid_co-0009",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_08_abr-valid_co-0009",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_08_abr-valid_co-0009",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -75,7 +75,7 @@
     {
       "run_id": "abr-valid_co-0010",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_09_abr-valid_co-0010",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_09_abr-valid_co-0010",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -83,7 +83,7 @@
     {
       "run_id": "abr-valid_co-0011",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_10_abr-valid_co-0011",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_10_abr-valid_co-0011",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -91,7 +91,7 @@
     {
       "run_id": "abr-valid_co-0012",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_11_abr-valid_co-0012",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_11_abr-valid_co-0012",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -99,7 +99,7 @@
     {
       "run_id": "abr-valid_co-0013",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_12_abr-valid_co-0013",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_12_abr-valid_co-0013",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -107,7 +107,7 @@
     {
       "run_id": "abr-valid_co-0014",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_13_abr-valid_co-0014",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_13_abr-valid_co-0014",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -115,7 +115,7 @@
     {
       "run_id": "abr-valid_co-0015",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_14_abr-valid_co-0015",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_14_abr-valid_co-0015",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -123,7 +123,7 @@
     {
       "run_id": "abr-valid_co-0016",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_15_abr-valid_co-0016",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_15_abr-valid_co-0016",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -131,7 +131,7 @@
     {
       "run_id": "abr-valid_co-0017",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_16_abr-valid_co-0017",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_16_abr-valid_co-0017",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -139,7 +139,7 @@
     {
       "run_id": "abr-valid_co-0018",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_17_abr-valid_co-0018",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_17_abr-valid_co-0018",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -147,7 +147,7 @@
     {
       "run_id": "abr-valid_co-0019",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_18_abr-valid_co-0019",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_18_abr-valid_co-0019",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -155,7 +155,7 @@
     {
       "run_id": "abr-valid_co-0020",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_19_abr-valid_co-0020",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_19_abr-valid_co-0020",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -163,7 +163,7 @@
     {
       "run_id": "abr-valid_co-0021",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_20_abr-valid_co-0021",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_20_abr-valid_co-0021",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -171,7 +171,7 @@
     {
       "run_id": "abr-valid_co-0022",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_21_abr-valid_co-0022",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_21_abr-valid_co-0022",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -179,7 +179,7 @@
     {
       "run_id": "abr-valid_co-0023",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_22_abr-valid_co-0023",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_22_abr-valid_co-0023",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -187,7 +187,7 @@
     {
       "run_id": "abr-valid_co-0024",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_23_abr-valid_co-0024",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_23_abr-valid_co-0024",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -195,7 +195,7 @@
     {
       "run_id": "abr-valid_co-0025",
       "scenario": "valid_complete_trace",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_24_abr-valid_co-0025",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/valid_complete_trace/rep_24_abr-valid_co-0025",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -203,7 +203,7 @@
     {
       "run_id": "abr-digest_m-0026",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_00_abr-digest_m-0026",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_00_abr-digest_m-0026",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -211,7 +211,7 @@
     {
       "run_id": "abr-digest_m-0027",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_01_abr-digest_m-0027",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_01_abr-digest_m-0027",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -219,7 +219,7 @@
     {
       "run_id": "abr-digest_m-0028",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_02_abr-digest_m-0028",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_02_abr-digest_m-0028",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -227,7 +227,7 @@
     {
       "run_id": "abr-digest_m-0029",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_03_abr-digest_m-0029",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_03_abr-digest_m-0029",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -235,7 +235,7 @@
     {
       "run_id": "abr-digest_m-0030",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_04_abr-digest_m-0030",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_04_abr-digest_m-0030",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -243,7 +243,7 @@
     {
       "run_id": "abr-digest_m-0031",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_05_abr-digest_m-0031",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_05_abr-digest_m-0031",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -251,7 +251,7 @@
     {
       "run_id": "abr-digest_m-0032",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_06_abr-digest_m-0032",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_06_abr-digest_m-0032",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -259,7 +259,7 @@
     {
       "run_id": "abr-digest_m-0033",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_07_abr-digest_m-0033",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_07_abr-digest_m-0033",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -267,7 +267,7 @@
     {
       "run_id": "abr-digest_m-0034",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_08_abr-digest_m-0034",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_08_abr-digest_m-0034",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -275,7 +275,7 @@
     {
       "run_id": "abr-digest_m-0035",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_09_abr-digest_m-0035",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_09_abr-digest_m-0035",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -283,7 +283,7 @@
     {
       "run_id": "abr-digest_m-0036",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_10_abr-digest_m-0036",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_10_abr-digest_m-0036",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -291,7 +291,7 @@
     {
       "run_id": "abr-digest_m-0037",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_11_abr-digest_m-0037",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_11_abr-digest_m-0037",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -299,7 +299,7 @@
     {
       "run_id": "abr-digest_m-0038",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_12_abr-digest_m-0038",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_12_abr-digest_m-0038",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -307,7 +307,7 @@
     {
       "run_id": "abr-digest_m-0039",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_13_abr-digest_m-0039",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_13_abr-digest_m-0039",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -315,7 +315,7 @@
     {
       "run_id": "abr-digest_m-0040",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_14_abr-digest_m-0040",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_14_abr-digest_m-0040",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -323,7 +323,7 @@
     {
       "run_id": "abr-digest_m-0041",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_15_abr-digest_m-0041",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_15_abr-digest_m-0041",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -331,7 +331,7 @@
     {
       "run_id": "abr-digest_m-0042",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_16_abr-digest_m-0042",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_16_abr-digest_m-0042",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -339,7 +339,7 @@
     {
       "run_id": "abr-digest_m-0043",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_17_abr-digest_m-0043",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_17_abr-digest_m-0043",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -347,7 +347,7 @@
     {
       "run_id": "abr-digest_m-0044",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_18_abr-digest_m-0044",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_18_abr-digest_m-0044",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -355,7 +355,7 @@
     {
       "run_id": "abr-digest_m-0045",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_19_abr-digest_m-0045",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_19_abr-digest_m-0045",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -363,7 +363,7 @@
     {
       "run_id": "abr-digest_m-0046",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_20_abr-digest_m-0046",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_20_abr-digest_m-0046",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -371,7 +371,7 @@
     {
       "run_id": "abr-digest_m-0047",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_21_abr-digest_m-0047",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_21_abr-digest_m-0047",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -379,7 +379,7 @@
     {
       "run_id": "abr-digest_m-0048",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_22_abr-digest_m-0048",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_22_abr-digest_m-0048",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -387,7 +387,7 @@
     {
       "run_id": "abr-digest_m-0049",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_23_abr-digest_m-0049",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_23_abr-digest_m-0049",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -395,7 +395,7 @@
     {
       "run_id": "abr-digest_m-0050",
       "scenario": "digest_mismatch_events_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_24_abr-digest_m-0050",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_events_only/rep_24_abr-digest_m-0050",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -403,7 +403,7 @@
     {
       "run_id": "abr-digest_m-0051",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_00_abr-digest_m-0051",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_00_abr-digest_m-0051",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -411,7 +411,7 @@
     {
       "run_id": "abr-digest_m-0052",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_01_abr-digest_m-0052",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_01_abr-digest_m-0052",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -419,7 +419,7 @@
     {
       "run_id": "abr-digest_m-0053",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_02_abr-digest_m-0053",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_02_abr-digest_m-0053",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -427,7 +427,7 @@
     {
       "run_id": "abr-digest_m-0054",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_03_abr-digest_m-0054",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_03_abr-digest_m-0054",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -435,7 +435,7 @@
     {
       "run_id": "abr-digest_m-0055",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_04_abr-digest_m-0055",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_04_abr-digest_m-0055",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -443,7 +443,7 @@
     {
       "run_id": "abr-digest_m-0056",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_05_abr-digest_m-0056",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_05_abr-digest_m-0056",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -451,7 +451,7 @@
     {
       "run_id": "abr-digest_m-0057",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_06_abr-digest_m-0057",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_06_abr-digest_m-0057",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -459,7 +459,7 @@
     {
       "run_id": "abr-digest_m-0058",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_07_abr-digest_m-0058",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_07_abr-digest_m-0058",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -467,7 +467,7 @@
     {
       "run_id": "abr-digest_m-0059",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_08_abr-digest_m-0059",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_08_abr-digest_m-0059",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -475,7 +475,7 @@
     {
       "run_id": "abr-digest_m-0060",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_09_abr-digest_m-0060",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_09_abr-digest_m-0060",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -483,7 +483,7 @@
     {
       "run_id": "abr-digest_m-0061",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_10_abr-digest_m-0061",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_10_abr-digest_m-0061",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -491,7 +491,7 @@
     {
       "run_id": "abr-digest_m-0062",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_11_abr-digest_m-0062",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_11_abr-digest_m-0062",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -499,7 +499,7 @@
     {
       "run_id": "abr-digest_m-0063",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_12_abr-digest_m-0063",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_12_abr-digest_m-0063",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -507,7 +507,7 @@
     {
       "run_id": "abr-digest_m-0064",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_13_abr-digest_m-0064",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_13_abr-digest_m-0064",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -515,7 +515,7 @@
     {
       "run_id": "abr-digest_m-0065",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_14_abr-digest_m-0065",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_14_abr-digest_m-0065",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -523,7 +523,7 @@
     {
       "run_id": "abr-digest_m-0066",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_15_abr-digest_m-0066",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_15_abr-digest_m-0066",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -531,7 +531,7 @@
     {
       "run_id": "abr-digest_m-0067",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_16_abr-digest_m-0067",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_16_abr-digest_m-0067",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -539,7 +539,7 @@
     {
       "run_id": "abr-digest_m-0068",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_17_abr-digest_m-0068",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_17_abr-digest_m-0068",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -547,7 +547,7 @@
     {
       "run_id": "abr-digest_m-0069",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_18_abr-digest_m-0069",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_18_abr-digest_m-0069",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -555,7 +555,7 @@
     {
       "run_id": "abr-digest_m-0070",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_19_abr-digest_m-0070",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_19_abr-digest_m-0070",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -563,7 +563,7 @@
     {
       "run_id": "abr-digest_m-0071",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_20_abr-digest_m-0071",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_20_abr-digest_m-0071",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -571,7 +571,7 @@
     {
       "run_id": "abr-digest_m-0072",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_21_abr-digest_m-0072",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_21_abr-digest_m-0072",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -579,7 +579,7 @@
     {
       "run_id": "abr-digest_m-0073",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_22_abr-digest_m-0073",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_22_abr-digest_m-0073",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -587,7 +587,7 @@
     {
       "run_id": "abr-digest_m-0074",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_23_abr-digest_m-0074",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_23_abr-digest_m-0074",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -595,7 +595,7 @@
     {
       "run_id": "abr-digest_m-0075",
       "scenario": "digest_mismatch_export_only",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_24_abr-digest_m-0075",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/digest_mismatch_export_only/rep_24_abr-digest_m-0075",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -603,7 +603,7 @@
     {
       "run_id": "abr-missing_-0076",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_00_abr-missing_-0076",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_00_abr-missing_-0076",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -611,7 +611,7 @@
     {
       "run_id": "abr-missing_-0077",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_01_abr-missing_-0077",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_01_abr-missing_-0077",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -619,7 +619,7 @@
     {
       "run_id": "abr-missing_-0078",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_02_abr-missing_-0078",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_02_abr-missing_-0078",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -627,7 +627,7 @@
     {
       "run_id": "abr-missing_-0079",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_03_abr-missing_-0079",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_03_abr-missing_-0079",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -635,7 +635,7 @@
     {
       "run_id": "abr-missing_-0080",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_04_abr-missing_-0080",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_04_abr-missing_-0080",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -643,7 +643,7 @@
     {
       "run_id": "abr-missing_-0081",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_05_abr-missing_-0081",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_05_abr-missing_-0081",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -651,7 +651,7 @@
     {
       "run_id": "abr-missing_-0082",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_06_abr-missing_-0082",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_06_abr-missing_-0082",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -659,7 +659,7 @@
     {
       "run_id": "abr-missing_-0083",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_07_abr-missing_-0083",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_07_abr-missing_-0083",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -667,7 +667,7 @@
     {
       "run_id": "abr-missing_-0084",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_08_abr-missing_-0084",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_08_abr-missing_-0084",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -675,7 +675,7 @@
     {
       "run_id": "abr-missing_-0085",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_09_abr-missing_-0085",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_09_abr-missing_-0085",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -683,7 +683,7 @@
     {
       "run_id": "abr-missing_-0086",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_10_abr-missing_-0086",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_10_abr-missing_-0086",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -691,7 +691,7 @@
     {
       "run_id": "abr-missing_-0087",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_11_abr-missing_-0087",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_11_abr-missing_-0087",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -699,7 +699,7 @@
     {
       "run_id": "abr-missing_-0088",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_12_abr-missing_-0088",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_12_abr-missing_-0088",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -707,7 +707,7 @@
     {
       "run_id": "abr-missing_-0089",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_13_abr-missing_-0089",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_13_abr-missing_-0089",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -715,7 +715,7 @@
     {
       "run_id": "abr-missing_-0090",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_14_abr-missing_-0090",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_14_abr-missing_-0090",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -723,7 +723,7 @@
     {
       "run_id": "abr-missing_-0091",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_15_abr-missing_-0091",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_15_abr-missing_-0091",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -731,7 +731,7 @@
     {
       "run_id": "abr-missing_-0092",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_16_abr-missing_-0092",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_16_abr-missing_-0092",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -739,7 +739,7 @@
     {
       "run_id": "abr-missing_-0093",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_17_abr-missing_-0093",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_17_abr-missing_-0093",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -747,7 +747,7 @@
     {
       "run_id": "abr-missing_-0094",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_18_abr-missing_-0094",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_18_abr-missing_-0094",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -755,7 +755,7 @@
     {
       "run_id": "abr-missing_-0095",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_19_abr-missing_-0095",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_19_abr-missing_-0095",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -763,7 +763,7 @@
     {
       "run_id": "abr-missing_-0096",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_20_abr-missing_-0096",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_20_abr-missing_-0096",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -771,7 +771,7 @@
     {
       "run_id": "abr-missing_-0097",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_21_abr-missing_-0097",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_21_abr-missing_-0097",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -779,7 +779,7 @@
     {
       "run_id": "abr-missing_-0098",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_22_abr-missing_-0098",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_22_abr-missing_-0098",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -787,7 +787,7 @@
     {
       "run_id": "abr-missing_-0099",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_23_abr-missing_-0099",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_23_abr-missing_-0099",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -795,7 +795,7 @@
     {
       "run_id": "abr-missing_-0100",
       "scenario": "missing_evidence_pack",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_24_abr-missing_-0100",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_evidence_pack/rep_24_abr-missing_-0100",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -803,7 +803,7 @@
     {
       "run_id": "abr-failed_c-0101",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_00_abr-failed_c-0101",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_00_abr-failed_c-0101",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -811,7 +811,7 @@
     {
       "run_id": "abr-failed_c-0102",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_01_abr-failed_c-0102",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_01_abr-failed_c-0102",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -819,7 +819,7 @@
     {
       "run_id": "abr-failed_c-0103",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_02_abr-failed_c-0103",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_02_abr-failed_c-0103",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -827,7 +827,7 @@
     {
       "run_id": "abr-failed_c-0104",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_03_abr-failed_c-0104",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_03_abr-failed_c-0104",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -835,7 +835,7 @@
     {
       "run_id": "abr-failed_c-0105",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_04_abr-failed_c-0105",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_04_abr-failed_c-0105",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -843,7 +843,7 @@
     {
       "run_id": "abr-failed_c-0106",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_05_abr-failed_c-0106",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_05_abr-failed_c-0106",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -851,7 +851,7 @@
     {
       "run_id": "abr-failed_c-0107",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_06_abr-failed_c-0107",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_06_abr-failed_c-0107",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -859,7 +859,7 @@
     {
       "run_id": "abr-failed_c-0108",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_07_abr-failed_c-0108",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_07_abr-failed_c-0108",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -867,7 +867,7 @@
     {
       "run_id": "abr-failed_c-0109",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_08_abr-failed_c-0109",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_08_abr-failed_c-0109",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -875,7 +875,7 @@
     {
       "run_id": "abr-failed_c-0110",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_09_abr-failed_c-0110",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_09_abr-failed_c-0110",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -883,7 +883,7 @@
     {
       "run_id": "abr-failed_c-0111",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_10_abr-failed_c-0111",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_10_abr-failed_c-0111",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -891,7 +891,7 @@
     {
       "run_id": "abr-failed_c-0112",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_11_abr-failed_c-0112",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_11_abr-failed_c-0112",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -899,7 +899,7 @@
     {
       "run_id": "abr-failed_c-0113",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_12_abr-failed_c-0113",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_12_abr-failed_c-0113",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -907,7 +907,7 @@
     {
       "run_id": "abr-failed_c-0114",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_13_abr-failed_c-0114",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_13_abr-failed_c-0114",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -915,7 +915,7 @@
     {
       "run_id": "abr-failed_c-0115",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_14_abr-failed_c-0115",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_14_abr-failed_c-0115",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -923,7 +923,7 @@
     {
       "run_id": "abr-failed_c-0116",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_15_abr-failed_c-0116",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_15_abr-failed_c-0116",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -931,7 +931,7 @@
     {
       "run_id": "abr-failed_c-0117",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_16_abr-failed_c-0117",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_16_abr-failed_c-0117",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -939,7 +939,7 @@
     {
       "run_id": "abr-failed_c-0118",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_17_abr-failed_c-0118",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_17_abr-failed_c-0118",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -947,7 +947,7 @@
     {
       "run_id": "abr-failed_c-0119",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_18_abr-failed_c-0119",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_18_abr-failed_c-0119",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -955,7 +955,7 @@
     {
       "run_id": "abr-failed_c-0120",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_19_abr-failed_c-0120",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_19_abr-failed_c-0120",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -963,7 +963,7 @@
     {
       "run_id": "abr-failed_c-0121",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_20_abr-failed_c-0121",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_20_abr-failed_c-0121",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -971,7 +971,7 @@
     {
       "run_id": "abr-failed_c-0122",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_21_abr-failed_c-0122",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_21_abr-failed_c-0122",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -979,7 +979,7 @@
     {
       "run_id": "abr-failed_c-0123",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_22_abr-failed_c-0123",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_22_abr-failed_c-0123",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -987,7 +987,7 @@
     {
       "run_id": "abr-failed_c-0124",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_23_abr-failed_c-0124",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_23_abr-failed_c-0124",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -995,7 +995,7 @@
     {
       "run_id": "abr-failed_c-0125",
       "scenario": "failed_compliance_evaluation",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_24_abr-failed_c-0125",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/failed_compliance_evaluation/rep_24_abr-failed_c-0125",
       "gate_verdict": "INVALID",
       "expected_verdict": "INVALID",
       "gate_matches_rubric": true
@@ -1003,7 +1003,7 @@
     {
       "run_id": "abr-missing_-0126",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_00_abr-missing_-0126",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_00_abr-missing_-0126",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1011,7 +1011,7 @@
     {
       "run_id": "abr-missing_-0127",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_01_abr-missing_-0127",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_01_abr-missing_-0127",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1019,7 +1019,7 @@
     {
       "run_id": "abr-missing_-0128",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_02_abr-missing_-0128",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_02_abr-missing_-0128",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1027,7 +1027,7 @@
     {
       "run_id": "abr-missing_-0129",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_03_abr-missing_-0129",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_03_abr-missing_-0129",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1035,7 +1035,7 @@
     {
       "run_id": "abr-missing_-0130",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_04_abr-missing_-0130",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_04_abr-missing_-0130",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1043,7 +1043,7 @@
     {
       "run_id": "abr-missing_-0131",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_05_abr-missing_-0131",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_05_abr-missing_-0131",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1051,7 +1051,7 @@
     {
       "run_id": "abr-missing_-0132",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_06_abr-missing_-0132",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_06_abr-missing_-0132",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1059,7 +1059,7 @@
     {
       "run_id": "abr-missing_-0133",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_07_abr-missing_-0133",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_07_abr-missing_-0133",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1067,7 +1067,7 @@
     {
       "run_id": "abr-missing_-0134",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_08_abr-missing_-0134",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_08_abr-missing_-0134",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1075,7 +1075,7 @@
     {
       "run_id": "abr-missing_-0135",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_09_abr-missing_-0135",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_09_abr-missing_-0135",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1083,7 +1083,7 @@
     {
       "run_id": "abr-missing_-0136",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_10_abr-missing_-0136",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_10_abr-missing_-0136",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1091,7 +1091,7 @@
     {
       "run_id": "abr-missing_-0137",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_11_abr-missing_-0137",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_11_abr-missing_-0137",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1099,7 +1099,7 @@
     {
       "run_id": "abr-missing_-0138",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_12_abr-missing_-0138",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_12_abr-missing_-0138",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1107,7 +1107,7 @@
     {
       "run_id": "abr-missing_-0139",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_13_abr-missing_-0139",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_13_abr-missing_-0139",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1115,7 +1115,7 @@
     {
       "run_id": "abr-missing_-0140",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_14_abr-missing_-0140",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_14_abr-missing_-0140",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1123,7 +1123,7 @@
     {
       "run_id": "abr-missing_-0141",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_15_abr-missing_-0141",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_15_abr-missing_-0141",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1131,7 +1131,7 @@
     {
       "run_id": "abr-missing_-0142",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_16_abr-missing_-0142",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_16_abr-missing_-0142",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1139,7 +1139,7 @@
     {
       "run_id": "abr-missing_-0143",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_17_abr-missing_-0143",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_17_abr-missing_-0143",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1147,7 +1147,7 @@
     {
       "run_id": "abr-missing_-0144",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_18_abr-missing_-0144",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_18_abr-missing_-0144",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1155,7 +1155,7 @@
     {
       "run_id": "abr-missing_-0145",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_19_abr-missing_-0145",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_19_abr-missing_-0145",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1163,7 +1163,7 @@
     {
       "run_id": "abr-missing_-0146",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_20_abr-missing_-0146",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_20_abr-missing_-0146",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1171,7 +1171,7 @@
     {
       "run_id": "abr-missing_-0147",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_21_abr-missing_-0147",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_21_abr-missing_-0147",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1179,7 +1179,7 @@
     {
       "run_id": "abr-missing_-0148",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_22_abr-missing_-0148",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_22_abr-missing_-0148",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1187,7 +1187,7 @@
     {
       "run_id": "abr-missing_-0149",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_23_abr-missing_-0149",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_23_abr-missing_-0149",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1195,7 +1195,7 @@
     {
       "run_id": "abr-missing_-0150",
       "scenario": "missing_approval_record",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_24_abr-missing_-0150",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/missing_approval_record/rep_24_abr-missing_-0150",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1203,7 +1203,7 @@
     {
       "run_id": "abr-reordere-0151",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_00_abr-reordere-0151",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_00_abr-reordere-0151",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1211,7 +1211,7 @@
     {
       "run_id": "abr-reordere-0152",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_01_abr-reordere-0152",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_01_abr-reordere-0152",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1219,7 +1219,7 @@
     {
       "run_id": "abr-reordere-0153",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_02_abr-reordere-0153",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_02_abr-reordere-0153",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1227,7 +1227,7 @@
     {
       "run_id": "abr-reordere-0154",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_03_abr-reordere-0154",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_03_abr-reordere-0154",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1235,7 +1235,7 @@
     {
       "run_id": "abr-reordere-0155",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_04_abr-reordere-0155",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_04_abr-reordere-0155",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1243,7 +1243,7 @@
     {
       "run_id": "abr-reordere-0156",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_05_abr-reordere-0156",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_05_abr-reordere-0156",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1251,7 +1251,7 @@
     {
       "run_id": "abr-reordere-0157",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_06_abr-reordere-0157",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_06_abr-reordere-0157",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1259,7 +1259,7 @@
     {
       "run_id": "abr-reordere-0158",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_07_abr-reordere-0158",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_07_abr-reordere-0158",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1267,7 +1267,7 @@
     {
       "run_id": "abr-reordere-0159",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_08_abr-reordere-0159",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_08_abr-reordere-0159",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1275,7 +1275,7 @@
     {
       "run_id": "abr-reordere-0160",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_09_abr-reordere-0160",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_09_abr-reordere-0160",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1283,7 +1283,7 @@
     {
       "run_id": "abr-reordere-0161",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_10_abr-reordere-0161",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_10_abr-reordere-0161",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1291,7 +1291,7 @@
     {
       "run_id": "abr-reordere-0162",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_11_abr-reordere-0162",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_11_abr-reordere-0162",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1299,7 +1299,7 @@
     {
       "run_id": "abr-reordere-0163",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_12_abr-reordere-0163",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_12_abr-reordere-0163",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1307,7 +1307,7 @@
     {
       "run_id": "abr-reordere-0164",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_13_abr-reordere-0164",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_13_abr-reordere-0164",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1315,7 +1315,7 @@
     {
       "run_id": "abr-reordere-0165",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_14_abr-reordere-0165",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_14_abr-reordere-0165",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1323,7 +1323,7 @@
     {
       "run_id": "abr-reordere-0166",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_15_abr-reordere-0166",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_15_abr-reordere-0166",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1331,7 +1331,7 @@
     {
       "run_id": "abr-reordere-0167",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_16_abr-reordere-0167",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_16_abr-reordere-0167",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1339,7 +1339,7 @@
     {
       "run_id": "abr-reordere-0168",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_17_abr-reordere-0168",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_17_abr-reordere-0168",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1347,7 +1347,7 @@
     {
       "run_id": "abr-reordere-0169",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_18_abr-reordere-0169",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_18_abr-reordere-0169",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1355,7 +1355,7 @@
     {
       "run_id": "abr-reordere-0170",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_19_abr-reordere-0170",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_19_abr-reordere-0170",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1363,7 +1363,7 @@
     {
       "run_id": "abr-reordere-0171",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_20_abr-reordere-0171",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_20_abr-reordere-0171",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1371,7 +1371,7 @@
     {
       "run_id": "abr-reordere-0172",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_21_abr-reordere-0172",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_21_abr-reordere-0172",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1379,7 +1379,7 @@
     {
       "run_id": "abr-reordere-0173",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_22_abr-reordere-0173",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_22_abr-reordere-0173",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1387,7 +1387,7 @@
     {
       "run_id": "abr-reordere-0174",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_23_abr-reordere-0174",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_23_abr-reordere-0174",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1395,7 +1395,7 @@
     {
       "run_id": "abr-reordere-0175",
       "scenario": "reordered_required_events",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_24_abr-reordere-0175",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/reordered_required_events/rep_24_abr-reordere-0175",
       "gate_verdict": "VALID",
       "expected_verdict": "VALID",
       "gate_matches_rubric": true
@@ -1403,7 +1403,7 @@
     {
       "run_id": "abr-policy_v-0176",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_00_abr-policy_v-0176",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_00_abr-policy_v-0176",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1411,7 +1411,7 @@
     {
       "run_id": "abr-policy_v-0177",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_01_abr-policy_v-0177",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_01_abr-policy_v-0177",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1419,7 +1419,7 @@
     {
       "run_id": "abr-policy_v-0178",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_02_abr-policy_v-0178",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_02_abr-policy_v-0178",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1427,7 +1427,7 @@
     {
       "run_id": "abr-policy_v-0179",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_03_abr-policy_v-0179",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_03_abr-policy_v-0179",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1435,7 +1435,7 @@
     {
       "run_id": "abr-policy_v-0180",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_04_abr-policy_v-0180",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_04_abr-policy_v-0180",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1443,7 +1443,7 @@
     {
       "run_id": "abr-policy_v-0181",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_05_abr-policy_v-0181",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_05_abr-policy_v-0181",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1451,7 +1451,7 @@
     {
       "run_id": "abr-policy_v-0182",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_06_abr-policy_v-0182",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_06_abr-policy_v-0182",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1459,7 +1459,7 @@
     {
       "run_id": "abr-policy_v-0183",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_07_abr-policy_v-0183",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_07_abr-policy_v-0183",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1467,7 +1467,7 @@
     {
       "run_id": "abr-policy_v-0184",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_08_abr-policy_v-0184",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_08_abr-policy_v-0184",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1475,7 +1475,7 @@
     {
       "run_id": "abr-policy_v-0185",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_09_abr-policy_v-0185",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_09_abr-policy_v-0185",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1483,7 +1483,7 @@
     {
       "run_id": "abr-policy_v-0186",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_10_abr-policy_v-0186",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_10_abr-policy_v-0186",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1491,7 +1491,7 @@
     {
       "run_id": "abr-policy_v-0187",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_11_abr-policy_v-0187",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_11_abr-policy_v-0187",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1499,7 +1499,7 @@
     {
       "run_id": "abr-policy_v-0188",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_12_abr-policy_v-0188",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_12_abr-policy_v-0188",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1507,7 +1507,7 @@
     {
       "run_id": "abr-policy_v-0189",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_13_abr-policy_v-0189",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_13_abr-policy_v-0189",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1515,7 +1515,7 @@
     {
       "run_id": "abr-policy_v-0190",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_14_abr-policy_v-0190",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_14_abr-policy_v-0190",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1523,7 +1523,7 @@
     {
       "run_id": "abr-policy_v-0191",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_15_abr-policy_v-0191",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_15_abr-policy_v-0191",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1531,7 +1531,7 @@
     {
       "run_id": "abr-policy_v-0192",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_16_abr-policy_v-0192",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_16_abr-policy_v-0192",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1539,7 +1539,7 @@
     {
       "run_id": "abr-policy_v-0193",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_17_abr-policy_v-0193",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_17_abr-policy_v-0193",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1547,7 +1547,7 @@
     {
       "run_id": "abr-policy_v-0194",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_18_abr-policy_v-0194",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_18_abr-policy_v-0194",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1555,7 +1555,7 @@
     {
       "run_id": "abr-policy_v-0195",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_19_abr-policy_v-0195",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_19_abr-policy_v-0195",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1563,7 +1563,7 @@
     {
       "run_id": "abr-policy_v-0196",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_20_abr-policy_v-0196",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_20_abr-policy_v-0196",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1571,7 +1571,7 @@
     {
       "run_id": "abr-policy_v-0197",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_21_abr-policy_v-0197",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_21_abr-policy_v-0197",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1579,7 +1579,7 @@
     {
       "run_id": "abr-policy_v-0198",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_22_abr-policy_v-0198",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_22_abr-policy_v-0198",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1587,7 +1587,7 @@
     {
       "run_id": "abr-policy_v-0199",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_23_abr-policy_v-0199",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_23_abr-policy_v-0199",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true
@@ -1595,7 +1595,7 @@
     {
       "run_id": "abr-policy_v-0200",
       "scenario": "policy_version_mismatch",
-      "artifact_dir": "/Users/monikadvorackova/projekty/aigov-compliance-engine/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_24_abr-policy_v-0200",
+      "artifact_dir": "/workspace/aigov-compliance-engine/experiments/output/artifact_bundle_replay_artifacts/policy_version_mismatch/rep_24_abr-policy_v-0200",
       "gate_verdict": "BLOCKED",
       "expected_verdict": "BLOCKED",
       "gate_matches_rubric": true

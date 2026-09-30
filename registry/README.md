@@ -19,7 +19,6 @@ From the repository root:
 ```bash
 python3 scripts/registry_check.py
 make registry-check
-make customer-analytics-check
 ```
 
 The checker validates JSON shape, required fields, **unique `id` values** within each catalog, **cross-references** between catalogs, and **on-disk paths** for schemas, manifests, and benchmark assets.
@@ -33,4 +32,4 @@ These catalogs are **documentation and interchange discoverability** only. They 
 - Registry program overview: [`../docs/registry/overview.md`](../docs/registry/overview.md)
 - Submission workflow: [`../docs/registry/submission-guidelines.md`](../docs/registry/submission-guidelines.md)
 - Certification program: [`../docs/registry/certification-program.md`](../docs/registry/certification-program.md)
-- Policy pack marketplace (curated manifest): [`../marketplace/manifest.json`](../marketplace/manifest.json)
+- Policy pack marketplace (curated manifest): [`../marketplace/manifest.json`](../marketplace/manifest.json), format: [`../marketplace/policy-pack-format.md`](../marketplace/policy-pack-format.md)

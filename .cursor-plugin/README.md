@@ -19,7 +19,7 @@ The hosted audit service, Rust runtime enforcement, database migrations, and CI 
 1. **Branching** — Work on a **feature branch**. Do not push directly to `main` or `staging` (see `rules/branch-policy.mdc`).
 2. **Rules** — Copy or symlink `rules/*.mdc` into your project `.cursor/rules/` (or equivalent supported by your Cursor version), or consume via Marketplace when published.
 3. **Skills** — Copy each `skills/<skill-name>/` directory (each contains `SKILL.md` with YAML frontmatter) into a Cursor skills tree your team uses (for example `.cursor/skills/govai/`) so Agent can discover them.
-4. **MCP** — Use **plugin-level** [`.cursor-plugin/mcp.json`](mcp.json) and/or the `mcpServers` block in `plugin.json` as the canonical definition of `govai-local`. For workspace-local Cursor config, merge **`examples/local-config.json`** into **`.cursor/mcp.json`** (or use **`.cursor/mcp.json.example`** at the repo root). Adjust `command` if `python3` is not on your `PATH`.
+4. **MCP** — Use the **`mcpServers`** block in [`plugin.json`](plugin.json) as the canonical definition of `govai-local` (there is no separate standalone `mcp.json` file in this plugin). For workspace-local Cursor config, merge **`examples/local-config.json`** into **`.cursor/mcp.json`** (or use **`.cursor/mcp.json.example`** at the repo root). Adjust `command` if `python3` is not on your `PATH`.
 5. **Python environment** — Evidence validation and pytest tools expect the **`python/.venv`** project virtualenv when present (see `Makefile` / `python/` layout). Restart Cursor after MCP changes.
 
 ## MCP stdio configuration
@@ -106,7 +106,7 @@ Each skill lives under `skills/<kebab-name>/SKILL.md` with YAML frontmatter (`na
 ### Internally usable (clone-and-use — ready)
 
 - [x] `plugin.json` with Marketplace-oriented metadata (`govai`, version, author, links, license, keywords, `logo`, `rules`, `skills`, `mcpServers`).
-- [x] Plugin-level **`mcp.json`** plus workspace examples (`.cursor/mcp.json.example`, `examples/local-config.json`).
+- [x] Plugin-level **`mcpServers`** block in `plugin.json` plus workspace examples (`.cursor/mcp.json.example`, `examples/local-config.json`).
 - [x] Non-empty rules, skill directories with `SKILL.md`, README, and `examples/local-config.json`.
 - [x] `assets/logo.png` derived from `dashboard/brand/aigov-mark.ico` (lossless composite, no mark scaling).
 - [x] Local MCP server with read/write separation and dry-run for audit templates.
@@ -137,6 +137,6 @@ The plugin is **not published**, **not approved**, and **not listed** in Cursor 
 - [use-cases.md](use-cases.md) — CTO, ML platform, compliance, enterprise, and OSS contributor workflows.
 - [assets/README.md](assets/README.md) — logo master, banners, screenshots, demo video guidance, branding, file naming.
 
-Commercial collateral for sales and customer success lives under `docs/commercial/` (pricing, OSS vs hosted matrix, enterprise features, support and SLA, onboarding playbook, sales one-pager, marketplace submission checklist).
+Commercial collateral for sales and customer success (pricing, OSS vs hosted matrix, enterprise features, support and SLA, onboarding playbook, sales one-pager, marketplace submission checklist) is a GovAI Platform concern and is not part of this Core repository.
 
 See also `marketplace.md` (submission index) and `docs/reports/cursor-marketplace-readiness.md` (readiness audit).

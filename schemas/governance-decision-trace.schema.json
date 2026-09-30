@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://govai.dev/schemas/governance-decision-trace.schema.json",
+  "title": "GovAI Governance Decision Trace",
+  "description": "Structural schema for govai.standards.governance_decision_trace.v1 documents. Mirrors python/aigov_py/standards/decision_trace.py and the closed gate_inputs field set from python/aigov_py/experiments/scenario_fields.py::make_base_fields(); those remain authoritative in case of any discrepancy.",
+  "type": "object",
+  "required": ["schema_version", "trace_id", "tenant_scope", "run_id", "recorded_gate_verdict", "gate_inputs"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "govai.standards.governance_decision_trace.v1"
+    },
+    "trace_id": {"type": "string", "minLength": 1},
+    "tenant_scope": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "recorded_gate_verdict": {
+      "type": "string",
+      "enum": ["VALID", "INVALID", "BLOCKED"]
+    },
+    "gate_inputs": {
+      "type": "object",
+      "description": "Exactly this closed set of keys is required — no more, no fewer.",
+      "additionalProperties": false,
+      "required": [
+        "model_validation",
+        "evidence_complete",
+        "ai_discovery_present",
+        "evaluation_result",
+        "evaluation_internal_consistent",
+        "approval",
+        "trace_consistent",
+        "run_available",
+        "evidence_pack_present",
+        "events_content_sha256_match",
+        "export_digest_match",
+        "artifact_bound_verification",
+        "policy_version_match",
+        "approval_is_stale",
+        "causal_evaluation_before_approval",
+        "run_id_matches_decision_scope"
+      ],
+      "properties": {
+        "model_validation": {"type": "string"},
+        "evidence_complete": {"type": "boolean"},
+        "ai_discovery_present": {"type": "boolean"},
+        "evaluation_result": {"type": "string"},
+        "evaluation_internal_consistent": {"type": "boolean"},
+        "approval": {"type": "string"},
+        "trace_consistent": {"type": "boolean"},
+        "run_available": {"type": "boolean"},
+        "evidence_pack_present": {"type": "boolean"},
+        "events_content_sha256_match": {"type": "boolean"},
+        "export_digest_match": {"type": "boolean"},
+        "artifact_bound_verification": {"type": "boolean"},
+        "policy_version_match": {"type": "boolean"},
+        "approval_is_stale": {"type": "boolean"},
+        "causal_evaluation_before_approval": {"type": "boolean"},
+        "run_id_matches_decision_scope": {"type": "boolean"}
+      }
+    }
+  }
+}
