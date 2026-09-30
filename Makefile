@@ -16,6 +16,15 @@ AIGOV_MODE ?= ci
 	emit_event \
 	flow flow_full \
 	pr_prepare gate core-runtime-examples-check reference-integrations-check reconstructible-demo-check runtime-packaging-check runtime-observability-check lineage-governance-check \
+	observability observability-manifest operational-snapshot operational-health-score operational-intelligence-report observability-check \
+	registry-check \
+	autonomous-governance-check multi-agent-governance-check \
+	multi-tenant-check tenant-isolation-check \
+	conformity-workflow-check regulatory-workflow-check \
+	research-package-check academic-publication-check \
+	regulatory-manifest ai-act-obligations regulatory-evidence regulatory-export regulatory-check \
+	microbenchmark-check empirical-evaluation-run empirical-evaluation-check manuscript-evidence-check \
+	evidence-quality-check \
 	audit_close \
 	demo demo_new \
 	env_check \
@@ -77,6 +86,110 @@ runtime-observability-check:
 
 lineage-governance-check:
 	@python3 scripts/check_lineage_governance_graph.py
+
+# ================================
+# Observability (docs/observability/)
+# ================================
+
+observability-manifest:
+	@python3 scripts/validate_observability_manifest.py
+
+operational-snapshot:
+	@python3 scripts/validate_operational_snapshot.py --input examples/observability/sample-operational-snapshot.json
+
+operational-health-score:
+	@python3 scripts/operational_health_score.py --input examples/observability/sample-operational-snapshot.json
+
+operational-intelligence-report:
+	@python3 scripts/generate_operational_intelligence_report.py --input examples/observability/sample-operational-snapshot.json >/dev/null
+	@echo "operational-intelligence-report: OK"
+
+observability-check:
+	@python3 scripts/observability_check.py
+
+observability: observability-manifest operational-snapshot operational-health-score observability-check
+	@echo "observability: OK"
+
+registry-check:
+	@python3 scripts/registry_check.py
+
+# ================================
+# Autonomous / multi-agent governance (autonomous/)
+# ================================
+
+autonomous-governance-check:
+	@python3 scripts/autonomous_governance_check.py
+	@$(MAKE) gate
+
+multi-agent-governance-check:
+	@python3 scripts/autonomous_governance_check.py --multi-agent
+	@$(MAKE) gate
+
+# ================================
+# Multi-tenant governance (multi-tenant/)
+# ================================
+
+multi-tenant-check:
+	@python3 scripts/multi_tenant_check.py
+
+tenant-isolation-check: multi-tenant-check
+
+# ================================
+# EU AI Act conformity automation (conformity/)
+# ================================
+
+conformity-workflow-check:
+	@python3 scripts/conformity_workflow_check.py
+
+regulatory-workflow-check: conformity-workflow-check
+
+# ================================
+# Research / academic publication (research/)
+# ================================
+
+research-package-check:
+	@python3 scripts/research_package_check.py
+
+academic-publication-check: research-package-check
+
+microbenchmark-check:
+	@python3 scripts/microbenchmark_audit_engine.py
+
+empirical-evaluation-run:
+	@python3 scripts/run_full_empirical_evaluation.py
+
+empirical-evaluation-check:
+	@python3 scripts/empirical_evaluation_check.py
+
+manuscript-evidence-check:
+	@python3 scripts/manuscript_evidence_runner.py
+
+# ================================
+# Evidence quality (docs/evidence-quality/)
+# ================================
+
+evidence-quality-check:
+	@python3 scripts/evidence_quality_check.py
+
+# ================================
+# Regulatory evidence (docs/regulatory/)
+# ================================
+
+regulatory-manifest:
+	@python3 scripts/validate_regulatory_evidence_manifest.py
+
+ai-act-obligations:
+	@python3 scripts/validate_ai_act_obligations.py
+
+regulatory-evidence:
+	@python3 scripts/regulatory_evidence_check.py
+
+regulatory-export:
+	@python3 scripts/generate_regulatory_evidence_export.py >/dev/null
+	@echo "regulatory-export: OK"
+
+regulatory-check: regulatory-manifest ai-act-obligations regulatory-evidence regulatory-export
+	@echo "regulatory-check: OK"
 
 # Registered interchange conformance checks.
 standards-conformance:
@@ -184,10 +297,10 @@ status: require_audit_url
 	curl -sS "$(GOVAI_AUDIT_BASE_URL)/status" ; echo
 
 verify: require_audit_url
-	curl -sS "$(GOVAI_AUDIT_BASE_URL)/verify" ; echo
+	curl -sS "$(GOVAI_AUDIT_BASE_URL)/verify" -H "Authorization: Bearer $${GOVAI_API_KEY:-ci-test-api-key}" ; echo
 
-verify_log: require_audit_url
-	curl -sS "$(GOVAI_AUDIT_BASE_URL)/verify-log" ; echo
+# Legacy alias: `/verify-log` was retired in favor of `/verify`; kept as a name-compatible entrypoint.
+verify_log: verify
 
 # ================================
 # Core
@@ -336,9 +449,10 @@ flow_full: require_run require_audit_url
 	$(MAKE) promote RUN_ID="$(RUN_ID)"; \
 	$(MAKE) report_prepare RUN_ID="$(RUN_ID)"; \
 	cd python && . .venv/bin/activate && \
-		RUN_ID="$(RUN_ID)" AIGOV_MODE="$(AIGOV_MODE)" python -m aigov_py.ai_discovery_completed; \
+		GOVAI_AUDIT_BASE_URL=$${GOVAI_AUDIT_BASE_URL} GOVAI_API_KEY=$${GOVAI_API_KEY:-ci-test-api-key} GOVAI_PROJECT=$${GOVAI_PROJECT:-github-actions} RUN_ID="$(RUN_ID)" AIGOV_MODE="$(AIGOV_MODE)" python -m aigov_py.ai_discovery_completed; \
 	echo "GET $(GOVAI_AUDIT_BASE_URL)/compliance-summary?run_id=$(RUN_ID)"; \
-	curl -fsS "$(GOVAI_AUDIT_BASE_URL)/compliance-summary?run_id=$(RUN_ID)"; echo
+	curl -fsS "$(GOVAI_AUDIT_BASE_URL)/compliance-summary?run_id=$(RUN_ID)" \
+		-H "Authorization: Bearer $${GOVAI_API_KEY:-ci-test-api-key}"; echo
 
 flow: flow_full
 

@@ -1,0 +1,31 @@
+{
+  "schema_version": "govai.standards.governance_policy_module.v1",
+  "policy": {
+    "id": "pol.internal-model-risk",
+    "name": "Internal model risk inventory",
+    "version": "1.0.0"
+  },
+  "requirements": [
+    {
+      "code": "model_inventory",
+      "required_evidence": [
+        "model_registration",
+        "owner_assignment"
+      ]
+    },
+    {
+      "code": "risk_tiering",
+      "required_evidence": [
+        "risk_classification",
+        "mitigation_plan"
+      ]
+    },
+    {
+      "code": "robustness",
+      "required_evidence": [
+        "performance_monitoring",
+        "drift_detection"
+      ]
+    }
+  ]
+}

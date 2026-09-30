@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://govai.dev/schemas/governance-evidence-pack.schema.json",
+  "title": "GovAI Governance Evidence Pack",
+  "description": "Structural schema for govai.standards.governance_evidence_pack.v1 documents. Mirrors python/aigov_py/standards/evidence_pack.py, the authoritative Python validator (which also enforces cross-field rules this schema does not express, e.g. GOVERNED artifacts requiring non-empty control_refs); that validator remains the source of truth in case of any discrepancy.",
+  "type": "object",
+  "required": ["schema_version", "pack_id", "tenant_scope", "artifacts", "digest_manifest"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "govai.standards.governance_evidence_pack.v1"
+    },
+    "pack_id": {"type": "string", "minLength": 1},
+    "tenant_scope": {"type": "string", "minLength": 1},
+    "run_id": {"type": ["string", "null"]},
+    "pack_digest": {"type": ["string", "null"], "pattern": "^(sha256:)?[0-9a-fA-F]{64}$"},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["artifact_id", "artifact_type", "content_digest", "evidence_type"],
+        "properties": {
+          "artifact_id": {"type": "string", "minLength": 1},
+          "artifact_type": {"type": "string", "minLength": 1},
+          "uri": {"type": ["string", "null"], "minLength": 1},
+          "content_digest": {"type": "string", "pattern": "^(sha256:)?[0-9a-fA-F]{64}$"},
+          "evidence_type": {"type": "string", "enum": ["GOVERNED", "REFERENCE"]},
+          "control_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "ai_act_refs": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "digest_manifest": {
+      "type": "object",
+      "required": ["entries"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["artifact_id", "content_digest"],
+            "properties": {
+              "artifact_id": {"type": "string", "minLength": 1},
+              "content_digest": {"type": "string", "pattern": "^(sha256:)?[0-9a-fA-F]{64}$"}
+            }
+          }
+        }
+      }
+    }
+  }
+}

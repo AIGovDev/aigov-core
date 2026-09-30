@@ -14,7 +14,7 @@ This document names **where** connection strings and keys appear; it does **not*
 |-------|------|
 | **Supabase** (Postgres + Auth + Storage) | Dashboard auth (`NEXT_PUBLIC_SUPABASE_*`), Python helpers (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` in `python/aigov_py/supabase_db.py`). |
 | **Postgres** (direct) | Rust service and API routes use **`DATABASE_URL`**. Dashboard console reads optional **`GOVAI_CONSOLE_RUNS_ENABLED`** + **`GOVAI_DATABASE_URL`** / **`DATABASE_URL`** (`dashboard/lib/console/govaiConsoleRunsRead.ts`). Python uses **`GOVAI_DATABASE_URL`** / **`DATABASE_URL`** via `python/aigov_py/psycopg_database_url.py`. |
-| **SQL migrations** | Ordered files under `rust/migrations/` (e.g. `0001_govai_core.sql` … `0004_console_runs.sql`). Also referenced from `DEMO_FLOW.md` / `ENTERPRISE_LAYER.md`. |
+| **SQL migrations** | Ordered files under `rust/migrations/`: `0001_core_api_key_usage.sql`, `0002_core_issued_api_keys.sql` (API-key bookkeeping only). The `teams`/`team_members`/`compliance_workflow` enterprise-layer schema is **not** shipped as migrations here — see [ENTERPRISE_LAYER.md](ENTERPRISE_LAYER.md#running-this-locally--a-real-gap-not-just-missing-docs). |
 
 ## Where database URLs are consumed (audit)
 

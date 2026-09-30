@@ -1,0 +1,31 @@
+{
+  "schema_version": "govai.standards.governance_policy_module.v1",
+  "policy": {
+    "id": "pol.vendor-evaluation",
+    "name": "Third-party AI vendor evaluation",
+    "version": "1.0.0"
+  },
+  "requirements": [
+    {
+      "code": "vendor_due_diligence",
+      "required_evidence": [
+        "vendor_questionnaire",
+        "security_assessment"
+      ]
+    },
+    {
+      "code": "traceability",
+      "required_evidence": [
+        "data_flow_diagram",
+        "subprocessor_list"
+      ]
+    },
+    {
+      "code": "robustness",
+      "required_evidence": [
+        "sla_review",
+        "incident_history"
+      ]
+    }
+  ]
+}

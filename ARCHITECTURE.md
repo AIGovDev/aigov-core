@@ -29,7 +29,7 @@ There is **no edge** between the two subgraphs on purpose: enterprise tables and
 | Layer | What it is | Stability expectation |
 |-------|------------|------------------------|
 | **Core (frozen)** | Append-only `audit_log.jsonl`, `policy.rs` enforcement on `POST /evidence`, bundle/projection/compliance-summary routes that read the log only (`/bundle`, `/bundle-hash`, `/compliance-summary`, `/verify*`). Event schema (`schema.rs`), canonical contracts in [docs/strong-core-contract-note.md](docs/strong-core-contract-note.md). | This is the **portable regulation-agnostic contract**; changes are intentional and versioned. |
-| **Enterprise layer** | Supabase JWT auth and team-scoped **`/api/*`** routes: **`/api/me`**, **`/api/assessments`**, **`/api/compliance-workflow*`** backed by Postgres **`teams`**, **`team_members`**, product **RBAC** (`rust/src/rbac.rs`), **`compliance_workflow`** (migration `0003_compliance_workflow.sql`). Dashboard + Python Supabase helpers target this stack. | **Optional product layer** (same repo): **not** the same stability or portability guarantee as the core ledger API. Detail: [ENTERPRISE_LAYER.md](ENTERPRISE_LAYER.md). |
+| **Enterprise layer** | Supabase JWT auth and team-scoped **`/api/*`** routes: **`/api/me`**, **`/api/assessments`**, **`/api/compliance-workflow*`** backed by Postgres **`teams`**, **`team_members`**, product **RBAC** (`rust/src/rbac.rs`), **`compliance_workflow`**. This schema's migrations are **not shipped in AIGov Core** — see [ENTERPRISE_LAYER.md](ENTERPRISE_LAYER.md#running-this-locally--a-real-gap-not-just-missing-docs). Dashboard + Python Supabase helpers target this stack. | **Optional product layer** (same repo): **not** the same stability or portability guarantee as the core ledger API. Detail: [ENTERPRISE_LAYER.md](ENTERPRISE_LAYER.md). |
 
 ---
 
@@ -193,7 +193,7 @@ Environment variables commonly used: `RUN_ID`, `AIGOV_AUDIT_URL` / `AIGOV_AUDIT_
 
 ## Dashboard (`dashboard/`)
 
-Next.js (App Router): `/login`, `/runs` (list), `/runs/[id]` (detail). Run rows come from **Supabase** after `db_ingest` (same project as dashboard env). Optionally set **`AIGOV_AUDIT_URL`** on the dashboard server so `/runs/[id]` can render the **frozen** `GET /compliance-summary` contract (no projection logic in the UI).
+**Not shipped in AIGov Core.** `dashboard/` in this repository currently contains only a brand asset (`dashboard/brand/`) — there is no Next.js application, `package.json`, or `app/` tree committed here. The description below is the **intended/hosted-Platform** shape (`/login`, `/runs` list, `/runs/[id]` detail, reading run rows from Supabase after `db_ingest`, optionally rendering the frozen `GET /compliance-summary` contract) — it documents what the hosted GovAI Platform dashboard does, not code present in this OSS repository. Any `cd dashboard && npm install` instruction elsewhere in these docs will not work against a clean clone of AIGov Core.
 
 ## EU AI Act (mapping only)
 

@@ -4,9 +4,11 @@ Exact commands and **representative** expected outputs. UUIDs, accuracy, and has
 
 > **Disclaimer:** This is a **research prototype**. Outputs describe what the current code prints or returns; they are **not** legal or compliance guarantees.
 
+> **Scope note:** this file walks the **`make`-based training/approval/promotion flow** (Python pipeline + a locally-run `aigov_audit`). It is a separate path from **[`examples/blocked_deployment.sh`](examples/blocked_deployment.sh)** (the Docker Compose fail-closed demo referenced in `README.md`) — the two are not meant to be chained together against the same `RUN_ID`.
+
 ## Prerequisites
 
-1. **`DATABASE_URL`** — Postgres connection string (required for `make audit` / `audit_bg`). For a **clean clone / reproducible** enterprise demo, apply the SQL migrations **in order** to that same database (`rust/migrations/0001_govai_core.sql`, `0002_add_compliance_context_fields.sql`, `0003_compliance_workflow.sql`) so `teams`, `team_members`, and **`compliance_workflow`** exist. Without this, `/api/*` handlers that touch Postgres return DB errors. Deeper semantics (teams, RBAC): [ENTERPRISE_LAYER.md](ENTERPRISE_LAYER.md).
+1. **`DATABASE_URL`** — Postgres connection string (required for `make audit` / `audit_bg`). The enterprise `/api/*` surface needs **`teams`**, **`team_members`**, and **`compliance_workflow`** to exist, but **their schema is not shipped as migrations in this repository** — `rust/migrations/` only contains `0001_core_api_key_usage.sql` and `0002_core_issued_api_keys.sql` (API-key bookkeeping). Point `DATABASE_URL` at an operator-provisioned database that already has this schema (hosted GovAI Platform), or provision it yourself from the shape implied by `rust/src/govai_api.rs` / `rust/src/rbac.rs`. Without it, `/api/*` handlers that touch Postgres return DB errors. Deeper semantics (teams, RBAC): [ENTERPRISE_LAYER.md](ENTERPRISE_LAYER.md).
 2. **Python venv** — `cd python && . .venv/bin/activate` with `pip install -e .` (see [README.md](README.md)).
 3. For **`make demo_new`** / **`make db_ingest`**: **`SUPABASE_URL`** and **`SUPABASE_SERVICE_ROLE_KEY`**, and the `supabase` Python package if not already installed.
 4. **Auth and team scope for `/api/*`** (enterprise workflow, assessments, `GET /api/me`) — required for the steps in **§2b**:
@@ -21,15 +23,26 @@ One canonical **`run_id`** with symlinked pointers to evidence, report, audit JS
 
 ## 1. Start the evidence service
 
+AIGov Core does not background-manage a local audit service — start it in its own terminal (**`make audit_bg`/`audit_stop`/`audit_restart` intentionally exit with an error** for this reason) and leave it running for the rest of this walkthrough:
+
 ```bash
-make audit_bg
+export GOVAI_LEDGER_DIR="$(pwd)/.govai-ledger"
+mkdir -p "$GOVAI_LEDGER_DIR"
+export GOVAI_API_KEY="dev-key"
+export GOVAI_API_KEYS="$GOVAI_API_KEY"
+export GOVAI_API_KEYS_JSON="{\"$GOVAI_API_KEY\":\"local-dev\"}"
+export AIGOV_ENVIRONMENT=dev
+export AIGOV_POLICY_DIR="$(pwd)/rust"
+make run-audit
 ```
 
-**Expected (stdout):** `starting aigov_audit in background on http://127.0.0.1:8088`, then `ready on http://127.0.0.1:8088` — or `aigov_audit already running on http://127.0.0.1:8088` if the service was already up.
+**Expected (stdout):** `[policy] loaded from …`, then `govai listening on http://127.0.0.1:8088`.
 
-The Rust process prints `govai listening on http://…` to **its** stdout (captured in `.aigov_audit.log` when using `audit_bg`).
+In a **second terminal**, export the same `GOVAI_API_KEY` plus `GOVAI_AUDIT_BASE_URL` before running any step below:
 
 ```bash
+export GOVAI_AUDIT_BASE_URL=http://127.0.0.1:8088
+export GOVAI_API_KEY="dev-key"   # same value as the server terminal
 make status
 ```
 
@@ -217,16 +230,16 @@ This runs (via Makefile): `ensure_evidence` → `report` → `export_bundle` →
 
 ### One-shot (train → gates → bundle → compliance summary JSON)
 
-`make flow_full` runs **`run` → `approve` → `promote` → `report_prepare`**, then **`GET /compliance-summary?run_id=…`** (response printed to stdout). `make flow` is an alias.
+`make flow_full` runs **`run` → `approve` → `promote` → `report_prepare` → `ai_discovery_completed`**, then **`GET /compliance-summary?run_id=…`** (response printed to stdout). The `ai_discovery_completed` step matters: the compliance decision also requires an `ai_discovery_reported` evidence event (requirement code `ai_discovery_completed`) — without it the run stays `BLOCKED` even after approval and promotion. `make flow` is an alias.
 
 ```bash
-make audit_bg
+# make run-audit in a separate terminal first (see "1. Start the evidence service" above)
 RUN_ID=$(make new_run)
 export RUN_ID
 make flow_full RUN_ID="$RUN_ID"
 ```
 
-Requires **`DATABASE_URL`**, audit up (`check_audit`), and default **`AUDIT_URL`** unless overridden.
+Requires **`DATABASE_URL`**, audit up, and default **`AUDIT_URL`** unless overridden. (`check_audit` was removed from AIGov Core — see the target's own message for the offline alternative.)
 
 ## 6. Makefile demo targets
 
@@ -256,13 +269,13 @@ RUN_ID=<uuid> make bundle
 
 ## Dashboard
 
-Local dev (from repo root):
+**Not shipped in AIGov Core** — `dashboard/` in this repository has no Next.js app committed (see [ARCHITECTURE.md](ARCHITECTURE.md#dashboard-dashboard)). The steps below describe the hosted GovAI Platform dashboard; `cd dashboard && npm install` will not find anything to install against a clean clone of this repo.
 
 ```bash
 cd dashboard && npm install && npm run dev
 ```
 
-Set **`NEXT_PUBLIC_SUPABASE_URL`** and **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** (or **`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`**, see `dashboard/lib/supabase/`) so the app can read `runs` from Supabase.
+Set **`NEXT_PUBLIC_SUPABASE_URL`** and **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** (or **`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`**) so the app can read `runs` from Supabase.
 
 After a successful **`db_ingest`**, open **`/runs/<RUN_ID>`** (URL printed by `demo_new`).
 

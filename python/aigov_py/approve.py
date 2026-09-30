@@ -3,37 +3,14 @@ from __future__ import annotations
 import json
 import os
 import uuid
-import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict
+from ._evidence_http import post_evidence_json
 from .prototype_domain import (
     approved_human_event_id_for_run,
     dataset_governance_iris,
     risk_lifecycle_payloads,
 )
-
-
-def _post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-    headers = {"Content-Type": "application/json"}
-
-    api_key = os.environ.get("GOVAI_API_KEY", "").strip()
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    project = os.environ.get("GOVAI_PROJECT", "").strip()
-    if project:
-        headers["X-GovAI-Project"] = project
-
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers=headers,
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8"))
 
 
 def _utc_now_iso() -> str:
@@ -90,10 +67,7 @@ def main() -> None:
         },
     }
 
-    try:
-        out = _post_json(url, event)
-    except Exception:
-        raise
+    out = post_evidence_json(url, event)
 
     print(json.dumps(out, ensure_ascii=False))
 

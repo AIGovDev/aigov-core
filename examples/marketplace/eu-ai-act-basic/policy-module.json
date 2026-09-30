@@ -1,0 +1,38 @@
+{
+  "schema_version": "govai.standards.governance_policy_module.v1",
+  "policy": {
+    "id": "pol.eu-ai-act-basic",
+    "name": "EU AI Act - basic Annex III alignment",
+    "version": "1.0.0"
+  },
+  "requirements": [
+    {
+      "code": "risk_assessment",
+      "required_evidence": [
+        "risk_register",
+        "mitigation_plan"
+      ]
+    },
+    {
+      "code": "human_oversight",
+      "required_evidence": [
+        "human_approval_record",
+        "escalation_procedure"
+      ]
+    },
+    {
+      "code": "traceability",
+      "required_evidence": [
+        "decision_log",
+        "model_version_record"
+      ]
+    },
+    {
+      "code": "post_market_monitoring",
+      "required_evidence": [
+        "incident_log",
+        "performance_review"
+      ]
+    }
+  ]
+}

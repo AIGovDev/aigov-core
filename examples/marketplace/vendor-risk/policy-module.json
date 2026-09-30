@@ -1,0 +1,31 @@
+{
+  "schema_version": "govai.standards.governance_policy_module.v1",
+  "policy": {
+    "id": "pol.vendor-risk",
+    "name": "Ongoing AI vendor risk monitoring",
+    "version": "1.0.0"
+  },
+  "requirements": [
+    {
+      "code": "ongoing_vendor_monitoring",
+      "required_evidence": [
+        "periodic_review",
+        "renewal_assessment"
+      ]
+    },
+    {
+      "code": "traceability",
+      "required_evidence": [
+        "contract_reference",
+        "data_processing_terms"
+      ]
+    },
+    {
+      "code": "robustness",
+      "required_evidence": [
+        "uptime_report",
+        "breach_notification_history"
+      ]
+    }
+  ]
+}

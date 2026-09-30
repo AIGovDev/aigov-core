@@ -19,10 +19,12 @@ A first-line **`VALID`** from `govai check` alone is **not** sufficient proof un
 
 ### Exact working sequence (repository root)
 
+AIGov Core does not background-manage a local audit service — `make audit_bg` intentionally exits with an error for this reason. Start it in its own terminal instead, and leave it running for the rest of this walkthrough:
+
 ```bash
 export DATABASE_URL='postgresql://USER:PASSWORD@127.0.0.1:5432/DATABASE'
 export GOVAI_AUTO_MIGRATE=true
-make audit_bg
+make run-audit
 ```
 
 Install the CLI (`python/` venv):
