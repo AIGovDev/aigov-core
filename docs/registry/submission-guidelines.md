@@ -2,6 +2,8 @@
 
 This page is the contributor-facing checklist for proposing new **policy packs** or **registry metadata** updates.
 
+> **Note:** this checklist describes an intended workflow. The `marketplace/` tree, `examples/marketplace/`, and `scripts/validate_policy_pack.py` referenced below are **not yet implemented** in this repository — only `registry/policy-pack-catalog.json` and `registry/capability-taxonomy.json` currently exist.
+
 ## Before you open a pull request
 
 1. **Read the format** — [`../marketplace/policy-pack-format.md`](../marketplace/policy-pack-format.md) and an existing pack such as [`../../examples/marketplace/eu-ai-act-basic/`](../../examples/marketplace/eu-ai-act-basic/).

@@ -8,7 +8,7 @@ Exact commands and **representative** expected outputs. UUIDs, accuracy, and has
 
 ## Prerequisites
 
-1. **`DATABASE_URL`** — Postgres connection string (required for `make audit` / `audit_bg`). For a **clean clone / reproducible** enterprise demo, apply the SQL migrations **in order** to that same database (`rust/migrations/0001_govai_core.sql`, `0002_add_compliance_context_fields.sql`, `0003_compliance_workflow.sql`) so `teams`, `team_members`, and **`compliance_workflow`** exist. Without this, `/api/*` handlers that touch Postgres return DB errors. Deeper semantics (teams, RBAC): [ENTERPRISE_LAYER.md](ENTERPRISE_LAYER.md).
+1. **`DATABASE_URL`** — Postgres connection string (required for `make audit` / `audit_bg`). The enterprise `/api/*` surface needs **`teams`**, **`team_members`**, and **`compliance_workflow`** to exist, but **their schema is not shipped as migrations in this repository** — `rust/migrations/` only contains `0001_core_api_key_usage.sql` and `0002_core_issued_api_keys.sql` (API-key bookkeeping). Point `DATABASE_URL` at an operator-provisioned database that already has this schema (hosted GovAI Platform), or provision it yourself from the shape implied by `rust/src/govai_api.rs` / `rust/src/rbac.rs`. Without it, `/api/*` handlers that touch Postgres return DB errors. Deeper semantics (teams, RBAC): [ENTERPRISE_LAYER.md](ENTERPRISE_LAYER.md).
 2. **Python venv** — `cd python && . .venv/bin/activate` with `pip install -e .` (see [README.md](README.md)).
 3. For **`make demo_new`** / **`make db_ingest`**: **`SUPABASE_URL`** and **`SUPABASE_SERVICE_ROLE_KEY`**, and the `supabase` Python package if not already installed.
 4. **Auth and team scope for `/api/*`** (enterprise workflow, assessments, `GET /api/me`) — required for the steps in **§2b**:
@@ -269,13 +269,13 @@ RUN_ID=<uuid> make bundle
 
 ## Dashboard
 
-Local dev (from repo root):
+**Not shipped in AIGov Core** — `dashboard/` in this repository has no Next.js app committed (see [ARCHITECTURE.md](ARCHITECTURE.md#dashboard-dashboard)). The steps below describe the hosted GovAI Platform dashboard; `cd dashboard && npm install` will not find anything to install against a clean clone of this repo.
 
 ```bash
 cd dashboard && npm install && npm run dev
 ```
 
-Set **`NEXT_PUBLIC_SUPABASE_URL`** and **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** (or **`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`**, see `dashboard/lib/supabase/`) so the app can read `runs` from Supabase.
+Set **`NEXT_PUBLIC_SUPABASE_URL`** and **`NEXT_PUBLIC_SUPABASE_ANON_KEY`** (or **`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`**) so the app can read `runs` from Supabase.
 
 After a successful **`db_ingest`**, open **`/runs/<RUN_ID>`** (URL printed by `demo_new`).
 

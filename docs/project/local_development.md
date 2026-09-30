@@ -274,10 +274,10 @@ catalog: ci
 ```bash
 export GOVAI_AUDIT_BASE_URL=http://127.0.0.1:8088
 export GOVAI_API_KEY=test-key   # must match root docker-compose.yml
-make fail-closed-demo            # scripts/run_fail_closed_demo.py — BLOCKED contract, JSON on stdout
+bash examples/blocked_deployment.sh   # BLOCKED contract, asserts `govai check` exit code 3
 ```
 
-Read-only vs fail-closed semantics and exit codes: **`examples/local-demo/CONTRACT.md`**. Public docs preview: run the **`dashboard/`** dev server (`cd dashboard && npm ci && npm run dev`) and open **`/docs`** / **`/help`** (content is read from **`../docs/`** at build/runtime).
+Read-only vs fail-closed semantics and exit codes: **`examples/local-demo/CONTRACT.md`**. There is no public docs/help dashboard preview in AIGov Core — `dashboard/` has no Next.js app committed in this repo (see [ARCHITECTURE.md](../../ARCHITECTURE.md#dashboard-dashboard)).
 
 ### Local audit read-only demo (optional)
 

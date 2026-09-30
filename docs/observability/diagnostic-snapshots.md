@@ -1,5 +1,7 @@
 # Diagnostic snapshots
 
+> **Note:** `scripts/operational_health_score.py` and `scripts/generate_operational_intelligence_report.py`, referenced below, are not yet implemented in this repository.
+
 Operational snapshots are deterministic JSON objects describing a point-in-time view of audit service runtime, readiness, evidence flow, and operator diagnostics. They are inputs for **offline scoring** ([`scripts/operational_health_score.py`](../../scripts/operational_health_score.py)) and the **operational intelligence report** ([`scripts/generate_operational_intelligence_report.py`](../../scripts/generate_operational_intelligence_report.py)).
 
 A canonical sample lives at [`examples/observability/sample-operational-snapshot.json`](../../examples/observability/sample-operational-snapshot.json).

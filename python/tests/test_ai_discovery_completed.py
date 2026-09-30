@@ -26,7 +26,7 @@ def test_ai_discovery_completed_emits_expected_event(monkeypatch: pytest.MonkeyP
     fake_resp.__enter__.return_value = fake_resp
     fake_resp.__exit__.return_value = False
 
-    with patch("aigov_py.ai_discovery_completed.urllib.request.urlopen", return_value=fake_resp) as urlopen:
+    with patch("aigov_py._evidence_http.urllib.request.urlopen", return_value=fake_resp) as urlopen:
         mod.main()
 
     req = urlopen.call_args[0][0]
@@ -58,7 +58,7 @@ def test_ai_discovery_completed_sends_bearer_auth_header(monkeypatch: pytest.Mon
     fake_resp.__enter__.return_value = fake_resp
     fake_resp.__exit__.return_value = False
 
-    with patch("aigov_py.ai_discovery_completed.urllib.request.urlopen", return_value=fake_resp) as urlopen:
+    with patch("aigov_py._evidence_http.urllib.request.urlopen", return_value=fake_resp) as urlopen:
         mod.main()
 
     req = urlopen.call_args[0][0]
@@ -81,6 +81,6 @@ def test_ai_discovery_completed_is_idempotent_on_duplicate_409(
         hdrs=None,
         fp=None,
     )
-    with patch("aigov_py.ai_discovery_completed.urllib.request.urlopen", side_effect=err):
+    with patch("aigov_py._evidence_http.urllib.request.urlopen", side_effect=err):
         mod.main()
 

@@ -590,7 +590,7 @@ Note: a run can be `BLOCKED` even when `missing_evidence: []` if approval/promot
 
 ## API usage tiers
 
-Hosted platform plans expose usage limits via `GET /usage` (runs and events per billing period). Commercial packaging is described in [docs/pricing/index.md](docs/pricing/index.md); engineering limits follow your deployment configuration and order form.
+Hosted platform plans expose usage limits via `GET /usage` (runs and events per billing period). Commercial packaging is a GovAI Platform concern (not documented in this Core repository); engineering limits follow your deployment configuration and order form.
 
 ## Auditability and Trust
 

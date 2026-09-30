@@ -18,7 +18,3 @@ The JSON artefacts and validators do **not**:
 - replace database migrations or storage layout;
 - implement authorization in the Rust runtime (this repository’s enforcement code is unchanged by this phase).
 
-## Related material
-
-- Hosted productization snapshots: [`../hosted-platform/README.md`](../hosted-platform/README.md)
-- Control plane governance posture: [`../control-plane/README.md`](../control-plane/README.md)

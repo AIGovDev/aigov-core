@@ -1,5 +1,7 @@
 # Evidence flow observability
 
+> **Note:** `scripts/operational_health_score.py`, referenced later in this document, is not yet implemented in this repository.
+
 Evidence flow signals describe **observable behaviour** of evidence ingest and verdict surfaces during a snapshot window. They are not part of the ledger; they are operator-observed summaries useful for trend analysis and SLA-style narratives outside GovAI.
 
 ## Signals

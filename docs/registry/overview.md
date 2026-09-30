@@ -12,7 +12,7 @@ GovAI ships a **documentation-first registry layer** so operators, partners, and
 | [`registry/benchmark-catalog.json`](../../registry/benchmark-catalog.json) | Points to local stdlib benchmark runners. |
 | [`registry/certification-levels.json`](../../registry/certification-levels.json) | Defines **community**, **verified**, and **enterprise** documentation levels. |
 | [`registry/capability-taxonomy.json`](../../registry/capability-taxonomy.json) | Stable capability identifiers (risk management, human oversight, traceability, robustness, post-market monitoring). |
-| [`marketplace/manifest.json`](../../marketplace/manifest.json) | Curated machine-readable list of in-repo example policy pack directories. |
+| `marketplace/manifest.json` | Curated machine-readable list of in-repo example policy pack directories. **Not yet implemented** — the `marketplace/` tree does not exist in this repository. |
 
 Validation entry point: `python3 scripts/registry_check.py` (see [`../../Makefile`](../../Makefile) targets `registry-check` and `customer-analytics-check`).
 

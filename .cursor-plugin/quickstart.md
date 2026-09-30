@@ -20,7 +20,7 @@ See also the canonical overview in [README.md](README.md).
 ## Plugin manifest and MCP
 
 - **Manifest:** [`.cursor-plugin/plugin.json`](plugin.json) — Marketplace-oriented metadata (`name: govai`, `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`, `logo`, `rules`, `skills`, `mcpServers`).
-- **Plugin-level MCP:** [`.cursor-plugin/mcp.json`](mcp.json) — defines the `govai-local` stdio server (same shape as the `mcpServers` block in `plugin.json`). Cursor may discover this file when loading the plugin from the repository.
+- **Plugin-level MCP:** the `mcpServers` block in [`plugin.json`](plugin.json) — defines the `govai-local` stdio server. There is no separate standalone `mcp.json` file in this plugin; Cursor discovers this block when loading the plugin from the repository.
 - **Workspace MCP:** For a local `.cursor/mcp.json`, merge **`examples/local-config.json`** or copy **`.cursor/mcp.json.example`** from the repository root.
 
 **Path contract:** `args` use **`mcp/govai_mcp_server.py`** relative to the **repository root**. Open the repo as the workspace root.
@@ -92,4 +92,4 @@ Deeper operational context: [../docs/troubleshooting.md](../docs/troubleshooting
 ## Next steps
 
 - Personas and workflows: [use-cases.md](use-cases.md).
-- Commercial packaging and pricing: [../docs/commercial/pricing.md](../docs/commercial/pricing.md).
+- Commercial packaging and pricing: GovAI Platform concern, not documented in this Core repository.

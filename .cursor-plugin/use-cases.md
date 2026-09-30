@@ -45,7 +45,7 @@ How different roles use the AIGov Cursor plugin together with the open source en
 **Plugin usage:**
 
 - OSS plugin for **developer IDE consistency** on top of a **private** or **hosted** AIGov backend (per contract).
-- Enterprise features (SSO, RBAC, retention) apply to the **service** and organisation controls; see [../docs/commercial/enterprise-features.md](../docs/commercial/enterprise-features.md).
+- Enterprise features (SSO, RBAC, retention) apply to the **service** and organisation controls (GovAI Platform concern, not documented in this Core repository).
 
 **Outcomes:** Developers get the same Cursor-native experience while central IT maintains authoritative enforcement and identity.
 

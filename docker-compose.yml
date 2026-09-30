@@ -26,8 +26,11 @@ services:
       AIGOV_BIND: "0.0.0.0:8088"
       GOVAI_AUTO_MIGRATE: "true"
       DATABASE_URL: "postgres://postgres:postgres@db:5432/govai"
-      # Optional but recommended even for operator-hosted:
+      # Required together: GOVAI_API_KEYS and GOVAI_API_KEYS_JSON must agree
+      # (see rust/src/audit_api_key.rs) or ledger-touching routes 400 with
+      # TENANT_RESOLUTION_FAILED even though the key itself is accepted.
       GOVAI_API_KEYS: "test-key"
+      GOVAI_API_KEYS_JSON: '{"test-key":"local-dev"}'
       # GOVAI_BASE_URL: "http://localhost:8088"
     ports:
       - "8088:8088"

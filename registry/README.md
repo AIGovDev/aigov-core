@@ -33,4 +33,4 @@ These catalogs are **documentation and interchange discoverability** only. They 
 - Registry program overview: [`../docs/registry/overview.md`](../docs/registry/overview.md)
 - Submission workflow: [`../docs/registry/submission-guidelines.md`](../docs/registry/submission-guidelines.md)
 - Certification program: [`../docs/registry/certification-program.md`](../docs/registry/certification-program.md)
-- Policy pack marketplace (curated manifest): [`../marketplace/manifest.json`](../marketplace/manifest.json)
+- Policy pack marketplace (curated manifest): `marketplace/manifest.json` — **not yet implemented**, the `marketplace/` tree does not exist in this repository

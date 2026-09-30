@@ -2,7 +2,7 @@
 
 This document defines vocabulary for **Knowledge Preservation Architecture** as applied to AIGov Core, and **critiques** that direction. It is written for principal-level architecture review: precise definitions first, adversarial analysis second.
 
-Companion (directional): [knowledge-preservation-layer.md](knowledge-preservation-layer.md).  
+Companion (directional): not yet written.  
 Implemented today: append-only ledger, projection, verdicts, export/replay ([governance-semantics.md](governance-semantics.md)).
 
 ---
@@ -411,7 +411,6 @@ AIGov Core’s honest positioning in engineering terms:
 | Topic | Document |
 |-------|----------|
 | Runtime implementation | [../epistemic-readiness.md](../epistemic-readiness.md) |
-| Current direction | [knowledge-preservation-layer.md](knowledge-preservation-layer.md) |
 | Verdict semantics | [governance-semantics.md](governance-semantics.md) |
 | Ledger | [append-only-ledger-semantics.md](append-only-ledger-semantics.md) |
 | Platform boundary | [platform-vs-core-boundary.md](platform-vs-core-boundary.md) |
