@@ -16,7 +16,7 @@ REGISTRY_DIR = ROOT / "registry"
 MARKETPLACE_MANIFEST = ROOT / "marketplace/manifest.json"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from validate_policy_pack import validate as validate_pack  # noqa: E402
+from validate_policy_pack import validate as validate_pack
 
 
 def _load(path: Path) -> dict:

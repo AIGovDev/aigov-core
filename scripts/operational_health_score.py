@@ -139,7 +139,7 @@ def compute_score(snapshot: dict[str, Any], manifest: dict[str, Any] | None = No
         readiness.get(s) is True
         for s in ("audit_ready_endpoint_status", "migration_state_consistent", "policy_pack_load_status")
     )
-    all_sub_scores_ge = lambda threshold: all(v >= threshold for v in sub_scores.values())  # noqa: E731
+    all_sub_scores_ge = lambda threshold: all(v >= threshold for v in sub_scores.values())
 
     if health_score >= 85 and all_sub_scores_ge(75) and all_readiness_true:
         risk_level = "low"

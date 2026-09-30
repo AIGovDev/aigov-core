@@ -17,7 +17,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from operational_health_score import compute_score  # noqa: E402
+from operational_health_score import compute_score
 
 DEFAULT_INPUT = ROOT / "examples/observability/sample-operational-snapshot.json"
 MANIFEST_PATH = ROOT / "docs/observability/observability-manifest.json"

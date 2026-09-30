@@ -17,9 +17,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from validate_observability_manifest import MANIFEST_PATH, validate as validate_manifest  # noqa: E402
-from validate_operational_snapshot import (  # noqa: E402
+from validate_observability_manifest import MANIFEST_PATH
+from validate_observability_manifest import validate as validate_manifest
+from validate_operational_snapshot import (
     DEFAULT_INPUT as DEFAULT_SNAPSHOT,
+)
+from validate_operational_snapshot import (
     validate as validate_snapshot,
 )
 

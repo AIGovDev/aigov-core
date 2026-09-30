@@ -35,7 +35,9 @@ def validate(pack_dir: Path) -> list[str]:
     except json.JSONDecodeError as e:
         return errors + [f"policy-module.json is not valid JSON: {e}"]
 
-    from aigov_py.standards.policy_module import validate_governance_policy_module_document
+    from aigov_py.standards.policy_module import (
+        validate_governance_policy_module_document,
+    )
 
     result = validate_governance_policy_module_document(data)
     if not result.ok:
