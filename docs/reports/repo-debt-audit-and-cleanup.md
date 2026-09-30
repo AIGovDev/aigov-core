@@ -6,6 +6,18 @@
 
 This file was itself one of the findings: it was cited as authoritative from `README.md`, `docs/roadmap.md`, and `docs/contributors/contributor-pathways.md`, but did not exist until this pass.
 
+## Evaluation gate
+
+Every fix below was verified directly: `cd python && python -m pytest -q` (427 passed, 2 skipped) after each code change; every new/changed Makefile target run individually; `docker compose`-based live verification of the `GOVAI_API_KEYS_JSON` fix could not complete in this sandboxed environment (build networking stalled with zero cache progress) but the underlying requirement was verified directly against a running `aigov_audit` instance earlier on this branch.
+
+Evaluation status: passed (see individual commit messages on this branch for per-change verification detail).
+
+## Human approval gate
+
+Reviewer must confirm: the `aigov-core-agpl/` deletion, the `legal/published/{privacy-policy,dpa}.md` removal, and the OpenAPI phantom-route removal reflect intended scope before merge — these are the three changes in this pass with the highest blast radius.
+
+Human approval status: pending pull-request review.
+
 ## Issues addressed
 
 | ID | Finding | Resolution |

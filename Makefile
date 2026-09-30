@@ -18,6 +18,10 @@ AIGOV_MODE ?= ci
 	pr_prepare gate core-runtime-examples-check reference-integrations-check reconstructible-demo-check runtime-packaging-check runtime-observability-check lineage-governance-check \
 	observability observability-manifest operational-snapshot operational-health-score operational-intelligence-report observability-check \
 	registry-check \
+	autonomous-governance-check multi-agent-governance-check \
+	multi-tenant-check tenant-isolation-check \
+	conformity-workflow-check regulatory-workflow-check \
+	research-package-check academic-publication-check \
 	audit_close \
 	demo demo_new \
 	env_check \
@@ -105,6 +109,45 @@ observability: observability-manifest operational-snapshot operational-health-sc
 
 registry-check:
 	@python3 scripts/registry_check.py
+
+# ================================
+# Autonomous / multi-agent governance (autonomous/)
+# ================================
+
+autonomous-governance-check:
+	@python3 scripts/autonomous_governance_check.py
+	@$(MAKE) gate
+
+multi-agent-governance-check:
+	@python3 scripts/autonomous_governance_check.py --multi-agent
+	@$(MAKE) gate
+
+# ================================
+# Multi-tenant governance (multi-tenant/)
+# ================================
+
+multi-tenant-check:
+	@python3 scripts/multi_tenant_check.py
+
+tenant-isolation-check: multi-tenant-check
+
+# ================================
+# EU AI Act conformity automation (conformity/)
+# ================================
+
+conformity-workflow-check:
+	@python3 scripts/conformity_workflow_check.py
+
+regulatory-workflow-check: conformity-workflow-check
+
+# ================================
+# Research / academic publication (research/)
+# ================================
+
+research-package-check:
+	@python3 scripts/research_package_check.py
+
+academic-publication-check: research-package-check
 
 # Registered interchange conformance checks.
 standards-conformance:
