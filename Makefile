@@ -186,8 +186,8 @@ status: require_audit_url
 verify: require_audit_url
 	curl -sS "$(GOVAI_AUDIT_BASE_URL)/verify" -H "Authorization: Bearer $${GOVAI_API_KEY:-ci-test-api-key}" ; echo
 
-verify_log: require_audit_url
-	curl -sS "$(GOVAI_AUDIT_BASE_URL)/verify" -H "Authorization: Bearer $${GOVAI_API_KEY:-ci-test-api-key}" ; echo
+# Legacy alias: `/verify-log` was retired in favor of `/verify`; kept as a name-compatible entrypoint.
+verify_log: verify
 
 # ================================
 # Core
@@ -336,7 +336,7 @@ flow_full: require_run require_audit_url
 	$(MAKE) promote RUN_ID="$(RUN_ID)"; \
 	$(MAKE) report_prepare RUN_ID="$(RUN_ID)"; \
 	cd python && . .venv/bin/activate && \
-		RUN_ID="$(RUN_ID)" AIGOV_MODE="$(AIGOV_MODE)" python -m aigov_py.ai_discovery_completed; \
+		GOVAI_AUDIT_BASE_URL=$${GOVAI_AUDIT_BASE_URL} GOVAI_API_KEY=$${GOVAI_API_KEY:-ci-test-api-key} GOVAI_PROJECT=$${GOVAI_PROJECT:-github-actions} RUN_ID="$(RUN_ID)" AIGOV_MODE="$(AIGOV_MODE)" python -m aigov_py.ai_discovery_completed; \
 	echo "GET $(GOVAI_AUDIT_BASE_URL)/compliance-summary?run_id=$(RUN_ID)"; \
 	curl -fsS "$(GOVAI_AUDIT_BASE_URL)/compliance-summary?run_id=$(RUN_ID)" \
 		-H "Authorization: Bearer $${GOVAI_API_KEY:-ci-test-api-key}"; echo

@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import requests
 
@@ -80,7 +81,7 @@ def verify(run_id: str, *, as_json: bool = False) -> int:
     ledger_derived = isinstance(evidence, dict) and bool(evidence.get("log_path"))
     try:
         r = requests.get(
-            f"{endpoint}/verify/{run_id}",
+            f"{endpoint}/verify/{quote(run_id, safe='')}",
             headers=_audit_request_headers(),
             timeout=15,
         )
