@@ -22,6 +22,7 @@ AIGOV_MODE ?= ci
 	multi-tenant-check tenant-isolation-check \
 	conformity-workflow-check regulatory-workflow-check \
 	research-package-check academic-publication-check \
+	regulatory-manifest ai-act-obligations regulatory-evidence regulatory-export regulatory-check \
 	audit_close \
 	demo demo_new \
 	env_check \
@@ -148,6 +149,26 @@ research-package-check:
 	@python3 scripts/research_package_check.py
 
 academic-publication-check: research-package-check
+
+# ================================
+# Regulatory evidence (docs/regulatory/)
+# ================================
+
+regulatory-manifest:
+	@python3 scripts/validate_regulatory_evidence_manifest.py
+
+ai-act-obligations:
+	@python3 scripts/validate_ai_act_obligations.py
+
+regulatory-evidence:
+	@python3 scripts/regulatory_evidence_check.py
+
+regulatory-export:
+	@python3 scripts/generate_regulatory_evidence_export.py >/dev/null
+	@echo "regulatory-export: OK"
+
+regulatory-check: regulatory-manifest ai-act-obligations regulatory-evidence regulatory-export
+	@echo "regulatory-check: OK"
 
 # Registered interchange conformance checks.
 standards-conformance:
