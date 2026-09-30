@@ -15,3 +15,6 @@ audit_log*.bak.*
 # Python cache
 __pycache__/
 *.pyc
+
+# Empirical benchmark outputs (docs/research/performance-results.md: "gitignored")
+benchmark-runs/

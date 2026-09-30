@@ -23,6 +23,8 @@ AIGOV_MODE ?= ci
 	conformity-workflow-check regulatory-workflow-check \
 	research-package-check academic-publication-check \
 	regulatory-manifest ai-act-obligations regulatory-evidence regulatory-export regulatory-check \
+	microbenchmark-check empirical-evaluation-run empirical-evaluation-check manuscript-evidence-check \
+	evidence-quality-check \
 	audit_close \
 	demo demo_new \
 	env_check \
@@ -149,6 +151,25 @@ research-package-check:
 	@python3 scripts/research_package_check.py
 
 academic-publication-check: research-package-check
+
+microbenchmark-check:
+	@python3 scripts/microbenchmark_audit_engine.py
+
+empirical-evaluation-run:
+	@python3 scripts/run_full_empirical_evaluation.py
+
+empirical-evaluation-check:
+	@python3 scripts/empirical_evaluation_check.py
+
+manuscript-evidence-check:
+	@python3 scripts/manuscript_evidence_runner.py
+
+# ================================
+# Evidence quality (docs/evidence-quality/)
+# ================================
+
+evidence-quality-check:
+	@python3 scripts/evidence_quality_check.py
 
 # ================================
 # Regulatory evidence (docs/regulatory/)
