@@ -16,6 +16,8 @@ AIGOV_MODE ?= ci
 	emit_event \
 	flow flow_full \
 	pr_prepare gate core-runtime-examples-check reference-integrations-check reconstructible-demo-check runtime-packaging-check runtime-observability-check lineage-governance-check \
+	observability observability-manifest operational-snapshot operational-health-score operational-intelligence-report observability-check \
+	registry-check \
 	audit_close \
 	demo demo_new \
 	env_check \
@@ -77,6 +79,32 @@ runtime-observability-check:
 
 lineage-governance-check:
 	@python3 scripts/check_lineage_governance_graph.py
+
+# ================================
+# Observability (docs/observability/)
+# ================================
+
+observability-manifest:
+	@python3 scripts/validate_observability_manifest.py
+
+operational-snapshot:
+	@python3 scripts/validate_operational_snapshot.py --input examples/observability/sample-operational-snapshot.json
+
+operational-health-score:
+	@python3 scripts/operational_health_score.py --input examples/observability/sample-operational-snapshot.json
+
+operational-intelligence-report:
+	@python3 scripts/generate_operational_intelligence_report.py --input examples/observability/sample-operational-snapshot.json >/dev/null
+	@echo "operational-intelligence-report: OK"
+
+observability-check:
+	@python3 scripts/observability_check.py
+
+observability: observability-manifest operational-snapshot operational-health-score observability-check
+	@echo "observability: OK"
+
+registry-check:
+	@python3 scripts/registry_check.py
 
 # Registered interchange conformance checks.
 standards-conformance:

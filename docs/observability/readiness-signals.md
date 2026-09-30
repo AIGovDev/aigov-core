@@ -1,7 +1,5 @@
 # Readiness signals
 
-> **Note:** `scripts/operational_health_score.py`, referenced throughout this document, is not yet implemented in this repository.
-
 Readiness signals describe whether the **operator-controlled** environment is in a state suitable for handling production traffic. They are recorded as **booleans** in each [operational snapshot](diagnostic-snapshots.md) and consumed by [`scripts/operational_health_score.py`](../../scripts/operational_health_score.py).
 
 ## Signals

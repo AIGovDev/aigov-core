@@ -1,0 +1,31 @@
+{
+  "schema_version": "govai.standards.governance_policy_module.v1",
+  "policy": {
+    "id": "pol.healthcare-ai",
+    "name": "Healthcare AI clinical safety",
+    "version": "1.0.0"
+  },
+  "requirements": [
+    {
+      "code": "clinical_risk_assessment",
+      "required_evidence": [
+        "risk_register",
+        "clinical_safety_case"
+      ]
+    },
+    {
+      "code": "human_oversight",
+      "required_evidence": [
+        "clinician_review",
+        "override_capability_demonstrated"
+      ]
+    },
+    {
+      "code": "traceability",
+      "required_evidence": [
+        "decision_log",
+        "training_data_provenance"
+      ]
+    }
+  ]
+}

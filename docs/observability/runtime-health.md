@@ -1,7 +1,5 @@
 # Runtime health signals
 
-> **Note:** `scripts/operational_health_score.py`, referenced later in this document, is not yet implemented in this repository.
-
 Runtime health describes how the **audit service** and surrounding operator-controlled infrastructure are behaving during a given **window**. It is captured externally — typically by an operator monitoring stack — and recorded in an [operational snapshot](diagnostic-snapshots.md) for offline scoring.
 
 ## Signals

@@ -1,7 +1,5 @@
 # Operational risk
 
-> **Note:** `scripts/operational_health_score.py`, referenced throughout this document, is not yet implemented in this repository.
-
 The operational health scoring tool derives a single **risk_level** from the sub-scores it computes for a given operational snapshot. The risk level is intended for offline review and for prioritising operator follow-up; it is **not** a verdict surface.
 
 ## Risk-level derivation
