@@ -8,7 +8,6 @@ on:
       - "rust/**"
       - "python/**"
       - "scripts/**"
-      - "typescript-sdk/**"
       - "dashboard/**"
       - "docs/**"
       - "Makefile"

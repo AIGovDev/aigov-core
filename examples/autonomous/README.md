@@ -7,7 +7,7 @@ These artefacts do **not** change GovAI compliance verdict semantics or Rust run
 ## Commands
 
 - `bash examples/autonomous/run-autonomous-governance-check.sh` — validates the `autonomous/` JSON bundle, documentation paths, example drivers, and Makefile wiring; prints deterministic JSON with `--json` on the script.
-- `bash examples/autonomous/run-multi-agent-governance-check.sh` — same as above plus multi-agent coordination sample validation and a `docs/index.md` wiring check.
+- `bash examples/autonomous/run-multi-agent-governance-check.sh` — same as above plus multi-agent coordination sample validation (agent `role_ref` and `delegation_graph` entries checked against the real role models).
 
 Aggregate Makefile targets (each ends with `make gate` for audit report heading hygiene):
 
