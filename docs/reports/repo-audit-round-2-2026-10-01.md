@@ -27,7 +27,7 @@ Verification performed for this change set includes:
 - policy-intelligence targets: pass
 - runtime-safety targets: pass
 - standards-conformance validation: pass
-- make gate: pass
+- `make gate`: pass
 
 ## Evaluation gate
 
