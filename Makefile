@@ -25,6 +25,9 @@ AIGOV_MODE ?= ci
 	regulatory-manifest ai-act-obligations regulatory-evidence regulatory-export regulatory-check \
 	microbenchmark-check empirical-evaluation-run empirical-evaluation-check manuscript-evidence-check \
 	evidence-quality-check \
+	agent-governance agent-governance-manifest agent-delegation-snapshot agent-governance-score agent-governance-report agent-governance-check \
+	policy-intelligence policy-intelligence-manifest governance-control-snapshot policy-coverage-score governance-control-report policy-intelligence-check \
+	runtime-safety runtime-safety-manifest runtime-safety-snapshot runtime-safety-score runtime-safety-report runtime-safety-check \
 	audit_close \
 	demo demo_new \
 	env_check \
@@ -170,6 +173,76 @@ manuscript-evidence-check:
 
 evidence-quality-check:
 	@python3 scripts/evidence_quality_check.py
+
+# ================================
+# Agent governance (docs/agent-governance/)
+# ================================
+
+agent-governance-manifest:
+	@python3 scripts/validate_agent_governance_manifest.py
+
+agent-delegation-snapshot:
+	@python3 scripts/validate_agent_delegation_snapshot.py --input examples/agent-governance/sample-agent-delegation-snapshot.json
+
+agent-governance-score:
+	@python3 scripts/agent_governance_score.py --input examples/agent-governance/sample-agent-delegation-snapshot.json
+
+agent-governance-report:
+	@python3 scripts/generate_agent_governance_report.py --input examples/agent-governance/sample-agent-delegation-snapshot.json >/dev/null
+	@echo "agent-governance-report: OK"
+
+agent-governance-check:
+	@python3 scripts/agent_governance_check.py
+	@$(MAKE) gate
+
+agent-governance: agent-governance-manifest agent-delegation-snapshot agent-governance-score agent-governance-check
+	@echo "agent-governance: OK"
+
+# ================================
+# Policy intelligence (docs/policy-intelligence/)
+# ================================
+
+policy-intelligence-manifest:
+	@python3 scripts/validate_policy_intelligence_manifest.py
+
+governance-control-snapshot:
+	@python3 scripts/validate_governance_control_snapshot.py --input examples/policy-intelligence/sample-governance-control-snapshot.json
+
+policy-coverage-score:
+	@python3 scripts/policy_coverage_score.py --input examples/policy-intelligence/sample-governance-control-snapshot.json
+
+governance-control-report:
+	@python3 scripts/generate_governance_control_report.py --input examples/policy-intelligence/sample-governance-control-snapshot.json >/dev/null
+	@echo "governance-control-report: OK"
+
+policy-intelligence-check:
+	@python3 scripts/policy_intelligence_check.py
+
+policy-intelligence: policy-intelligence-manifest governance-control-snapshot policy-coverage-score policy-intelligence-check
+	@echo "policy-intelligence: OK"
+
+# ================================
+# Runtime safety (docs/runtime-safety/)
+# ================================
+
+runtime-safety-manifest:
+	@python3 scripts/validate_runtime_safety_manifest.py
+
+runtime-safety-snapshot:
+	@python3 scripts/validate_runtime_safety_snapshot.py --input examples/runtime-safety/sample-runtime-safety-snapshot.json
+
+runtime-safety-score:
+	@python3 scripts/runtime_safety_score.py --input examples/runtime-safety/sample-runtime-safety-snapshot.json
+
+runtime-safety-report:
+	@python3 scripts/generate_runtime_safety_report.py --input examples/runtime-safety/sample-runtime-safety-snapshot.json >/dev/null
+	@echo "runtime-safety-report: OK"
+
+runtime-safety-check:
+	@python3 scripts/runtime_safety_check.py
+
+runtime-safety: runtime-safety-manifest runtime-safety-snapshot runtime-safety-score runtime-safety-check
+	@echo "runtime-safety: OK"
 
 # ================================
 # Regulatory evidence (docs/regulatory/)

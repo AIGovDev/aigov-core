@@ -39,7 +39,7 @@ Merge requires normal human review and approval through the protected pull-reque
 
 ## Risk
 
-Residual risk primarily concerns future drift between documentation, manifests, and executable validation logic. The added executable tooling reduces this risk.
+Residual risk primarily concerns future drift between documentation, manifests, and executable validation logic.
 
 ## Conclusion
 
