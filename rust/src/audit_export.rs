@@ -46,7 +46,7 @@ pub fn build_audit_export_v1(
     );
     let outcome = derive_verdict_from_state(&state, policy_cfg);
 
-    let log_chain = build_log_chain(log_path, run_id)?;
+    let log_chain = build_log_chain(log_path, run_id, &events)?;
     let chain_head = log_chain
         .last()
         .and_then(|e| e.get("record_hash"))
@@ -119,32 +119,46 @@ pub fn build_audit_export_v1(
     Ok(doc)
 }
 
-fn build_log_chain(log_path: &str, run_id: &str) -> Result<Vec<Value>, String> {
+fn build_log_chain(
+    log_path: &str,
+    run_id: &str,
+    events: &[EvidenceEvent],
+) -> Result<Vec<Value>, String> {
+    // `events` (from `collect_events_for_run`) is already in this export's
+    // one true order (`stable_event_order`: ts_utc, event_type, event_id).
+    // Deriving the chain from a SEPARATE scan+sort here, as a prior version
+    // of this function did, drifted from that order under ts_utc ties (same
+    // ts_utc, different event_type) — `stable_event_order` tie-breaks on
+    // event_type before event_id, but the old chain sort didn't, so the two
+    // "orders" could legitimately disagree on untampered data and trip
+    // `event_order_mismatch_log_chain`. Building the chain by looking up
+    // each already-ordered event's (prev_hash, record_hash) makes the two
+    // orders the same order by construction, not by two sorts agreeing.
     let (records, _) = crate::audit_store::scan_ledger_records(log_path)?;
-    let mut chain: Vec<Value> = Vec::new();
+    let mut by_event_id: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
     for rec in records {
         let ev: EvidenceEvent =
             serde_json::from_str(&rec.event_json).map_err(|e| e.to_string())?;
         if ev.run_id != run_id {
             continue;
         }
+        by_event_id.insert(ev.event_id, (rec.prev_hash, rec.record_hash));
+    }
+
+    let mut chain: Vec<Value> = Vec::with_capacity(events.len());
+    for ev in events {
+        let (prev_hash, record_hash) = by_event_id
+            .remove(&ev.event_id)
+            .ok_or_else(|| format!("ledger record missing for event_id {}", ev.event_id))?;
         chain.push(json!({
             "event_id": ev.event_id,
             "ts_utc": ev.ts_utc,
             "event_type": ev.event_type,
-            "prev_hash": rec.prev_hash,
-            "record_hash": rec.record_hash,
+            "prev_hash": prev_hash,
+            "record_hash": record_hash,
         }));
     }
-    chain.sort_by(|a, b| {
-        let ta = a.get("ts_utc").and_then(|v| v.as_str()).unwrap_or("");
-        let tb = b.get("ts_utc").and_then(|v| v.as_str()).unwrap_or("");
-        ta.cmp(tb).then_with(|| {
-            let ea = a.get("event_id").and_then(|v| v.as_str()).unwrap_or("");
-            let eb = b.get("event_id").and_then(|v| v.as_str()).unwrap_or("");
-            ea.cmp(eb)
-        })
-    });
 
     // `prev_hash` as scanned above is the *physical* ledger chain value: it
     // points at whatever record immediately preceded this one in the shared,
