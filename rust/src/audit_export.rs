@@ -145,6 +145,40 @@ fn build_log_chain(log_path: &str, run_id: &str) -> Result<Vec<Value>, String> {
             ea.cmp(eb)
         })
     });
+
+    // `prev_hash` as scanned above is the *physical* ledger chain value: it
+    // points at whatever record immediately preceded this one in the shared,
+    // multi-run ledger file — which is almost never this run's own previous
+    // record once any other run's evidence (or a delegated sub-agent's own
+    // events) lands between them. A per-run export is a filtered, re-sorted
+    // VIEW of that shared ledger, so validating physical adjacency against it
+    // produces false "chain_break" results on entirely untampered data as
+    // soon as a single foreign record (or just an out-of-order ts_utc) sits
+    // between two of this run's records.
+    //
+    // What this export actually needs to guarantee is narrower and still
+    // meaningful: that THIS run's records, in the order presented here,
+    // form an unbroken, tamper-evident sequence on their own — each one
+    // still carries its real, ledger-computed `record_hash` (so content
+    // tampering of any single record is still caught), but `prev_hash` for
+    // every record after the first is rewritten to point at the previous
+    // record IN THIS EXPORT. That is a cryptographic chain over the subset
+    // the recipient actually has, not an unverifiable claim about physical
+    // neighbors they were never given. The first record keeps its real,
+    // physical `prev_hash` as an informational anchor into the rest of the
+    // ledger; replay intentionally does not validate it (a run-scoped
+    // export may legitimately start mid-ledger).
+    for i in 1..chain.len() {
+        let prior_hash = chain[i - 1]
+            .get("record_hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if let Some(obj) = chain[i].as_object_mut() {
+            obj.insert("prev_hash".to_string(), json!(prior_hash));
+        }
+    }
+
     Ok(chain)
 }
 
@@ -564,5 +598,90 @@ mod tests {
         let (report, _) = run_export_validations(&doc);
         assert!(report.is_ok(), "replay validation errors: {:?}", report.errors);
         assert!(report.events_content_sha256_ok);
+    }
+
+    /// Regression test for a real bug found while building an offline-replay
+    /// demo: a per-run export used to report a false `chain_break` whenever
+    /// ANY other run's event physically sat between two of this run's own
+    /// records (e.g. a concurrently delegated sub-agent writing to the same
+    /// shared ledger) or when one of this run's own events carried a
+    /// timestamp out of physical order. Neither condition is tampering —
+    /// both are routine in a multi-run, multi-agent ledger — so export must
+    /// not flag either as a broken chain.
+    #[test]
+    fn export_survives_foreign_interleaved_records_and_out_of_order_timestamps() {
+        let tmp = TempDir::new().unwrap();
+        let run_id = "target-run";
+        let other_run_id = "other-run";
+        let log_path = isolated_ledger_path(tmp.path(), "tenant-interleave");
+        ensure_ledger_parent(&log_path);
+        let log_path = log_path.to_string_lossy().into_owned();
+
+        let base_event = |event_id: &str, event_type: &str, run: &str, ts: &str| EvidenceEvent {
+            event_id: event_id.to_string(),
+            event_type: event_type.to_string(),
+            ts_utc: ts.to_string(),
+            actor: "t".to_string(),
+            system: "t".to_string(),
+            run_id: run.to_string(),
+            environment: None,
+            payload: json!({}),
+            parent_run_id: None,
+            root_run_id: None,
+            delegated_from_event_id: None,
+            agent_id: None,
+            agent_role: None,
+            delegation_reason: None,
+        };
+
+        // Physical order: target, FOREIGN (other run), target (with an
+        // out-of-order ts_utc earlier than the record before it), target.
+        append_event(
+            &log_path,
+            base_event("t1", "data_registered", run_id, "2026-01-01T00:00:10Z"),
+        );
+        append_event(
+            &log_path,
+            base_event("o1", "evaluation_reported", other_run_id, "2026-01-01T00:00:11Z"),
+        );
+        append_event(
+            &log_path,
+            // Earlier timestamp than t1 above, even though it's physically later.
+            base_event("t2", "model_trained", run_id, "2026-01-01T00:00:05Z"),
+        );
+        append_event(
+            &log_path,
+            base_event("t3", "ai_discovery_reported", run_id, "2026-01-01T00:00:12Z"),
+        );
+
+        let doc = export_doc(run_id, &log_path, "tenant-interleave");
+        let chain = doc
+            .get("evidence_hashes")
+            .and_then(|h| h.get("log_chain"))
+            .and_then(|v| v.as_array())
+            .expect("log_chain");
+        assert_eq!(chain.len(), 3, "foreign run's event must not appear in this run's chain");
+
+        let (report, _) = run_export_validations(&doc);
+        assert!(
+            report.chain_continuity_ok,
+            "false chain_break on untampered, merely interleaved/reordered data: {:?}",
+            report.errors
+        );
+        assert!(report.is_ok(), "replay validation errors: {:?}", report.errors);
+
+        // And genuine tampering — flipping one record_hash — must still be caught.
+        let mut tampered = doc.clone();
+        let tampered_chain = tampered["evidence_hashes"]["log_chain"]
+            .as_array_mut()
+            .unwrap();
+        let rh = tampered_chain[1]["record_hash"].as_str().unwrap().to_string();
+        let flipped = format!("{}{}", &rh[..rh.len() - 1], if rh.ends_with('0') { '1' } else { '0' });
+        tampered_chain[1]["record_hash"] = json!(flipped);
+        let (tampered_report, _) = run_export_validations(&tampered);
+        assert!(
+            !tampered_report.chain_continuity_ok,
+            "tampering a record_hash must still be detected"
+        );
     }
 }
