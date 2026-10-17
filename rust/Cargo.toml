@@ -75,7 +75,7 @@ urlencoding = "2.1"
 ed25519-dalek = { version = "3", features = ["pkcs8"] }
 governor = "0.10.4"
 rand = "0.10.1"
-zip = "8.6"
+zip = "9.0"
 
 [dev-dependencies]
 hmac = "0.13.0"
