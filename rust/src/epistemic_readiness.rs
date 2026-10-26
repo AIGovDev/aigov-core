@@ -130,6 +130,8 @@ pub struct EpistemicReadiness {
     pub continuity_validation: KnowledgeContinuityValidation,
     /// Derived trace verification plan for external audit review.
     pub trace_verification_plan: Value,
+    /// Advisory model-call inventory; it does not change governance verdicts.
+    pub provider_trace: Value,
 }
 
 /// Optional signals from bundle verification (offline export bundle checks).
@@ -226,11 +228,51 @@ pub fn evaluate_epistemic_readiness_from_export(
         gap_report,
         continuity_validation,
         trace_verification_plan: json!({}),
+        provider_trace: provider_trace_summary(export),
     };
     let trace_plan =
         build_trace_verification_plan_from_readiness(export, &readiness, &requirements);
     readiness.trace_verification_plan = trace_verification_plan_to_json(&trace_plan);
     readiness
+}
+
+fn provider_trace_summary(export: &Value) -> Value {
+    let null = Value::Null;
+    let events = export.get("evidence_events").and_then(Value::as_array);
+    let invocations: Vec<&Value> = events.into_iter().flatten().filter(|ev|
+        ev.get("event_type").and_then(Value::as_str) == Some("model_invocation_recorded")
+    ).collect();
+    let mut profiles = serde_json::Map::new();
+    let mut unknown_metadata = 0usize;
+    let mut unavailable_artifacts = 0usize;
+    let mut digest_only = 0usize;
+    let mut identities: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = std::collections::BTreeMap::new();
+    for ev in &invocations {
+        let payload = ev.get("payload").unwrap_or(&null);
+        let provider = payload.get("provider").unwrap_or(&null);
+        let value = |key: &str| provider.get(key).and_then(Value::as_str).unwrap_or("unknown");
+        let profile = payload.get("capture").and_then(|c| c.get("profile")).and_then(Value::as_str).unwrap_or("unknown");
+        let profile_count = profiles.get(profile).and_then(Value::as_u64).unwrap_or(0) + 1;
+        profiles.insert(profile.to_string(), json!(profile_count));
+        if profile == "digest_only" { digest_only += 1; }
+        let determinism_unknown = provider.get("determinism").and_then(|d| d.get("status")).and_then(Value::as_str).unwrap_or("unknown") == "unknown";
+        if determinism_unknown || ["name", "endpoint", "requested_model", "reported_model", "api_version", "backend_fingerprint", "provider_request_id"].iter().any(|k| value(k) == "unknown") { unknown_metadata += 1; }
+        let key = format!("{}|{}", value("name"), value("requested_model"));
+        if value("backend_fingerprint") != "unknown" { identities.entry(key).or_default().insert(value("backend_fingerprint").to_string()); }
+        for direction in ["request", "response"] {
+            if let Some(artifact) = payload.get("capture").and_then(|c| c.get(direction)) {
+                if matches!(artifact.get("availability").and_then(Value::as_str), Some("expired" | "inaccessible" | "unknown")) { unavailable_artifacts += 1; }
+            }
+        }
+    }
+    let backend_fingerprint_changes = identities.values().filter(|set| set.len() > 1).count();
+    json!({"invocation_count": invocations.len(), "capture_profiles": profiles,
+           "invocations_with_unknown_provider_metadata": unknown_metadata,
+           "digest_only_artifact_count": digest_only,
+           "unavailable_or_unknown_artifact_count": unavailable_artifacts,
+           "requested_model_identities_with_backend_fingerprint_changes": backend_fingerprint_changes,
+           "provider_reexecution_is_not_historical_replay": true,
+           "artifact_bytes_fetched_during_readiness": false})
 }
 
 pub fn epistemic_readiness_to_json(report: &EpistemicReadiness) -> Value {
@@ -1369,5 +1411,21 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .starts_with("sha256:"));
+    }
+
+    #[test]
+    fn provider_trace_summary_reports_unknowns_fingerprint_drift_and_digest_limits() {
+        let export = json!({"evidence_events":[
+            {"event_type":"model_invocation_recorded","payload":{"provider":{"name":"p","requested_model":"m","reported_model":"m","endpoint":"https://p.test","api_version":"v1","backend_fingerprint":"rev-1","provider_request_id":"r1","determinism":{"status":"guaranteed"}},"capture":{"profile":"digest_only","request":{"availability":"retained"},"response":{"availability":"retained"}}}},
+            {"event_type":"model_invocation_recorded","payload":{"provider":{"name":"p","requested_model":"m","reported_model":"m","endpoint":"https://p.test","api_version":"v1","backend_fingerprint":"rev-2","provider_request_id":"r2","determinism":{"status":"not_guaranteed"}},"capture":{"profile":"full","request":{"availability":"expired"},"response":{"availability":"retained"}}}},
+            {"event_type":"model_invocation_recorded","payload":{"provider":{"name":"unknown","requested_model":"unknown","backend_fingerprint":"unknown"},"capture":{"profile":"redacted","request":{"availability":"unknown"},"response":{"availability":"inaccessible"}}}}
+        ]});
+        let summary = provider_trace_summary(&export);
+        assert_eq!(summary["invocation_count"], json!(3));
+        assert_eq!(summary["digest_only_artifact_count"], json!(1));
+        assert_eq!(summary["requested_model_identities_with_backend_fingerprint_changes"], json!(1));
+        assert_eq!(summary["invocations_with_unknown_provider_metadata"], json!(1));
+        assert_eq!(summary["unavailable_or_unknown_artifact_count"], json!(3));
+        assert_eq!(summary["artifact_bytes_fetched_during_readiness"], json!(false));
     }
 }

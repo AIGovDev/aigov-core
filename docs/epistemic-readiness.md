@@ -71,5 +71,12 @@ Readiness gaps (sorted, deterministic) include:
 ## Non-goals
 
 - No mutable knowledge graph
-- No model understanding or prompt retention
+- No claim to model understanding, hidden chain-of-thought, or guaranteed generation replay
+
+Decision-time invocation capture is available as ordinary evidence events; operators
+choose `full`, `redacted`, or `digest_only` capture explicitly. This is separate from
+the governance eligibility verdict. When a request or response is retained only as a
+digest, its content cannot be reconstructed. See
+[decision-time traces](runtime/decision-time-traces.md) for storage, redaction, and
+retention operations.
 - No second source of truth — ledger and export evidence remain canonical

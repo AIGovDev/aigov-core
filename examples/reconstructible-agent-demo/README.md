@@ -35,7 +35,7 @@ python3 examples/reconstructible-agent-demo/run_demo.py
 
 | Component | Mode |
 |-----------|------|
-| User prompt, reasoning text, tool result | Mocked (no external LLM) |
+| Provider call, request/response, reasoning text, tool result | Mocked (no external LLM). The invocation uses the provider-neutral event contract and digest-only capture; provider/backend identity and determinism are explicitly unknown. |
 | Evidence ingest, summary, export, verify | Live `aigov_audit` |
 
 ## Replay viewer

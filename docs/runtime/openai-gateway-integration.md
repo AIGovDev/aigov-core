@@ -18,4 +18,5 @@ The audit service still validates `event_type` and payload per **deployed policy
 ## Related
 
 - [Python SDK](python-sdk.md)
+- [Decision-time traces](decision-time-traces.md)
 - [Deployment guidance](deployment-guidance.md)

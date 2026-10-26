@@ -14,6 +14,7 @@ pub mod policy_engine;
 pub mod policy_signing;
 pub mod policy_store;
 pub mod schema;
+pub mod decision_trace;
 pub mod verify_chain;
 pub mod projection;
 
