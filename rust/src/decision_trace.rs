@@ -20,7 +20,7 @@ pub fn validate_trace_event(event: &EvidenceEvent, prior_events: &[EvidenceEvent
             if prior_events.iter().any(|prior| prior.event_type == INVOCATION_TYPE && prior.payload.get("invocation_id").and_then(Value::as_str) == Some(id)) {
                 return Err("invocation_id must be unique within the run".into());
             }
-            validate_invocation(&event.payload)
+            validate_invocation(&event.payload, prior_events)
         }
         REASONING_TYPE => validate_reasoning(event, prior_events),
         LINKS_TYPE => validate_links(event, prior_events),
@@ -51,7 +51,7 @@ fn validate_links(event: &EvidenceEvent, prior: &[EvidenceEvent]) -> Result<(), 
     Ok(())
 }
 
-fn validate_invocation(p: &Value) -> Result<(), String> {
+fn validate_invocation(p: &Value, prior_events: &[EvidenceEvent]) -> Result<(), String> {
     require(p, "schema_version", "aigov.model_invocation.v1")?;
     nonempty(p, "invocation_id")?;
     if let Some(outcome) = p.get("outcome").and_then(Value::as_str) {
