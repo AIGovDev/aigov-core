@@ -312,13 +312,17 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn validate_invocation(p: &Value) -> Result<(), String> {
+        super::validate_invocation(p, &[])
+    }
+
     fn base(event_type: &str, payload: Value) -> EvidenceEvent {
         EvidenceEvent { event_id:"e1".into(), event_type:event_type.into(), ts_utc:"2026-01-01T00:00:00Z".into(), actor:"test".into(), system:"test".into(), run_id:"r1".into(), environment:None, payload, parent_run_id:None, root_run_id:None, delegated_from_event_id:None, agent_id:None, agent_role:None, delegation_reason:None }
     }
     fn inv(profile:&str) -> Value {
         let content=json!({"messages":[{"role":"user","content":"review"}]});
         let digest=format!("{:x}", Sha256::digest(canonical_json(&content)));
-        let artifact=|content:Option<Value>| { let mut a=json!({"sha256":digest,"availability":"retained"}); if let Some(c)=content { a["content"]=c; } else { a["artifact_ref"]="s3://audit/run/request.json".into(); } if profile=="redacted" {a["redacted"]=true;} if profile=="digest_only" {a.as_object_mut().unwrap().remove("artifact_ref");} a };
+        let artifact=|content:Option<Value>| { let mut a=json!({"sha256":digest,"availability":"retained"}); if let Some(c)=content { a["content"]=c; } else { a["artifact_ref"]="s3://audit/run/request.json".into(); } if profile=="redacted" {a["redacted"]=Value::Bool(true);} if profile=="digest_only" {a.as_object_mut().unwrap().remove("artifact_ref");} a };
         json!({"schema_version":"aigov.model_invocation.v1","invocation_id":"i1","provider":{"name":"example","endpoint":"https://api.example.test/v1/responses","requested_model":"model-x","reported_model":"model-x-2026-10-24","api_version":"2026-10-01","backend_fingerprint":"rev-42","provider_request_id":"req-1","determinism":{"status":"unknown","source":"unknown"}},"generation":{"temperature":0,"seed":7},"capture":{"profile":profile,"request":artifact(if profile=="full" {Some(content.clone())} else {None}),"response":artifact(None)}})
     }
     #[test] fn invocation_capture_profiles_and_unknown_identity_validate() {
