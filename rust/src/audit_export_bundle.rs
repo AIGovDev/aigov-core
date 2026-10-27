@@ -97,7 +97,10 @@ pub fn read_zip_entries(zip_bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, S
         let mut file = archive
             .by_index(i)
             .map_err(|e| format!("zip entry {i}: {e}"))?;
-        let name = normalize_zip_path(file.name());
+        let name = file
+            .name()
+            .map_err(|e| format!("zip entry {i} name: {e}"))?;
+        let name = normalize_zip_path(&name);
         if name.is_empty() {
             continue;
         }
