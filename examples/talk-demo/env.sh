@@ -12,4 +12,10 @@ export AIGOV_POLICY_DIR="$REPO_ROOT/rust"
 export GOVAI_AUDIT_BASE_URL="http://127.0.0.1:8088"
 export GOVAI_PROJECT="ai-tinkerers-demo"
 
+# Demo-only Ed25519 keypair for signing exported audit bundles (Beat C-extra).
+# Not a secret: this is a throwaway local-dev signer, not used anywhere real.
+export GOVAI_DEMO_ISSUER_ID="ai-tinkerers-demo"
+export GOVAI_DEMO_SIGNING_SEED_HEX="d8cc4107d166accf57ebc54cd791934d1ebcbf1c216b548d1e5500a220975906"
+export GOVAI_DEMO_SIGNING_PUBKEY_B64="YPzPMWSjUmZNGmKMbW6FRK1vEefYZfXFrZFdmq/5ZiY="
+
 mkdir -p "$GOVAI_LEDGER_DIR"

@@ -48,6 +48,19 @@ Trace-derived or Postgres workflow verdicts are **not** used on this route.
 
 Returns schema `aigov.audit_export.v1` (see [schemas/aigov.audit_export.v1.schema.json](schemas/aigov.audit_export.v1.schema.json)). Event ordering is deterministic. CI validates example exports against the JSON Schema.
 
+## Decision-time trace evidence (`POST /evidence`)
+
+The endpoint accepts the backward-compatible generic `EvidenceEvent` envelope.
+It validates and appends `model_invocation_recorded` and
+`decision_reasoning_recorded` events, plus `decision_trace_links_recorded` events
+for actions or endorsements appended later. These records are included in ordinary
+audit exports and hash-chain checks. They do not change the governance verdict.
+The offline epistemic-readiness report includes an advisory `provider_trace` summary
+with invocation counts, capture profiles, unknown metadata, changed backend
+fingerprints under a stable requested model identity, and unavailable artifacts.
+It does not fetch artifact bytes or re-execute providers; a digest-only record cannot
+reconstruct request/response content. See [decision-time trace operations](runtime/decision-time-traces.md).
+
 ## Readiness (`GET /ready`)
 
 Checks may include:

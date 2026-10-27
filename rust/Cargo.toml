@@ -38,6 +38,18 @@ path = "src/bin/lineage_graph_once.rs"
 name = "verify_audit_export_bundle_once"
 path = "src/bin/verify_audit_export_bundle_once.rs"
 
+[[bin]]
+name = "sign_audit_export_once"
+path = "src/bin/sign_audit_export_once.rs"
+
+[[bin]]
+name = "verify_audit_export_signature_once"
+path = "src/bin/verify_audit_export_signature_once.rs"
+
+[[bin]]
+name = "signing_pubkey_from_seed_once"
+path = "src/bin/signing_pubkey_from_seed_once.rs"
+
 [dependencies]
 axum = "0.8.9"
 tokio = { version = "1", features = ["full"] }
@@ -63,7 +75,7 @@ urlencoding = "2.1"
 ed25519-dalek = { version = "3", features = ["pkcs8"] }
 governor = "0.10.4"
 rand = "0.10.1"
-zip = "8.6"
+zip = "9.0"
 
 [dev-dependencies]
 hmac = "0.13.0"

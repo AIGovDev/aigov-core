@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from lifecycle import (  # noqa: E402
     risk_recorded,
     risk_reviewed,
 )
+from aigov_py.runtime.decision_trace import captured_artifact, decision_reasoning_event, decision_trace_links_event, model_invocation_event  # noqa: E402
 
 # Mocked agent I/O (no external LLM API).
 MOCK_USER_REQUEST = "Should we approve deploying the retention-policy assistant to production?"
@@ -57,7 +59,36 @@ def _base(run_id: str, event_id: str, event_type: str, ts: str, payload: dict) -
 def agent_trace_events(run_id: str) -> list[dict]:
     tool_call_id = f"{run_id}-tool-call"
     tool_output_id = f"{run_id}-tool-output"
+    request = {"input": MOCK_USER_REQUEST, "tools": ["search_knowledge_base"], "temperature": 0}
+    response = {"output_text": "Search the policy corpus and require human approval before promotion.", "tool_call": "search_knowledge_base"}
+    invocation = model_invocation_event(
+        event_id=f"{run_id}-invocation", ts_utc="2026-05-01T10:00:00Z",
+        actor="reconstructible-agent-demo", system="aigov-core-examples", run_id=run_id,
+        invocation_id=f"{run_id}-invocation-1",
+        provider={"name": "mock-provider (simulated)", "endpoint": "mock://responses", "requested_model": "demo-agent-model", "reported_model": "demo-agent-model", "api_version": "not_applicable", "backend_fingerprint": "unknown", "provider_request_id": "unknown", "determinism": {"status": "unknown", "source": "unknown"}},
+        generation={"temperature": 0, "seed": None}, capture_profile="digest_only",
+        decision_context={
+            "prompt_template": {"version": "demo-planner-v1", "sha256": hashlib.sha256(b"demo-planner-template-v1").hexdigest()},
+            "tool_schemas": [{"name": "search_knowledge_base", "version": "1", "sha256": hashlib.sha256(b"search_knowledge_base-schema-v1").hexdigest()}],
+            "retrieval_snapshot_refs": [], "policy_version": "govai.runtime.agent-tool-use.dev",
+            "application_revision": "unknown", "runtime_version": "unknown",
+        },
+        request=captured_artifact(profile="digest_only", content=request),
+        response=captured_artifact(profile="digest_only", content=response),
+    ).to_wire_dict()
+    reasoning = decision_reasoning_event(
+        event_id=f"{run_id}-decision-reasoning", ts_utc="2026-05-01T10:00:04Z",
+        actor="reconstructible-agent-demo", system="aigov-core-examples", run_id=run_id,
+        decision_id=f"{run_id}-decision", step_id="tool-selection", reasoning_type="action_selection",
+        source="runtime", rationale="The retrieved policy clauses require human approval, so the agent searches the policy corpus and pauses before promotion.",
+        evidence_refs=[{"event_id": f"{run_id}-invocation", "kind": "model_invocation"}, {"event_id": f"{run_id}-tool-output", "kind": "tool_result"}],
+        source_event_ids=[f"{run_id}-invocation", f"{run_id}-user-request", f"{run_id}-tool-output"],
+        claims=[{"claim": "Human approval is required before promotion.", "source_event_ids": [f"{run_id}-tool-output"]}],
+        reliance=[{"source_event_id": f"{run_id}-tool-output", "use": "selected a human approval gate"}],
+        action_event_ids=[tool_call_id],
+    ).to_wire_dict()
     return [
+        invocation,
         _base(
             run_id,
             f"{run_id}-user-request",
@@ -105,6 +136,7 @@ def agent_trace_events(run_id: str) -> list[dict]:
                 "result_preview": MOCK_TOOL_RESULT,
             },
         ),
+        reasoning,
         _base(
             run_id,
             f"{run_id}-policy-eval",
@@ -156,7 +188,13 @@ def approval_and_promotion(run_id: str) -> list[dict]:
     promote["actor"] = "reconstructible-agent-demo"
     promote["system"] = "aigov-core-examples"
     promote["ts_utc"] = "2026-05-01T10:00:10Z"
-    return [human, promote]
+    links = decision_trace_links_event(
+        event_id=f"{run_id}-decision-trace-links", ts_utc="2026-05-01T10:00:11Z",
+        actor="reconstructible-agent-demo", system="aigov-core-examples", run_id=run_id,
+        decision_id=f"{run_id}-decision", reasoning_event_id=f"{run_id}-decision-reasoning",
+        action_event_ids=[f"{run_id}-tool-call"], human_endorsement_event_ids=[human["event_id"]],
+    ).to_wire_dict()
+    return [human, promote, links]
 
 
 def verdict_from_summary(summary: dict) -> str:

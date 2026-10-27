@@ -11,6 +11,7 @@ This folder documents how to **embed** those calls from production AI applicatio
 - [LangChain integration](langchain-integration.md) — stdlib hooks you wire into callbacks.
 - [OpenAI gateway integration](openai-gateway-integration.md) — routing metadata merged into payloads.
 - [Runtime policy patterns](runtime-policy-patterns.md) — aligning local controls with hosted policy.
+- [Decision-time traces](decision-time-traces.md) — provider-neutral invocation capture, concise rationale, and artifact retention.
 - [Error handling](error-handling.md) — typed exceptions and HTTP edge cases.
 - [Deployment guidance](deployment-guidance.md) — base URLs, keys, and safe rollout.
 
