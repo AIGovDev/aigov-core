@@ -280,6 +280,10 @@ async fn post_evidence(
         return policy_violation_response(&policy_version, &e);
     }
 
+    if let Err(e) = crate::decision_trace::validate_trace_event(&event, &existing) {
+        return policy_violation_response(&policy_version, &format!("policy_violation: invalid_decision_trace {e}"));
+    }
+
     let ledger_view = FileLedgerView::new(&log_path);
     if let Err(v) = st.policy_store.enforce_ingest_for_request(&tenant_id, &event, &ledger_view) {
         return policy_violation_response(&policy_version, &v.to_string());

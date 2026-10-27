@@ -481,6 +481,60 @@ async fn runtime_ingest_projection_verdict_export_suite() {
     assert!(replay_report.events_content_sha256_ok);
     assert_eq!(replay_events.len(), golden_path_valid_events(run_id).len());
     assert!(export_for_replay.get("lineage").is_some());
+
+    // Provider-neutral invocation evidence survives export and does not change
+    // deterministic governance replay when the provider reports a new backend.
+    let run_id = "decision-trace-run";
+    ingest_all(&app, &golden_path_valid_events(run_id), "tenant-a-key").await;
+    let source = json!({"event_id":"trace-source","event_type":"user_request","ts_utc":"2026-01-01T00:00:08Z","actor":"test","system":"test","run_id":run_id,"payload":{"request_id":"req-1"}});
+    let (status, _) = send(&app, "POST", "/evidence", Some(&source), "tenant-a-key").await;
+    assert_eq!(status, StatusCode::OK);
+    let invocation = |event_id: &str, invocation_id: &str, fingerprint: &str| json!({
+        "event_id":event_id,"event_type":"model_invocation_recorded","ts_utc":"2026-01-01T00:00:09Z","actor":"test","system":"test","run_id":run_id,
+        "payload":{"schema_version":"aigov.model_invocation.v1","invocation_id":invocation_id,
+            "provider":{"name":"provider-x","endpoint":"https://provider.example/v1/responses","requested_model":"model-x","reported_model":"model-x","api_version":"v1","backend_fingerprint":fingerprint,"provider_request_id":"unknown","determinism":{"status":"unknown","source":"unknown"}},
+            "generation":{"temperature":0,"seed":7},"capture":{"profile":"digest_only","request":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","availability":"retained"},"response":{"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","availability":"retained"}}}
+    });
+    for (i, fp) in [("i1", "backend-a"), ("i2", "backend-b")] {
+        let ev = invocation(&format!("trace-{i}"), i, fp);
+        let (status, body) = send(&app, "POST", "/evidence", Some(&ev), "tenant-a-key").await;
+        assert_eq!(status, StatusCode::OK, "valid invocation rejected: {body}");
+    }
+    let rationale = json!({"event_id":"trace-rationale","event_type":"decision_reasoning_recorded","ts_utc":"2026-01-01T00:00:10Z","actor":"test","system":"test","run_id":run_id,
+        "payload":{"schema_version":"aigov.decision_reasoning.v1","run_id":run_id,"decision_id":"decision-1","step_id":"step-1","reasoning_type":"action_selection","source":"runtime","rationale_status":"available","rationale":"The recorded policy evidence requires a human approval gate.","representation":"concise_rationale","evidence_refs":[{"event_id":"trace-source"}],"source_event_ids":["trace-source","trace-i2"],"claims":[{"claim":"human approval required","source_event_ids":["trace-source"]}],"reliance":[{"source_event_id":"trace-source","use":"selected approval gate"}],"action_event_ids":[format!("{run_id}-promote")],"human_endorsement_event_ids":[format!("{run_id}-human")]}});
+    let (status, body) = send(&app, "POST", "/evidence", Some(&rationale), "tenant-a-key").await;
+    assert_eq!(status, StatusCode::OK, "valid reasoning rejected: {body}");
+    let mut malformed = rationale.clone(); malformed["event_id"] = "bad-ref".into(); malformed["payload"]["source_event_ids"][0] = "missing-event".into();
+    let (status, _) = send(&app, "POST", "/evidence", Some(&malformed), "tenant-a-key").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let mut missing_provider = invocation("bad-provider", "i3", "backend-c"); missing_provider["payload"]["provider"].as_object_mut().unwrap().remove("name");
+    let (status, _) = send(&app, "POST", "/evidence", Some(&missing_provider), "tenant-a-key").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let links = json!({"event_id":"trace-links","event_type":"decision_trace_links_recorded","ts_utc":"2026-01-01T00:00:11Z","actor":"test","system":"test","run_id":run_id,
+        "payload":{"schema_version":"aigov.decision_trace_links.v1","run_id":run_id,"decision_id":"decision-1","reasoning_event_id":"trace-rationale","action_event_ids":[format!("{run_id}-promote")],"human_endorsement_event_ids":[format!("{run_id}-human")]}});
+    let (status, body) = send(&app, "POST", "/evidence", Some(&links), "tenant-a-key").await;
+    assert_eq!(status, StatusCode::OK, "valid late trace links rejected: {body}");
+
+    let (_, trace_export) = send(&app, "GET", &format!("/api/export/{run_id}"), None, "tenant-a-key").await;
+    let events = trace_export["evidence_events"].as_array().unwrap();
+    let invocations: Vec<_> = events.iter().filter(|e| e["event_type"] == "model_invocation_recorded").collect();
+    assert_eq!(invocations.len(), 2);
+    assert_eq!(invocations[0]["payload"]["provider"]["requested_model"], invocations[1]["payload"]["provider"]["requested_model"]);
+    assert_ne!(invocations[0]["payload"]["provider"]["backend_fingerprint"], invocations[1]["payload"]["provider"]["backend_fingerprint"]);
+    let (first_replay, _) = aigov_audit::replay_validation::run_export_validations(&trace_export);
+    let (second_replay, _) = aigov_audit::replay_validation::run_export_validations(&trace_export);
+    assert!(first_replay.is_ok(), "trace export replay failed: {:?}", first_replay.errors);
+    assert_eq!(first_replay.events_content_sha256_ok, second_replay.events_content_sha256_ok);
+    let governance_first = aigov_audit::replay_engine::replay_audit_export_v1(&trace_export, &aigov_audit::policy_config::PolicyConfig::default());
+    let governance_second = aigov_audit::replay_engine::replay_audit_export_v1(&trace_export, &aigov_audit::policy_config::PolicyConfig::default());
+    assert!(governance_first.ok, "offline governance replay failed: {:?}", governance_first.validation.errors);
+    assert_eq!(governance_first.determinism_digest, governance_second.determinism_digest);
+    let mut tampered = trace_export.clone();
+    let idx = tampered["evidence_events"].as_array().unwrap().iter().position(|e| e["event_type"] == "model_invocation_recorded").unwrap();
+    tampered["evidence_events"][idx]["payload"]["provider"]["backend_fingerprint"] = "tampered".into();
+    let (tamper_report, _) = aigov_audit::replay_validation::run_export_validations(&tampered);
+    assert!(!tamper_report.is_ok(), "tampered exported trace must fail integrity validation");
 }
 
 fn count_ledger_lines(path: &std::path::Path) -> usize {

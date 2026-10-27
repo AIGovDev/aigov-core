@@ -571,9 +571,131 @@ components:
           type: string
           description: Optional on ingest; server may stamp/replace per deployment tier.
         payload:
-          description: Event-specific JSON object (`rust/src/policy.rs` enforced types).
+          description: >-
+            Event-specific JSON object (`rust/src/policy.rs` enforced types).
+            `model_invocation_recorded`, `decision_reasoning_recorded`, and
+            `decision_trace_links_recorded` use the provider-neutral contracts below.
           type: object
           additionalProperties: true
+
+    ModelInvocationEvidence:
+      type: object
+      description: >-
+        Payload contract for event_type=model_invocation_recorded. Provider
+        identity values unavailable at call time must be the literal "unknown";
+        do not infer provider backend state. See docs/runtime/decision-time-traces.md.
+      required: [schema_version, invocation_id, provider, capture]
+      properties:
+        schema_version: {type: string, enum: [aigov.model_invocation.v1]}
+        invocation_id: {type: string, minLength: 1}
+        outcome: {type: string, enum: [succeeded, failed], description: Failed calls retain a failure type but not arbitrary exception messages.}
+        provider:
+          type: object
+          required: [name, endpoint, requested_model, reported_model, api_version, backend_fingerprint, provider_request_id, determinism]
+          properties:
+            name: {type: string, description: Provider name or explicit "unknown".}
+            endpoint: {type: string, description: Endpoint identifier or explicit "unknown"; omit credentials and query secrets.}
+            requested_model: {type: string}
+            reported_model: {type: string, description: Provider-reported deployment/model identity or "unknown".}
+            api_version: {type: string}
+            backend_fingerprint: {type: string, description: Provider fingerprint/revision or "unknown" when exposed.}
+            provider_request_id: {type: string, description: Provider request ID or "unknown".}
+            determinism:
+              type: object
+              required: [status, source]
+              properties:
+                status: {type: string, enum: [guaranteed, not_guaranteed, unknown]}
+                source: {type: string, enum: [provider_reported, unknown]}
+                detail: {type: string}
+        generation:
+          type: object
+          description: Requested parameters and seed, when available.
+          additionalProperties: true
+        decision_context:
+          type: object
+          description: >-
+            Optional version/digest pins for prompt templates, tool schemas,
+            retrieval snapshots, policy, application, and runtime. Store identifiers
+            and hashes here, not additional prompt text or secrets.
+          properties:
+            prompt_template:
+              type: object
+              required: [version, sha256]
+              properties:
+                version: {type: string}
+                sha256: {type: string, pattern: "^[A-Fa-f0-9]{64}$"}
+            tool_schemas:
+              type: array
+              items:
+                type: object
+                required: [name, version, sha256]
+                properties:
+                  name: {type: string}
+                  version: {type: string}
+                  sha256: {type: string, pattern: "^[A-Fa-f0-9]{64}$"}
+            retrieval_snapshot_refs:
+              type: array
+              items: {type: object, additionalProperties: true}
+            policy_version: {type: string}
+            application_revision: {type: string}
+            runtime_version: {type: string}
+        capture:
+          type: object
+          required: [profile, request, response]
+          properties:
+            profile: {type: string, enum: [full, redacted, digest_only]}
+            request: {$ref: "#/components/schemas/CapturedArtifact"}
+            response: {$ref: "#/components/schemas/CapturedArtifact"}
+
+    CapturedArtifact:
+      type: object
+      required: [sha256, availability]
+      properties:
+        sha256: {type: string, pattern: "^[A-Fa-f0-9]{64}$"}
+        availability: {type: string, enum: [retained, expired, inaccessible, unknown]}
+        artifact_ref: {type: string, description: Access-controlled reference for external artifact bytes.}
+        content: {description: Inline captured request/response JSON; avoid for sensitive or large content.}
+        redacted: {type: boolean}
+      description: >-
+        full/redacted capture requires content or artifact_ref. digest_only contains
+        no content/reference and cannot reconstruct the request or response.
+
+    DecisionReasoningEvidence:
+      type: object
+      description: >-
+        Payload contract for event_type=decision_reasoning_recorded. Rationale is a
+        concise decision explanation, not a verbatim hidden chain-of-thought record.
+      required: [schema_version, run_id, decision_id, step_id, reasoning_type, source, rationale_status, rationale, representation, evidence_refs, source_event_ids, claims, reliance, action_event_ids, human_endorsement_event_ids]
+      properties:
+        schema_version: {type: string, enum: [aigov.decision_reasoning.v1]}
+        run_id: {type: string}
+        decision_id: {type: string}
+        step_id: {type: string}
+        reasoning_type: {type: string, enum: [planning, evidence_assessment, policy_application, action_selection, other]}
+        source: {type: string, enum: [runtime, model_provided, human]}
+        rationale_status: {type: string, enum: [available, unavailable, unknown]}
+        rationale: {type: string, maxLength: 2000}
+        representation: {type: string, enum: [concise_rationale]}
+        evidence_refs: {type: array, items: {type: object, additionalProperties: true}}
+        source_event_ids: {type: array, items: {type: string}}
+        claims: {type: array, items: {type: object, additionalProperties: true}}
+        reliance: {type: array, items: {type: object, additionalProperties: true}}
+        action_event_ids: {type: array, items: {type: string}}
+        human_endorsement_event_ids: {type: array, items: {type: string}}
+
+    DecisionTraceLinksEvidence:
+      type: object
+      description: >-
+        Append after resulting actions or human endorsements exist. This supports
+        append-only ordering without predicting future event IDs.
+      required: [schema_version, run_id, decision_id, reasoning_event_id, action_event_ids, human_endorsement_event_ids]
+      properties:
+        schema_version: {type: string, enum: [aigov.decision_trace_links.v1]}
+        run_id: {type: string}
+        decision_id: {type: string}
+        reasoning_event_id: {type: string}
+        action_event_ids: {type: array, items: {type: string}}
+        human_endorsement_event_ids: {type: array, items: {type: string}}
 
     EvidenceIngestSuccess:
       type: object

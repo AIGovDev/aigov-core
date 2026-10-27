@@ -4,6 +4,21 @@ The package **`aigov_py.runtime`** exposes a small, typed surface for:
 
 - **`POST /evidence`** via [`RuntimeGovernanceClient.submit_evidence`](../../python/aigov_py/runtime/client.py)
 - **`GET /compliance-summary`** via [`RuntimeGovernanceClient.get_compliance_summary`](../../python/aigov_py/runtime/client.py)
+- Provider-neutral evidence builders and helpers: `invoke_and_record`,
+  `model_invocation_event`, `decision_reasoning_event`,
+  `decision_trace_links_event`, `captured_artifact`, and `verify_captured_artifact`.
+
+For the event fields, capture profiles, reference handling, and limits, see
+[Decision-time traces](decision-time-traces.md). These helpers do not intercept
+provider traffic automatically. `invoke_and_record` wraps the actual callable and
+returns its real response plus a trace event; the integration supplies serializers
+and a metadata extractor. Optional `decision_context` pins prompt/tool versions,
+retrieval references, policy, application revision, and runtime version. Artifact
+bytes can be sent to an operator-owned store via
+an `artifact_writer` callback and checked later through `verify_captured_artifact`.
+Use `decision_trace_links_event` after action and endorsement events are appended.
+If the provider call fails, `ProviderInvocationError.evidence_event` carries a
+failure invocation record for submission; its error message is intentionally omitted.
 
 ## Design principles
 

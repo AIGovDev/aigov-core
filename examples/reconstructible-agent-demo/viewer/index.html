@@ -210,7 +210,7 @@
     }
 
     function renderMermaid(events, verdict) {
-      const lines = ["flowchart TD", "  U[user_request] --> R[model_reasoning]", "  R --> TC[tool_call]", "  TC --> TO[tool_output]", "  TO --> PE[policy_evaluation]", "  PE --> D[ai_decision_completed]"];
+      const lines = ["flowchart TD", "  U[user_request] --> I[model_invocation_recorded]", "  I --> R[model_reasoning]", "  R --> TC[tool_call]", "  TC --> TO[tool_output]", "  TO --> DR[decision_reasoning_recorded]", "  DR --> PE[policy_evaluation]", "  PE --> D[ai_decision_completed]"];
       const hasApproval = events.some((e) => e.event_type === "human_approved");
       if (hasApproval) lines.push("  D --> HA[human_approved]", "  HA --> MP[model_promoted]");
       lines.push(`  MP --> V["verdict: ${verdict || "unknown"}"]`);

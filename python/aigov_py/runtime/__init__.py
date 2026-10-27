@@ -23,6 +23,15 @@ from aigov_py.runtime.models import (
     EvidenceEvent,
     EvidenceIngestResult,
 )
+from aigov_py.runtime.decision_trace import (
+    captured_artifact,
+    decision_reasoning_event,
+    model_invocation_event,
+    decision_trace_links_event,
+    invoke_and_record,
+    verify_captured_artifact,
+    ProviderInvocationError,
+)
 
 __all__ = [
     "ComplianceSummary",
@@ -40,4 +49,11 @@ __all__ = [
     "TransportError",
     "ValidationError",
     "compliance_summary_url",
+    "captured_artifact",
+    "decision_reasoning_event",
+    "model_invocation_event",
+    "decision_trace_links_event",
+    "invoke_and_record",
+    "verify_captured_artifact",
+    "ProviderInvocationError",
 ]
