@@ -11,6 +11,8 @@ This Dependabot update keeps Tokio 1.53.3 and replaces vulnerable ZIP 8.6.0 with
 | `rust/Cargo.toml` | Requires ZIP 9.x. |
 | `rust/Cargo.lock` | Locks Tokio 1.53.3, ZIP 9.0.5, and patched transitive dependencies. |
 | `rust/src/audit_export_bundle.rs` | Propagates ZIP entry-name decoding errors before normalizing paths. |
+| `tests/downstream-consumption/rust-consumer/Cargo.lock` | Retains both `webpki-roots 0.26.11` and patched `1.0.10` entries for the compatibility alias. |
+| `.github/workflows/govai-ci.yml` | Keeps downstream Cargo validation locked with `--locked`. |
 
 ## Security findings addressed
 
@@ -31,7 +33,8 @@ Status: pending CI.
 
 Evidence:
 - The dependency lockfile retains all resolved package variants and updates references to the patched webpki-roots release.
-- CI must confirm locked builds and the supply-chain audit before this remediation is considered complete.
+- The downstream lockfile initially omitted `webpki-roots 0.26.11`, an alias package that still resolves to patched `1.0.10`; restoring the generated entry made the downstream `cargo test --locked` smoke pass.
+- Final CI must confirm the remediation and supply-chain audit before this report is marked complete.
 
 ## Human approval gate
 

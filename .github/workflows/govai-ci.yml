@@ -53,8 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           cd tests/downstream-consumption/rust-consumer
-          cargo test
-          git diff -- Cargo.lock
+          cargo test --locked
 
       - name: Downstream Python consumption smoke
         run: |
