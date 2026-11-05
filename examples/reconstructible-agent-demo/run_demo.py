@@ -270,6 +270,8 @@ def print_plan(run_id: str) -> None:
         "12. Audit export download → exports/<run_id>.json",
         "13. Verify endpoint",
         "14. Open viewer/index.html with saved export",
+        "15. Offline deterministic replay (exported verdict must match)",
+        "16. Offline epistemic readiness (policy archive unavailable)",
     ]
     print("Reconstructible agent demo (AIGov Core runtime routes only).")
     print(f"base_url={env_config()['base']} run_id={run_id}")
