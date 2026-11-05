@@ -144,6 +144,13 @@ def main() -> int:
         for route in ("/compliance-summary", "/api/export", "/verify"):
             if route not in demo_text:
                 failures.append(f"run_demo.py: missing reference to mounted route {route}")
+        for offline_check in ("replay_audit_export", "epistemic_readiness_from_export"):
+            if offline_check not in demo_text:
+                failures.append(f"run_demo.py: missing offline evaluation {offline_check}")
+        if 'os.environ.pop("GOVAI_POLICY_ARTIFACT_AVAILABLE", None)' not in demo_text:
+            failures.append("run_demo.py: offline readiness must not inherit the live policy-artifact signal")
+        if "offline-readiness.json" not in demo_text:
+            failures.append("run_demo.py: must save the offline readiness report beside the export")
 
     viewer = DEMO_DIR / "viewer/index.html"
     if viewer.is_file():
@@ -174,7 +181,12 @@ def main() -> int:
     report = ROOT / "docs/reports/reconstructible-agent-demo.md"
     if report.is_file():
         report_text = report.read_text(encoding="utf-8")
-        for heading in ("## Evaluation gate", "## Human approval gate", "## Replay semantics", "## Verification"):
+        for heading in (
+            "## Evaluation gate",
+            "## Human approval gate",
+            "## Offline replay and readiness",
+            "## Verification",
+        ):
             if heading not in report_text:
                 failures.append(f"docs/reports/reconstructible-agent-demo.md: missing {heading}")
 
