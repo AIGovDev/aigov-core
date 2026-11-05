@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DEMO = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT / "examples/reference-runtime-common"))
+sys.path.insert(0, str(_ROOT / "python"))
 
 from flow import (  # noqa: E402
     client_from_env,
@@ -35,6 +37,8 @@ from lifecycle import (  # noqa: E402
     risk_reviewed,
 )
 from aigov_py.runtime.decision_trace import captured_artifact, decision_reasoning_event, decision_trace_links_event, model_invocation_event  # noqa: E402
+from aigov_py.epistemic_readiness import epistemic_readiness_from_export  # noqa: E402
+from aigov_py.replay_audit_export import replay_audit_export  # noqa: E402
 
 # Mocked agent I/O (no external LLM API).
 MOCK_USER_REQUEST = "Should we approve deploying the retention-policy assistant to production?"
@@ -209,6 +213,47 @@ def save_export(run_id: str, export: dict) -> Path:
     return path
 
 
+def evaluate_export_offline(export_path: Path, expected_verdict: str) -> Path:
+    """Replay the export and report what is missing for later reconstruction."""
+    replay = replay_audit_export(export_path)
+    replayed_verdict = replay.get("reconstructed_verdict")
+    if replayed_verdict != expected_verdict:
+        raise RuntimeError(
+            f"offline replay verdict {replayed_verdict!r} != live verdict {expected_verdict!r}"
+        )
+
+    # The demo intentionally has no archived policy bytes. Do not let a caller's
+    # shell setting silently make the offline report look more complete.
+    previous_policy_signal = os.environ.pop("GOVAI_POLICY_ARTIFACT_AVAILABLE", None)
+    try:
+        readiness = epistemic_readiness_from_export(export_path)
+    finally:
+        if previous_policy_signal is not None:
+            os.environ["GOVAI_POLICY_ARTIFACT_AVAILABLE"] = previous_policy_signal
+
+    if readiness.get("compliance_verdict_valid") != (expected_verdict == "VALID"):
+        raise RuntimeError(
+            "offline readiness compliance claim disagrees with the live ledger verdict: "
+            f"{readiness.get('compliance_verdict_valid')!r} vs {expected_verdict!r}"
+        )
+
+    report_path = export_path.with_name(f"{export_path.stem}-offline-readiness.json")
+    report_path.write_text(json.dumps(readiness, indent=2) + "\n", encoding="utf-8")
+    integrity = replay.get("integrity") or {}
+    continuity = readiness.get("continuity") or {}
+    print_json("Offline deterministic replay", replay)
+    print(
+        "offline_readiness="
+        f"{readiness.get('status')} "
+        f"compliance_verdict_valid={readiness.get('compliance_verdict_valid')} "
+        f"policy_artifact_retrievable={continuity.get('policy_artifact_retrievable')}"
+    )
+    print(f"offline_replay_verdict_match={integrity.get('verdict_match')}")
+    print(f"offline_readiness_gaps={readiness.get('readiness_gaps') or []}")
+    print(f"offline_readiness_report={report_path}")
+    return report_path
+
+
 def print_plan(run_id: str) -> None:
     steps = [
         "1. User request",
@@ -316,6 +361,7 @@ def main() -> None:
         raise RuntimeError(f"verify failed: {verify}")
 
     export_path = save_export(run_id, export)
+    evaluate_export_offline(export_path, final_verdict)
     viewer = _DEMO / "viewer" / "index.html"
     print(f"\nExport saved: {export_path}")
     print(f"Replay viewer: file://{viewer.resolve()}")
