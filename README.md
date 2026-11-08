@@ -4,7 +4,7 @@
 
 AIGov Core is the **open-source**, ledger-authoritative audit runtime for reconstructible AI governance. The `aigov_audit` service appends evidence to tenant-scoped ledgers, enforces policy at ingest, derives **VALID / INVALID / BLOCKED** from ledger projection (`GET /compliance-summary`), exports `aigov.audit_export.v1`, and verifies hash chains.
 
-**Quickstart:** [`docs/quickstart-runtime.md`](docs/quickstart-runtime.md) · **Architecture and data flow:** [`ARCHITECTURE.md`](ARCHITECTURE.md) · **Mounted API contract:** [`docs/runtime-api-contract.md`](docs/runtime-api-contract.md) · **Repository scope:** [`OPEN_SOURCE_SCOPE.md`](OPEN_SOURCE_SCOPE.md) · **Verification and release checks:** [`docs/releases/release-checklist.md`](docs/releases/release-checklist.md)
+**Quickstart:** [`docs/quickstart-runtime.md`](docs/quickstart-runtime.md) · **Architecture and data flow:** [`ARCHITECTURE.md`](ARCHITECTURE.md) · **Mounted API contract:** [`docs/runtime-api-contract.md`](docs/runtime-api-contract.md) · **Repository scope:** [`OPEN_SOURCE_SCOPE.md`](OPEN_SOURCE_SCOPE.md) · **Verification and release checks:** [`docs/releases/release-checklist.md`](docs/releases/release-checklist.md) · **Test scope and limits:** [`docs/test-scope.md`](docs/test-scope.md)
 
 ## What this repository is
 
