@@ -16,6 +16,14 @@ Scope: PR #414 (`security/harden-cla-enforcement` into `staging`)
 - GitHub Actions `compliance/report_gate` previously failed because this report was missing (run 43972566837, job 133668350438); this report addresses that explicit gate requirement.
 - No claim is made that the complete CI suite, external-contributor signing tests, or a security penetration test have passed.
 
+## Evaluation gate
+
+Status: **pending end-to-end validation**. The static `CLA workflow security guard` passed on run 43972566805. The next required evaluation is a signed and unsigned external PR, a multi-author PR, and concurrent signing, with the `CLAAssistant` status remaining mandatory. No unverified result is represented as passed.
+
+## Human approval gate
+
+Status: **pending**. A repository maintainer must review this security change and explicitly approve merging only after required CI and contributor-signing behavior are verified. This report is not an approval and does not waive the gate.
+
 ## Threats and limitations
 
 The upstream CLA Assistant Lite action still has repository-level `contents:write`, `actions:write`, `pull-requests:write`, and `statuses:write` permissions. Its commit-author discovery is limited to the first page of commits and its comment discovery to the first page of comments. Workflow concurrency does not provide a durable transactional signature store. An unprotected signatures branch also needs independent integrity monitoring and tested recovery.
