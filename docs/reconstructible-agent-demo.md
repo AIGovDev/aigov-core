@@ -36,7 +36,9 @@ Duplicate `event_id` values are rejected (`409 DUPLICATE_EVENT_ID`).
 - `GET /api/export/:run_id` document (`aigov.audit_export.v1`)
 - Bundle hashes (`GET /bundle-hash/:run_id`)
 
-The demo saves export JSON to `examples/reconstructible-agent-demo/exports/<run_id>.json` and opens `viewer/index.html` to render the timeline and hash continuity without calling the server again.
+The demo saves export JSON to `examples/reconstructible-agent-demo/exports/<run_id>.json`, replays it with `replay_audit_export_once`, and evaluates epistemic readiness with `epistemic_readiness_once`. The readiness report is saved beside the export as `<run_id>-offline-readiness.json`. The viewer renders the export timeline and hash-chain linkage without calling the server again; it is a visualizer, while the CLI helper performs deterministic offline replay.
+
+The demo intentionally runs offline readiness without an archived policy artifact. This keeps the distinction visible: a ledger verdict can replay as `VALID` while years-later epistemic readiness is `partial` because the policy bytes are unavailable. Model request/response capture is `digest_only`, so the hashes do not recover their content.
 
 ## Difference from observability traces
 
@@ -78,7 +80,10 @@ High-risk flows require explicit `human_approved` evidence with approver, scope,
 # Terminal 1 — runtime (see repo README)
 make run-audit
 
-# Terminal 2
+# Build the offline helpers once
+(cd rust && cargo build --locked --bin replay_audit_export_once --bin epistemic_readiness_once)
+
+# Terminal 2 — demo
 export GOVAI_EXAMPLE_EXECUTE=1
 export GOVAI_API_KEY=test-key
 python3 examples/reconstructible-agent-demo/run_demo.py
