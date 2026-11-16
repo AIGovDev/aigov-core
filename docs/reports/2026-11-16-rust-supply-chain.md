@@ -16,3 +16,9 @@ Resolve RustSec security advisories affecting the locked dependency versions.
 
 ## Impact
 No application source code changes. Dependency lockfile update only.
+
+## Evaluation gate
+Dependency-only security update; no evaluation logic changed. Existing evaluation requirements remain enforced.
+
+## Human approval gate
+This PR requires human review and approval before merging. No approval is claimed by this report.
