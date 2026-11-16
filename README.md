@@ -1,6 +1,6 @@
 # AIGov Core
 
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/MonikaDvorackova/aigov-core/govai-ci.yml)](https://github.com/MonikaDvorackova/aigov-core/actions/workflows/govai-ci.yml) [![GitHub License](https://img.shields.io/github/license/MonikaDvorackova/aigov-core)](https://github.com/MonikaDvorackova/aigov-core/blob/main/LICENSE) [![Crates.io](https://img.shields.io/badge/crates.io-not%20published-lightgrey)]() [![PyPI Version](https://img.shields.io/pypi/v/aigov-py)](https://pypi.org/project/aigov-py/) [![Documentation](https://img.shields.io/badge/docs-GitHub-blue)](https://github.com/MonikaDvorackova/aigov-core/tree/main/docs)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/MonikaDvorackova/aigov-core/govai-ci.yml)](https://github.com/AIGovDev/aigov-core/actions/workflows/govai-ci.yml) [![GitHub License](https://img.shields.io/github/license/MonikaDvorackova/aigov-core)](https://github.com/AIGovDev/aigov-core/blob/main/LICENSE) [![Crates.io](https://img.shields.io/badge/crates.io-not%20published-lightgrey)]() [![PyPI Version](https://img.shields.io/pypi/v/aigov-py)](https://pypi.org/project/aigov-py/) [![Documentation](https://img.shields.io/badge/docs-GitHub-blue)](https://github.com/AIGovDev/aigov-core/tree/main/docs)
 
 AIGov Core is the **open-source**, ledger-authoritative audit runtime for reconstructible AI governance. The `aigov_audit` service appends evidence to tenant-scoped ledgers, enforces policy at ingest, derives **VALID / INVALID / BLOCKED** from ledger projection (`GET /compliance-summary`), exports `aigov.audit_export.v1`, and verifies hash chains.
 
@@ -255,7 +255,7 @@ Choose one:
 1. Clone the repo
 
 ```bash
-git clone https://github.com/MonikaDvorackova/aigov-core.git
+git clone https://github.com/AIGovDev/aigov-core.git
 cd aigov-core
 ```
 
