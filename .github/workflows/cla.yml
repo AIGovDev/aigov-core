@@ -61,7 +61,7 @@ jobs:
           # Dedicated unprotected branch (action docs: "branch should not be protected").
           # Do not use main/staging — rulesets block direct signature commits.
           branch: cla-signatures
-          use-dco-flag: false
+          # The upstream default matcher accepts extra text around the signing phrase.\n          # Require exact consent to the published Individual CLA instead.\n          custom-pr-sign-comment: I have read the CLA Document and I hereby sign the CLA\n          use-dco-flag: false
           lock-pullrequest-aftermerge: true
           suggest-recheck: true
           # Maintainers + known bots bypass Individual CLA signing.
