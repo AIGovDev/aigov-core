@@ -57,7 +57,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: signatures/version1/cla.json
-          path-to-document: https://github.com/MonikaDvorackova/aigov-core/blob/main/legal/published/individual-contributor-license-agreement.md
+          path-to-document: https://github.com/AIGovDev/aigov-core/blob/main/legal/published/individual-contributor-license-agreement.md
           # Dedicated unprotected branch (action docs: "branch should not be protected").
           # Do not use main/staging — rulesets block direct signature commits.
           branch: cla-signatures
@@ -76,7 +76,7 @@ jobs:
 
 
             **Individuals:** please read the
-            [Individual CLA](https://github.com/MonikaDvorackova/aigov-core/blob/main/legal/published/individual-contributor-license-agreement.md)
+            [Individual CLA](https://github.com/AIGovDev/aigov-core/blob/main/legal/published/individual-contributor-license-agreement.md)
             and comment exactly:
 
 
@@ -84,11 +84,11 @@ jobs:
 
 
             **Organizations:** execute the
-            [Corporate CLA](https://github.com/MonikaDvorackova/aigov-core/blob/main/legal/published/corporate-contributor-license-agreement.md)
+            [Corporate CLA](https://github.com/AIGovDev/aigov-core/blob/main/legal/published/corporate-contributor-license-agreement.md)
             and ask a maintainer to add Authorized Contributor GitHub usernames to the CLA allowlist.
 
 
-            Overview: [docs/community/cla.md](https://github.com/MonikaDvorackova/aigov-core/blob/main/docs/community/cla.md)
+            Overview: [docs/community/cla.md](https://github.com/AIGovDev/aigov-core/blob/main/docs/community/cla.md)
 
 
             After signing, comment `recheck` if the status check does not update.
