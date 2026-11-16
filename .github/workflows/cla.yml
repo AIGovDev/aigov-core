@@ -19,9 +19,9 @@ on:
   pull_request_target:
     types: [opened, closed, synchronize]
 
-# Serialize signature writes for the same PR (avoid lost updates to cla.json).
+# Serialize ALL CLA events across PRs: each event reads and writes the same\n# signatures/version1/cla.json file. Per-PR concurrency risks lost updates.
 concurrency:
-  group: cla-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  group: cla-signatures-global
   cancel-in-progress: false
 
 # Default deny; CLA Assistant Lite requires write to comment, set statuses, and
