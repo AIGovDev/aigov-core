@@ -7,7 +7,22 @@ Its third-party CLA Assistant Lite action receives a short-lived token with
 It must never check out or execute code from an external PR. The token can write
 signature records on the intentionally unprotected `cla-signatures` branch.
 
-## Source-level findings (pinned upstream commit)\n- `src/signatureComment.ts` uses a permissive regular expression by default,\n  accepting extra text around the consent phrase. This PR configures\n  `custom-pr-sign-comment` to require an exact, case-insensitive match.\n- `src/graphql.ts` fetches only the first 100 commits and does not follow\n  pagination, so multi-author PRs with more than 100 commits need a separate\n  fail-closed gate before this implementation can be considered complete.\n- `src/pullrequest/signatureComment.ts` reads one page of PR comments;\n  signing comments beyond that page can be missed.\n- `src/pullRerunRunner.ts` invokes Actions workflow rerun APIs. Removing\n  `actions:write` without redesigning this behavior risks breaking rechecks.\n- All PRs share one signature JSON file. Previous per-PR concurrency could\n  overwrite concurrent signature updates. This PR serializes CLA events\n  globally, including comment-triggered events.\n\n## Immediate controls
+## Source-level findings (pinned upstream commit)
+- `src/signatureComment.ts` uses a permissive regular expression by default,
+  accepting extra text around the consent phrase. This PR configures
+  `custom-pr-sign-comment` to require an exact, case-insensitive match.
+- `src/graphql.ts` fetches only the first 100 commits and does not follow
+  pagination, so multi-author PRs with more than 100 commits need a separate
+  fail-closed gate before this implementation can be considered complete.
+- `src/pullrequest/signatureComment.ts` reads one page of PR comments;
+  signing comments beyond that page can be missed.
+- `src/pullRerunRunner.ts` invokes Actions workflow rerun APIs. Removing
+  `actions:write` without redesigning this behavior risks breaking rechecks.
+- All PRs share one signature JSON file. Previous per-PR concurrency could
+  overwrite concurrent signature updates. This PR serializes CLA events
+  globally, including comment-triggered events.
+
+## Immediate controls
 - Keep the action pinned to a full commit SHA and the existing explicit allowlist.
 - Keep default permissions denied and never introduce a long-lived PAT.
 - Keep exact signing text and the `recheck` path; preserve required `CLAAssistant` check.
