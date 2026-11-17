@@ -73,11 +73,21 @@ def signatures(repo):
     for item in entries:
         if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not isinstance(item.get("id"), int) or not isinstance(item.get("comment_id"), int):
             raise AuditError("Malformed signature record")
+        if item["id"] <= 0 or item["comment_id"] <= 0 or not item["name"].strip():
+            raise AuditError("Invalid signature identity or evidence reference")
         signed.add((item["name"].casefold(), item["id"]))
     return signed
 
 def audit(repo, number):
     names = contributors(repo, number)
+    pr = get(f"/repos/{repo}/pulls/{number}")
+    submitter = pr.get("user") if isinstance(pr, dict) else None
+    if not isinstance(submitter, dict) or not isinstance(submitter.get("login"), str) or type(submitter.get("id")) is not int or submitter["id"] <= 0:
+        raise AuditError("Unmapped pull request submitter")
+    login, uid = submitter["login"], submitter["id"]
+    if login in names and names[login] != uid:
+        raise AuditError("Conflicting PR submitter identity")
+    names[login] = uid
     signed = signatures(repo)
     missing = sorted(login for login, uid in names.items() if login not in ALLOWLIST and (login.casefold(), uid) not in signed)
     return {"approved": not missing, "authors": sorted(names), "unsigned": missing,
