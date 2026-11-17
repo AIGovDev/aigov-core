@@ -38,8 +38,14 @@ def pages(path):
             return result
     raise AuditError("Pagination safety limit reached")
 
-def contributors(repo, number):
+def contributors(repo, number, expected_count=None):
+    # GitHub pull-commits REST endpoint is capped at 250 commits.
+    # Do not approve PRs whose complete commit history cannot be enumerated.
+    if expected_count is not None and (type(expected_count) is not int or expected_count < 1 or expected_count > 250):
+        raise AuditError("PR commit count outside verifiable REST API range")
     commits = pages(f"/repos/{repo}/pulls/{number}/commits")
+    if len(commits) >= 250 or (expected_count is not None and len(commits) != expected_count):
+        raise AuditError("Incomplete or capped PR commit enumeration")
     if not commits:
         raise AuditError("PR has no commits")
     identities = {}
@@ -79,8 +85,10 @@ def signatures(repo):
     return signed
 
 def audit(repo, number):
-    names = contributors(repo, number)
     pr = get(f"/repos/{repo}/pulls/{number}")
+    if not isinstance(pr, dict):
+        raise AuditError("Invalid PR API response")
+    names = contributors(repo, number, pr.get("commits"))
     submitter = pr.get("user") if isinstance(pr, dict) else None
     if not isinstance(submitter, dict) or not isinstance(submitter.get("login"), str) or type(submitter.get("id")) is not int or submitter["id"] <= 0:
         raise AuditError("Unmapped pull request submitter")
