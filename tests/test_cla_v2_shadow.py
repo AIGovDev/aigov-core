@@ -11,7 +11,7 @@ spec.loader.exec_module(cla)
 
 class ShadowTests(unittest.TestCase):
     def test_signed_numeric_identity(self):
-        with patch.object(cla, "contributors", return_value={"contributor": 42}), patch.object(cla, "signatures", return_value={("contributor", 42)}):
+        with patch.object(cla, "get", return_value={"user": {"login": "maintainer", "id": 100}}), patch.object(cla, "contributors", return_value={"contributor": 42}), patch.object(cla, "signatures", return_value={("contributor", 42)}):
             self.assertTrue(cla.audit("owner/repo", 1)["approved"])
 
     def test_same_login_different_id_is_unsigned(self):
@@ -21,6 +21,15 @@ class ShadowTests(unittest.TestCase):
     def test_multiple_authors_blocks_unsigned(self):
         with patch.object(cla, "contributors", return_value={"signed": 1, "unsigned": 2}), patch.object(cla, "signatures", return_value={("signed", 1)}):
             self.assertFalse(cla.audit("owner/repo", 1)["approved"])
+
+    def test_unsigned_pr_submitter_blocks(self):
+        with patch.object(cla, "get", return_value={"user": {"login": "unsigned_submitter", "id": 99}}), patch.object(cla, "contributors", return_value={"signed": 1}), patch.object(cla, "signatures", return_value={("signed", 1)}):
+            self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["unsigned_submitter"])
+
+    def test_unmapped_submitter_fails_closed(self):
+        with patch.object(cla, "get", return_value={"user": None}), patch.object(cla, "contributors", return_value={"signed": 1}):
+            with self.assertRaises(cla.AuditError):
+                cla.audit("owner/repo", 1)
 
     def test_pagination_over_100(self):
         batch = [{"author": {"login": "a", "id": 1}}] * 100
