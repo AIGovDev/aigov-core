@@ -15,7 +15,10 @@ Enable the existing trusted, **informational** CLA v2 shadow audit on pull reque
 ## Evaluation gate
 Repository `compliance/report_gate` requires a `docs/reports/*.md` update for workflow changes. This report fulfills that change-control requirement. PR unit tests and CI must pass before merge. A real fork-origin PR and the trusted workflow trigger should be observed after merging to staging; GitHub's `pull_request_target` event policy may independently prevent startup.
 
-## Human approval and cutover
+## Human approval gate
+Status: pending. No production cutover is authorized by this shadow activation.
+
+## Cutover constraints
 Not approved for production enforcement. The legacy `CLAAssistant` check remains required. Before replacing it, complete signature-evidence validation, independently review a least-privilege signing mechanism or equivalent source-of-truth design, verify fork/event behavior, and coordinate an atomic branch-rules change without a period of unprotected merges.
 
 ## Rollback
