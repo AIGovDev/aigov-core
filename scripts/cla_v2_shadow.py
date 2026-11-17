@@ -10,6 +10,9 @@ import urllib.request
 API = "https://api.github.com"
 ALLOWLIST = {("monikadvorackova", 95243292)}
 BOT_ALLOWLIST = {"dependabot[bot]", "github-actions[bot]"}
+# Never exempt a bot based on its display login alone. These are the GitHub
+# account IDs of the two official service identities.
+VERIFIED_BOT_IDS = {49699333, 41898282}
 CONSENT = "I have read the CLA Document and I hereby sign the CLA"
 
 class AuditError(Exception):
@@ -53,7 +56,7 @@ def contributors(repo, number, expected_count=None):
     identities = {}
     for commit in commits:
         message = (commit.get("commit") or {}).get("message", "")
-        if not isinstance(message, str) or any(line.lower().startswith("co-authored-by:") for line in message.splitlines()):
+        if not isinstance(message, str) or any(line.strip().lower().startswith("co-authored-by:") for line in message.splitlines()):
             raise AuditError("Co-authored commit requires manual identity verification")
         author = commit.get("author")
         login = author.get("login") if isinstance(author, dict) else None
@@ -115,7 +118,7 @@ def audit(repo, number):
         raise AuditError("Conflicting PR submitter identity")
     names[login] = uid
     signed = signatures(repo)
-    missing = sorted(login for login, uid in names.items() if (login.casefold(), uid) not in ALLOWLIST and login not in BOT_ALLOWLIST and (login.casefold(), uid) not in signed)
+    missing = sorted(login for login, uid in names.items() if (login.casefold(), uid) not in ALLOWLIST and not (login in BOT_ALLOWLIST and uid in VERIFIED_BOT_IDS) and (login.casefold(), uid) not in signed)
     return {"approved": not missing, "authors": sorted(names), "unsigned": missing,
             "mode": "shadow-only", "legacy_signatures": True}
 

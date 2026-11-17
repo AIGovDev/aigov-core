@@ -73,6 +73,17 @@ class ShadowTests(unittest.TestCase):
         with patch.object(cla, "get", return_value={"user": {"login": "MonikaDvorackova", "id": 999}, "commits": 1}), patch.object(cla, "contributors", return_value={"MonikaDvorackova": 999}), patch.object(cla, "signatures", return_value=set()):
             self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["MonikaDvorackova"])
 
+    def test_indented_coauthor_trailer_fails_closed(self):
+        commit = {"author": {"login": "alice", "id": 42},
+                  "commit": {"message": "Change\n  Co-authored-by: Bob <bob@example.com>"}}
+        with patch.object(cla, "pages", return_value=[commit]):
+            with self.assertRaises(cla.AuditError):
+                cla.contributors("owner/repo", 1, expected_count=1)
+
+    def test_bot_login_with_wrong_numeric_id_is_unsigned(self):
+        with patch.object(cla, "get", return_value={"user": {"login": "dependabot[bot]", "id": 999}, "commits": 1}), patch.object(cla, "contributors", return_value={"dependabot[bot]": 999}), patch.object(cla, "signatures", return_value=set()):
+            self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["dependabot[bot]"])
+
     def test_api_error_fails_closed(self):
         with patch.object(cla, "get", return_value={"user": {"login": "alice", "id": 42}, "commits": 1}), patch.object(cla, "contributors", side_effect=cla.AuditError("API unavailable")):
             with self.assertRaises(cla.AuditError):
