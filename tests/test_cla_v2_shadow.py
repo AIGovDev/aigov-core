@@ -11,15 +11,15 @@ spec.loader.exec_module(cla)
 
 class ShadowTests(unittest.TestCase):
     def test_signed_numeric_identity(self):
-        with patch.object(cla, "get", return_value={"user": {"login": "maintainer", "id": 100}, "commits": 1}), patch.object(cla, "contributors", return_value={"contributor": 42}), patch.object(cla, "signatures", return_value={("contributor", 42)}):
+        with patch.object(cla, "get", return_value={"user": {"login": "contributor", "id": 42}, "commits": 1}), patch.object(cla, "contributors", return_value={"contributor": 42}), patch.object(cla, "signatures", return_value={("contributor", 42)}):
             self.assertTrue(cla.audit("owner/repo", 1)["approved"])
 
     def test_same_login_different_id_is_unsigned(self):
-        with patch.object(cla, "contributors", return_value={"contributor": 99}), patch.object(cla, "signatures", return_value={("contributor", 42)}):
+        with patch.object(cla, "get", return_value={"user": {"login": "contributor", "id": 99}, "commits": 1}), patch.object(cla, "contributors", return_value={"contributor": 99}), patch.object(cla, "signatures", return_value={("contributor", 42)}):
             self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["contributor"])
 
     def test_multiple_authors_blocks_unsigned(self):
-        with patch.object(cla, "contributors", return_value={"signed": 1, "unsigned": 2}), patch.object(cla, "signatures", return_value={("signed", 1)}):
+        with patch.object(cla, "get", return_value={"user": {"login": "signed", "id": 1}, "commits": 2}), patch.object(cla, "contributors", return_value={"signed": 1, "unsigned": 2}), patch.object(cla, "signatures", return_value={("signed", 1)}):
             self.assertFalse(cla.audit("owner/repo", 1)["approved"])
 
     def test_unsigned_pr_submitter_blocks(self):
