@@ -75,7 +75,7 @@ class ShadowTests(unittest.TestCase):
 
     def test_indented_coauthor_trailer_fails_closed(self):
         commit = {"author": {"login": "alice", "id": 42},
-                  "commit": {"message": "Change\\n  Co-authored-by: Bob <bob@example.com>"}}
+                  "commit": {"message": "Change\n  Co-authored-by: Bob <bob@example.com>"}}
         with patch.object(cla, "pages", return_value=[commit]):
             with self.assertRaises(cla.AuditError):
                 cla.contributors("owner/repo", 1, expected_count=1)
