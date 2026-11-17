@@ -54,7 +54,7 @@ echo
 echo "-> GET /compliance-summary/${RUN_ID}"
 SUMMARY="$(curl -fsS "${AUTH[@]}" "${BASE}/compliance-summary/${RUN_ID}")"
 echo "${SUMMARY}" | python3 -m json.tool
-echo "${SUMMARY}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "verdict" in d, d'
+echo "${SUMMARY}" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("verdict") == "BLOCKED", d'
 
 echo
 echo "-> GET /api/export/${RUN_ID}"
