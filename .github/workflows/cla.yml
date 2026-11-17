@@ -29,9 +29,13 @@ concurrency:
 # commit signature JSON to `cla-signatures` via GITHUB_TOKEN (documented by the action).
 permissions: {}
 
+# RETIRED 2026-11-17: replaced by first-party CLA v2 (cla-v2-production.yml).
+# Workflow definition and historical evidence preserved for audit continuity.
+# Do not remove this file; signature records on cla-signatures branch must remain accessible.
 jobs:
   CLAAssistant:
     name: CLAAssistant
+    if: false  # Retired: replaced by first-party CLA v2 (cla-v2-production.yml)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
