@@ -14,10 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout trusted base branch only
+      - name: Checkout PR merge commit with read-only token
         uses: actions/checkout@v4
         with:
-          ref: staging
           persist-credentials: false
       - name: Run read-only shadow audit
         env:
