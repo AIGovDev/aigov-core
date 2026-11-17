@@ -1,0 +1,35 @@
+# Trusted checker: always load executable code from protected staging, never PR head.
+# This workflow becomes active on pull_request events only after it is merged to staging.
+name: CLA v2 trusted shadow
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to audit
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  trusted-shadow:
+    name: CLA-v2-trusted-shadow
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted staging code
+        uses: actions/checkout@v4
+        with:
+          ref: staging
+          persist-credentials: false
+      - name: Execute trusted read-only audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number || github.event.pull_request.number }}
+        run: python3 scripts/cla_v2_shadow.py
