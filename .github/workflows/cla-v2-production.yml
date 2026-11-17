@@ -1,12 +1,10 @@
 # First-party CLA v2. Never execute PR-head code in this privileged workflow.
-# Keep CLA Assistant enabled until this workflow is deployed on the default branch,
-# proven against fork PRs, and branch rulesets require "CLA v2 / agreement".
 name: CLA v2 production
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches: [staging, main]
+    branches: [main]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -38,10 +36,10 @@ jobs:
       issues: read
       statuses: write
     steps:
-      - name: Checkout protected staging code only
+      - name: Checkout protected main code only
         uses: actions/checkout@v4
         with:
-          ref: staging
+          ref: main
           persist-credentials: false
       - name: Execute first-party CLA v2
         env:

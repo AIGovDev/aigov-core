@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - .github/workflows/cla.yml
+      - .github/workflows/cla-v2-production.yml
       - .github/workflows/cla-security-guard.yml
       - scripts/check_cla_workflow_security.py
   push:
     branches: [staging, main]
     paths:
       - .github/workflows/cla.yml
+      - .github/workflows/cla-v2-production.yml
       - .github/workflows/cla-security-guard.yml
       - scripts/check_cla_workflow_security.py
 

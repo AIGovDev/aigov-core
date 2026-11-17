@@ -1,12 +1,11 @@
-# Trusted checker: always load executable code from protected staging, never PR head.
-# Activate only after this workflow is reviewed and merged to staging.
+# Trusted checker: always load executable code from protected main, never PR head.
 # Never check out or execute PR-head code in this privileged event.
 name: CLA v2 trusted shadow
 
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches: [staging]
+    branches: [main]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -24,10 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout trusted staging code
+      - name: Checkout trusted main code
         uses: actions/checkout@v4
         with:
-          ref: staging
+          ref: main
           persist-credentials: false
       - name: Execute trusted read-only audit
         env:

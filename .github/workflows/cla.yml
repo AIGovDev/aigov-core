@@ -3,6 +3,9 @@
 # Uses CLA Assistant Lite (contributor-assistant/github-action).
 # Does not use DCO.
 #
+# RETIRED: replaced by first-party CLA v2 (cla-v2-production.yml).
+# Preserved for audit continuity. The job is disabled via `if: false`.
+#
 # Security notes (pull_request_target):
 # - This workflow must NOT checkout or execute code from the PR head.
 # - Only the pinned third-party action runs; inputs are static (not PR-controlled).
@@ -32,6 +35,7 @@ permissions: {}
 jobs:
   CLAAssistant:
     name: CLAAssistant
+    if: false  # Retired: replaced by first-party CLA v2 (cla-v2-production.yml)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
