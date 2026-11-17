@@ -50,6 +50,18 @@ class ShadowTests(unittest.TestCase):
             with self.assertRaises(cla.AuditError):
                 cla.contributors("owner/repo", 3)
 
+    def test_signature_comment_mismatch_fails_closed(self):
+        import base64
+        import json
+        record = {"name": "alice", "id": 42, "comment_id": 7, "created_at": "2026-01-01T00:00:00Z", "pullRequestNo": 2}
+        payload = {"encoding": "base64", "content": base64.b64encode(json.dumps({"signedContributors": [record]}).encode()).decode()}
+        wrong_comment = {"user": {"login": "alice", "id": 42}, "body": "not consent",
+                         "created_at": record["created_at"], "updated_at": record["created_at"],
+                         "html_url": "https://github.com/owner/repo/pull/2#issuecomment-7"}
+        with patch.object(cla, "get", side_effect=[payload, wrong_comment]):
+            with self.assertRaises(cla.AuditError):
+                cla.signatures("owner/repo")
+
     def test_api_error_fails_closed(self):
         with patch.object(cla, "contributors", side_effect=cla.AuditError("API unavailable")):
             with self.assertRaises(cla.AuditError):
