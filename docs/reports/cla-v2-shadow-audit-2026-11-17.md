@@ -14,3 +14,10 @@ The current informational workflow executes a PR-branch script with a read-only 
 
 ## Follow-up
 Add unit tests and signature-ID verification; validate workflow behavior on fork PRs; review independent signature writer design and migration evidence before any enforcement change.
+
+## Follow-up hardening (2026-11-17)
+- Separated untrusted PR unit tests (no API token) from the manually triggered trusted staging checker.
+- Added PR submitter verification and numeric GitHub ID matching against legacy signature records.
+- Enforced fail-closed behavior on GitHub REST's 250-commit PR enumeration ceiling and truncated commit responses. PRs above this ceiling need an alternative complete author enumeration before any required enforcement.
+- Unit test suite expanded to 10 tests; new CI results are pending, not asserted passed.
+- Historical signature authenticity is not yet independently verified against original consent comments or immutable evidence; **not ready for cutover**.
