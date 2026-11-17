@@ -42,14 +42,19 @@ def contributors(repo, number):
     commits = pages(f"/repos/{repo}/pulls/{number}/commits")
     if not commits:
         raise AuditError("PR has no commits")
-    names = set()
+    identities = {}
     for commit in commits:
         author = commit.get("author")
         login = author.get("login") if isinstance(author, dict) else None
         if not isinstance(login, str) or not login:
             raise AuditError("Unmapped commit author; manual review required")
-        names.add(login)
-    return names
+        uid = author.get("id")
+        if type(uid) is not int or uid <= 0:
+            raise AuditError("Missing GitHub numeric author ID")
+        if login in identities and identities[login] != uid:
+            raise AuditError("Conflicting GitHub author identity")
+        identities[login] = uid
+    return identities
 
 def signatures(repo):
     path = urllib.parse.quote("signatures/version1/cla.json", safe="/")
@@ -68,13 +73,13 @@ def signatures(repo):
     for item in entries:
         if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not isinstance(item.get("id"), int) or not isinstance(item.get("comment_id"), int):
             raise AuditError("Malformed signature record")
-        signed.add(item["name"])
+        signed.add((item["name"].casefold(), item["id"]))
     return signed
 
 def audit(repo, number):
     names = contributors(repo, number)
     signed = signatures(repo)
-    missing = sorted(names - signed - ALLOWLIST)
+    missing = sorted(login for login, uid in names.items() if login not in ALLOWLIST and (login.casefold(), uid) not in signed)
     return {"approved": not missing, "authors": sorted(names), "unsigned": missing,
             "mode": "shadow-only", "legacy_signatures": True}
 
