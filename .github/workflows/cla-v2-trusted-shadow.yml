@@ -1,8 +1,12 @@
 # Trusted checker: always load executable code from protected staging, never PR head.
-# This workflow becomes active on pull_request events only after it is merged to staging.
+# Activate only after this workflow is reviewed and merged to staging.
+# Never check out or execute PR-head code in this privileged event.
 name: CLA v2 trusted shadow
 
 on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [staging]
   workflow_dispatch:
     inputs:
       pr_number:
