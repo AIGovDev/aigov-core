@@ -9,6 +9,7 @@ import urllib.request
 
 API = "https://api.github.com"
 ALLOWLIST = {"MonikaDvorackova", "dependabot[bot]", "github-actions[bot]"}
+CONSENT = "I have read the CLA Document and I hereby sign the CLA"
 
 class AuditError(Exception):
     pass
@@ -81,6 +82,19 @@ def signatures(repo):
             raise AuditError("Malformed signature record")
         if item["id"] <= 0 or item["comment_id"] <= 0 or not item["name"].strip():
             raise AuditError("Invalid signature identity or evidence reference")
+        pr_number = item.get("pullRequestNo")
+        if type(pr_number) is not int or pr_number <= 0:
+            raise AuditError("Missing signature source PR")
+        comment = get(f"/repos/{repo}/issues/comments/{item['comment_id']}")
+        author = comment.get("user") if isinstance(comment, dict) else None
+        if (not isinstance(author, dict) or author.get("id") != item["id"]
+                or not isinstance(author.get("login"), str)
+                or author["login"].casefold() != item["name"].casefold()
+                or comment.get("body") != CONSENT
+                or comment.get("created_at") != item.get("created_at")
+                or comment.get("updated_at") != comment.get("created_at")
+                or not str(comment.get("html_url", "")).startswith(f"https://github.com/{repo}/pull/{pr_number}#issuecomment-")):
+            raise AuditError("Signature comment evidence mismatch")
         signed.add((item["name"].casefold(), item["id"]))
     return signed
 
