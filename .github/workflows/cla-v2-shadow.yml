@@ -1,0 +1,27 @@
+name: CLA v2 shadow audit
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  cla-v2-shadow:
+    name: CLA-v2-shadow
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted base branch only
+        uses: actions/checkout@v4
+        with:
+          ref: staging
+          persist-credentials: false
+      - name: Run read-only shadow audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 scripts/cla_v2_shadow.py
