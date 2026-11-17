@@ -1,0 +1,53 @@
+# First-party CLA v2. Never execute PR-head code in this privileged workflow.
+# Keep CLA Assistant enabled until this workflow is deployed on the default branch,
+# proven against fork PRs, and branch rulesets require "CLA v2 / agreement".
+name: CLA v2 production
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [staging, main]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request to recheck
+        required: true
+        type: number
+
+concurrency:
+  group: cla-v2-signatures-global
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  cla-v2:
+    name: CLA-v2-enforcement
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request &&
+       (github.event.comment.body == 'recheck' ||
+        github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: read
+      issues: read
+      statuses: write
+    steps:
+      - name: Checkout protected staging code only
+        uses: actions/checkout@v4
+        with:
+          ref: staging
+          persist-credentials: false
+      - name: Execute first-party CLA v2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: python3 scripts/cla_v2_production.py
