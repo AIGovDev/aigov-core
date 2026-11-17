@@ -18,6 +18,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Run shadow unit tests
+        run: python3 -m unittest discover -s tests -p 'test_cla_v2_shadow.py'
       - name: Run read-only shadow audit
         env:
           GH_TOKEN: ${{ github.token }}
