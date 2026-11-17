@@ -63,7 +63,7 @@ class ShadowTests(unittest.TestCase):
                 cla.signatures("owner/repo")
 
     def test_api_error_fails_closed(self):
-        with patch.object(cla, "contributors", side_effect=cla.AuditError("API unavailable")):
+        with patch.object(cla, "get", return_value={"user": {"login": "alice", "id": 42}, "commits": 1}), patch.object(cla, "contributors", side_effect=cla.AuditError("API unavailable")):
             with self.assertRaises(cla.AuditError):
                 cla.audit("owner/repo", 3)
 
