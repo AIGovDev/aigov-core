@@ -1,0 +1,22 @@
+# On untrusted PRs, execute tests without any GitHub API token.
+# The trusted shadow audit is activated only after this code reaches staging.
+name: CLA v2 shadow tests
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  cla-v2-tests:
+    name: CLA-v2-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout PR merge commit without credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run shadow unit tests
+        run: python3 -m unittest discover -s tests -p 'test_cla_v2_*.py'
