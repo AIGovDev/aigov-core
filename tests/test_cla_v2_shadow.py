@@ -11,7 +11,7 @@ spec.loader.exec_module(cla)
 
 class ShadowTests(unittest.TestCase):
     def test_signed_numeric_identity(self):
-        with patch.object(cla, "get", return_value={"user": {"login": "maintainer", "id": 100}}), patch.object(cla, "contributors", return_value={"contributor": 42}), patch.object(cla, "signatures", return_value={("contributor", 42)}):
+        with patch.object(cla, "get", return_value={"user": {"login": "maintainer", "id": 100}, "commits": 1}), patch.object(cla, "contributors", return_value={"contributor": 42}), patch.object(cla, "signatures", return_value={("contributor", 42)}):
             self.assertTrue(cla.audit("owner/repo", 1)["approved"])
 
     def test_same_login_different_id_is_unsigned(self):
@@ -23,11 +23,11 @@ class ShadowTests(unittest.TestCase):
             self.assertFalse(cla.audit("owner/repo", 1)["approved"])
 
     def test_unsigned_pr_submitter_blocks(self):
-        with patch.object(cla, "get", return_value={"user": {"login": "unsigned_submitter", "id": 99}}), patch.object(cla, "contributors", return_value={"signed": 1}), patch.object(cla, "signatures", return_value={("signed", 1)}):
+        with patch.object(cla, "get", return_value={"user": {"login": "unsigned_submitter", "id": 99}, "commits": 1}), patch.object(cla, "contributors", return_value={"signed": 1}), patch.object(cla, "signatures", return_value={("signed", 1)}):
             self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["unsigned_submitter"])
 
     def test_unmapped_submitter_fails_closed(self):
-        with patch.object(cla, "get", return_value={"user": None}), patch.object(cla, "contributors", return_value={"signed": 1}):
+        with patch.object(cla, "get", return_value={"user": None, "commits": 1}), patch.object(cla, "contributors", return_value={"signed": 1}):
             with self.assertRaises(cla.AuditError):
                 cla.audit("owner/repo", 1)
 
@@ -35,6 +35,15 @@ class ShadowTests(unittest.TestCase):
         batch = [{"author": {"login": "a", "id": 1}}] * 100
         with patch.object(cla, "get", side_effect=[batch, [{"author": {"login": "b", "id": 2}}]]):
             self.assertEqual(cla.contributors("owner/repo", 3), {"a": 1, "b": 2})
+
+    def test_commit_api_limit_fails_closed(self):
+        with self.assertRaises(cla.AuditError):
+            cla.contributors("owner/repo", 1, expected_count=251)
+
+    def test_truncated_commit_list_fails_closed(self):
+        with patch.object(cla, "pages", return_value=[{"author": {"login": "a", "id": 1}}]):
+            with self.assertRaises(cla.AuditError):
+                cla.contributors("owner/repo", 1, expected_count=2)
 
     def test_unmapped_author_fails_closed(self):
         with patch.object(cla, "pages", return_value=[{"author": None}]):
