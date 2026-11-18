@@ -69,6 +69,27 @@ class ShadowTests(unittest.TestCase):
             with self.assertRaises(cla.AuditError):
                 cla.contributors("owner/repo", 1, expected_count=1)
 
+    def test_exact_ai_attribution_does_not_create_human_cla_signer(self):
+        commit = {"author": {"login": "MonikaDvorackova", "id": 95243292},
+                  "commit": {"message": "Change\\n\\nCo-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>"}}
+        with patch.object(cla, "pages", return_value=[commit]):
+            self.assertEqual(cla.contributors("owner/repo", 1, expected_count=1),
+                             {"MonikaDvorackova": 95243292})
+
+    def test_ai_attribution_plus_human_coauthor_still_blocks(self):
+        commit = {"author": {"login": "alice", "id": 42},
+                  "commit": {"message": "Change\\n\\nCo-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>\\nCo-authored-by: Bob <bob@example.com>"}}
+        with patch.object(cla, "pages", return_value=[commit]):
+            with self.assertRaises(cla.AuditError):
+                cla.contributors("owner/repo", 1, expected_count=1)
+
+    def test_lookalike_ai_attribution_still_blocks(self):
+        commit = {"author": {"login": "alice", "id": 42},
+                  "commit": {"message": "Change\\n\\nCo-authored-by: Claude Sonnet 4.6 <attacker@example.com>"}}
+        with patch.object(cla, "pages", return_value=[commit]):
+            with self.assertRaises(cla.AuditError):
+                cla.contributors("owner/repo", 1, expected_count=1)
+
     def test_maintainer_name_spoof_does_not_bypass(self):
         with patch.object(cla, "get", return_value={"user": {"login": "MonikaDvorackova", "id": 999}, "commits": 1}), patch.object(cla, "contributors", return_value={"MonikaDvorackova": 999}), patch.object(cla, "signatures", return_value=set()):
             self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["MonikaDvorackova"])
