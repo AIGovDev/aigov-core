@@ -56,8 +56,18 @@ def contributors(repo, number, expected_count=None):
     identities = {}
     for commit in commits:
         message = (commit.get("commit") or {}).get("message", "")
-        if not isinstance(message, str) or any(line.strip().lower().startswith("co-authored-by:") for line in message.splitlines()):
-            raise AuditError("Co-authored commit requires manual identity verification")
+        if not isinstance(message, str):
+            raise AuditError("Invalid commit message")
+        for line in message.splitlines():
+            stripped = line.strip()
+            if not stripped.lower().startswith("co-authored-by:"):
+                continue
+            # AI tooling is not a legal contributor and cannot sign a CLA.
+            # Only the exact, known attribution trailer is non-human metadata.
+            # Any other coauthor (including malformed or spoofed variants)
+            # remains subject to manual identity verification.
+            if stripped != "Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>" and stripped != "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>":
+                raise AuditError("Co-authored commit requires manual identity verification")
         author = commit.get("author")
         login = author.get("login") if isinstance(author, dict) else None
         if not isinstance(login, str) or not login:

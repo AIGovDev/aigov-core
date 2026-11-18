@@ -39,6 +39,7 @@ require(not re.search(r"(?im)^\s*(?:-|\s)*uses:\s*actions/checkout@", source), "
 require(not re.search(r"(?im)^\s*(?:-|\s)*run:\s*", source), "cla.yml", "Never execute shell commands in privileged CLA workflow")
 require("PERSONAL_ACCESS_TOKEN" not in re.sub(r"(?m)^\s*#.*$", "", source), "cla.yml", "Never add a long-lived PAT")
 require("github.event.pull_request.head" not in source, "cla.yml", "Never interpolate untrusted PR head into privileged workflow")
+require(re.search(r"(?m)^\s+if:\s+false\s*(?:#.*)?$", source), "cla.yml", "CLAAssistant job must be retired (if: false) — CLA v2 is the active enforcement")
 
 
 # ── CLA v2 (first-party) ──────────────────────────────────────────────────────
