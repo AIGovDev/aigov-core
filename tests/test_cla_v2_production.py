@@ -34,6 +34,13 @@ class ProductionTests(unittest.TestCase):
         with patch.object(cla.legacy, "get", return_value=pr), patch.object(cla.legacy, "contributors", return_value={"dependabot[bot]": 999}), patch.object(cla.legacy, "signatures", return_value=set()), patch.object(cla, "verify_evidence", return_value=False):
             self.assertEqual(cla.audit("owner/repo", 1)[1], ["dependabot[bot]"])
 
+    def test_bot_cross_paired_id_not_exempt(self):
+        # dependabot[bot] with github-actions[bot]'s ID must not be exempted.
+        actions_id = 41898282
+        pr = {"commits": 1, "user": {"login": "dependabot[bot]", "id": actions_id}}
+        with patch.object(cla.legacy, "get", return_value=pr), patch.object(cla.legacy, "contributors", return_value={"dependabot[bot]": actions_id}), patch.object(cla.legacy, "signatures", return_value=set()), patch.object(cla, "verify_evidence", return_value=False):
+            self.assertEqual(cla.audit("owner/repo", 1)[1], ["dependabot[bot]"])
+
     def test_existing_signature_is_idempotent(self):
         with patch.object(cla, "request", side_effect=[
             {"id": 9, "user": {"login": "alice", "id": 42}, "body": cla.CONSENT,
