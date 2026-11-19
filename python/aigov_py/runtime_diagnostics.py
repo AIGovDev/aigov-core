@@ -116,9 +116,14 @@ def main(argv: list[str] | None = None) -> int:
 
     import os
 
-    base = (args.base_url or os.environ.get("GOVAI_AUDIT_BASE_URL") or "http://127.0.0.1:8088").strip()
+    base = (
+        args.base_url
+        or os.environ.get("AIGOV_AUDIT_BASE_URL")
+        or os.environ.get("GOVAI_AUDIT_BASE_URL")
+        or "http://127.0.0.1:8088"
+    ).strip()
     if not base:
-        print("error: --base-url or GOVAI_AUDIT_BASE_URL required", file=sys.stderr)
+        print("error: --base-url, AIGOV_AUDIT_BASE_URL, or GOVAI_AUDIT_BASE_URL required", file=sys.stderr)
         return 2
     try:
         return run_runtime_diagnostics(base, timeout_sec=args.timeout, json_out=args.json)

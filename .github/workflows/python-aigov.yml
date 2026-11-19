@@ -1,4 +1,4 @@
-name: python-govai
+name: python-aigov
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
     paths:
       - "python/**"
       - "scripts/**"
-      - ".github/workflows/python-govai.yml"
+      - ".github/workflows/python-aigov.yml"
   workflow_dispatch:
 
 jobs:
@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "# GovAI Python smoke"
+            echo "# AIGov Python smoke"
             echo
             echo "Status: ${{ job.status }}"
             echo "Full Python pytest runs in nightly-full-validation and release-validation."
