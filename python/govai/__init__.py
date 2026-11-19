@@ -1,6 +1,9 @@
 """
-Thin HTTP client for the GovAI Rust audit API: evidence ingest, bundle, compliance summary,
+AIGov HTTP client for the AIGov Rust audit API: evidence ingest, bundle, compliance summary,
 and hash-chain verification (``GET /verify``).
+
+This package is importable as ``import govai`` for backward compatibility.
+New code should prefer ``import aigov_py`` or the ``aigov`` CLI command.
 
 No business logic beyond HTTP and response handling.
 """

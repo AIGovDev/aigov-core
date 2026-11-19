@@ -109,12 +109,62 @@ def _benchmark_metrics(tmp_path_factory: pytest.TempPathFactory):
 
 
 def test_condition_d_achieves_perfect_f1(_benchmark_metrics) -> None:
-    """Condition D must achieve F1=1.0, FAR=0.0 on this synthetic dataset."""
+    """Condition D achieves F1=1.0, FAR=0.0 by calling verify_evidence(), not reading a label."""
     m = _benchmark_metrics["D_aigov_evidence"]
     assert m["f1"] == 1.0, f"D F1={m['f1']}"
     assert m["far"] == 0.0, f"D FAR={m['far']}"
     assert m["frr"] == 0.0, f"D FRR={m['frr']}"
     assert m["precision"] == 1.0
+
+
+def test_condition_d_calls_verifier_not_precomputed_label() -> None:
+    """
+    AUDIT-01 regression: Condition D must invoke verify_evidence() on a
+    reconstructed EvidencePackage, not just check case['aigov_verdict'].
+
+    We build a case whose aigov_verdict label says 'VALID' but whose
+    reconstructed EvidencePackage has a broken chain_digest.  If Condition D
+    reads the label it returns True (TP); if it calls the verifier it returns
+    False (TN, correctly catching the tamper).
+    """
+    import sys
+    from pathlib import Path
+
+    # Ensure the benchmark module is importable.
+    bench_dir = Path(__file__).resolve().parents[2] / "benchmarks" / "agent-verification"
+    if str(bench_dir) not in sys.path:
+        sys.path.insert(0, str(bench_dir))
+
+    from run_benchmark import _condition_d_live  # type: ignore[import]
+
+    # Build a case that looks like AUTHORIZED_CORRECT (aigov_verdict='VALID')
+    # but whose chain should fail when actually verified.
+    case = {
+        "case_id": "audit-01-regression",
+        "scenario_type": "BROKEN_EVIDENCE_CHAIN",  # triggers broken chain in package
+        "agent_self_report": "success",
+        "tool_response": "success",
+        "independent_readback": "2027-07-02T17:00:00+02:00",
+        "aigov_verdict": "VALID",   # pre-computed label claims VALID — this is the lie
+        "ground_truth": "BROKEN_EVIDENCE_CHAIN",
+        "is_true_positive": False,
+        "proposed_value": "2027-07-02T17:00:00+02:00",
+        "executed_value": "2027-07-02T17:00:00+02:00",
+        "expected_value": "2027-07-02T17:00:00+02:00",
+        "approval_valid": True,
+        "chain_integrity": False,   # chain is broken
+        "readback_matches": True,
+        "seed": 42,
+        "split": "dev",
+    }
+
+    result = _condition_d_live(case)
+    # The live verifier must detect the broken chain and return False (not VALID).
+    assert result is False, (
+        "AUDIT-01 regression: Condition D returned True on a broken-chain case "
+        "whose pre-computed label said 'VALID'.  This means it is reading the label "
+        "instead of calling verify_evidence()."
+    )
 
 
 def test_condition_a_has_high_false_acceptance(_benchmark_metrics) -> None:
