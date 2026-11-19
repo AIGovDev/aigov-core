@@ -136,7 +136,7 @@ def audit(repo, number):
     old = legacy.signatures(repo)
     missing = []
     for login, uid in names.items():
-        if (login.casefold(), uid) in legacy.ALLOWLIST or (login in legacy.BOT_ALLOWLIST and uid in legacy.VERIFIED_BOT_IDS):
+        if (login.casefold(), uid) in legacy.ALLOWLIST or (login in legacy.BOT_IDENTITY_MAP and uid == legacy.BOT_IDENTITY_MAP[login]):
             continue
         if (login.casefold(), uid) in old:
             continue
