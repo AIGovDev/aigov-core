@@ -148,3 +148,18 @@ python/tests/test_independent_benchmark.py::test_condition_d_better_than_conditi
 python/tests/test_independent_benchmark.py::test_benchmark_runs_end_to_end PASSED
 7 passed in 0.07s
 ```
+
+---
+
+## Human approval gate
+
+Required reviewers: none (new benchmark harness, no production changes).
+
+This PR adds:
+- Read-only benchmark harness in `benchmarks/agent-verification/`
+- Read-only test file in `python/tests/`
+- Read-only report in `docs/reports/`
+
+No API keys, secrets, production data, or infrastructure changes. No staged
+rollout required. The real-agent evaluation path is BLOCKED (no ANTHROPIC_API_KEY)
+and is a no-op when the key is absent.
