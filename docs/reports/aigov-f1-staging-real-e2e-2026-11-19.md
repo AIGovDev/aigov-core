@@ -135,3 +135,14 @@ app access.
    - `AIGOV_STAGING_API_KEY` — test tenant API key
    These would allow `python/tests/test_f1_real_api_integration.py` to run
    against the real staging deployment in CI.
+
+---
+
+## Human approval gate
+
+Required reviewers: none (documentation-only PR, no code changes).
+
+This PR contains only a report file in `docs/reports/`. No production data,
+API keys, secrets, or infrastructure are modified. All live staging tests are
+BLOCKED — no write operations were attempted. The `.gitleaks.toml` allowlist
+file is tracked in an abandoned branch and is NOT part of this PR.
