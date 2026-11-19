@@ -306,9 +306,10 @@ def verify_evidence(pkg: EvidencePackage, *, expected_field_value: str | None = 
         "PASS" if pkg.approval.bound_to(pkg.proposal) else "FAIL"
     )
 
-    # 2. Payload re-derivation.
-    recomputed = pkg.proposal.payload_digest
-    checks["payload_intact"] = "PASS" if recomputed == pkg.proposal.payload_digest else "FAIL"
+    # 2. Payload re-derivation: re-hash canonical_payload and compare to what the approver signed.
+    # Catches payload-substitution: a different proposal body that shares the same approval object.
+    recomputed = "sha256:" + hashlib.sha256(pkg.proposal.canonical_payload).hexdigest()
+    checks["payload_intact"] = "PASS" if recomputed == pkg.approval.approved_payload_digest else "FAIL"
 
     # 3. Executed value matches proposal.
     checks["execution_match"] = (

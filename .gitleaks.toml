@@ -1,0 +1,7 @@
+title = "AIGov gitleaks config"
+
+[allowlist]
+  description = "Synthetic test-fixture credentials are not real secrets"
+  paths = [
+    '''python/tests/test_f1_real_api_integration\.py''',
+  ]

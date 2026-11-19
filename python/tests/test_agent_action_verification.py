@@ -441,3 +441,48 @@ def test_aav_14_payload_digest_is_stable_sha256_format() -> None:
     digest = proposal.payload_digest
     assert digest.startswith("sha256:")
     assert len(digest) == len("sha256:") + 64
+
+
+def test_aav_15_payload_intact_detects_substituted_proposal() -> None:
+    """
+    Payload substitution: build an EvidencePackage where the approval was
+    legitimately issued for proposal_A, but the package wraps proposal_B
+    (same approval, different proposal body). payload_intact must FAIL.
+
+    Previously this check always PASSed (tautological self-comparison).
+    """
+    proposal_a = _base_proposal()
+    proposal_b = AgentProposal(
+        proposal_id=str(uuid.uuid4()),
+        agent_id=_AGENT,
+        tenant_id=_TENANT,
+        record_id=_RECORD_ID,
+        field="deadline",
+        proposed_value="2099-01-01T00:00:00Z",  # different value
+        rationale="substituted rationale",
+    )
+    # Approval bound to proposal_A, not proposal_B
+    approval_for_a = HumanApproval(
+        approval_id=str(uuid.uuid4()),
+        approver_id="reviewer-01",
+        proposal_id=proposal_a.proposal_id,
+        approved_payload_digest=proposal_a.payload_digest,
+    )
+    execution = ExecutionResult(
+        execution_id=str(uuid.uuid4()),
+        success=True,
+        executed_field="deadline",
+        executed_value=proposal_b.proposed_value,
+        readback_value=proposal_b.proposed_value,
+    )
+    # Build package with proposal_B but approval_for_A
+    pkg = EvidencePackage(
+        evidence_id=str(uuid.uuid4()),
+        proposal=proposal_b,
+        approval=approval_for_a,
+        execution=execution,
+    )
+    result = verify_evidence(pkg)
+    assert result.checks["payload_intact"] == "FAIL", (
+        "payload_intact must FAIL when proposal payload does not match what the approver signed"
+    )
