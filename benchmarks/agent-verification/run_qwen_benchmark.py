@@ -254,6 +254,30 @@ def run_qwen_benchmark(
     qwen_metrics["n_tool_calls"] = sum(len(t.tool_calls) for t in traces)
     qwen_metrics["peak_memory_mb"] = round(mem_peak / 1024 / 1024, 1)
 
+    # Verdict source breakdown: model_tool / prose_parse / fallback
+    n_model_tool = sum(1 for t in traces if t.verdict_source == "model_tool")
+    n_prose = sum(1 for t in traces if t.verdict_source == "prose_parse")
+    n_fallback = sum(1 for t in traces if t.verdict_source == "fallback")
+    qwen_metrics["verdict_source_counts"] = {
+        "model_tool": n_model_tool,
+        "prose_parse": n_prose,
+        "fallback": n_fallback,
+    }
+
+    # Separate accuracy for model-generated vs fallback verdicts
+    model_preds = [(t.verdict, s.ground_truth) for t, s in zip(traces, dataset)
+                   if t.verdict_source in ("model_tool", "prose_parse")]
+    fallback_preds = [(t.verdict, s.ground_truth) for t, s in zip(traces, dataset)
+                      if t.verdict_source == "fallback"]
+    if model_preds:
+        mp, mg = zip(*model_preds)
+        model_m = compute_confusion(list(mp), list(mg))
+        qwen_metrics["model_generated_metrics"] = model_m
+    if fallback_preds:
+        fp_v, fg = zip(*fallback_preds)
+        fb_m = compute_confusion(list(fp_v), list(fg))
+        qwen_metrics["fallback_metrics"] = fb_m
+
     print(f"\nQwen agent (Condition E — real local model):")
     print(
         f"  F1={qwen_metrics['f1']:.3f}  FAR={qwen_metrics['far']:.3f}  "
@@ -262,6 +286,7 @@ def run_qwen_benchmark(
         f"n_tool_calls={qwen_metrics['n_tool_calls']}  "
         f"parse_errors={qwen_metrics['n_parse_errors']}"
     )
+    print(f"  Verdict sources: model_tool={n_model_tool} prose_parse={n_prose} fallback={n_fallback}")
     print(f"  Total inference: {qwen_metrics['total_ms']:.0f} ms "
           f"| avg per scenario: {qwen_metrics['avg_inference_ms']:.0f} ms")
     print(f"  Peak memory (traced): {qwen_metrics['peak_memory_mb']:.1f} MB")
@@ -316,6 +341,7 @@ def run_qwen_benchmark(
             {
                 "scenario_id": t.scenario_id,
                 "verdict": t.verdict,
+                "verdict_source": t.verdict_source,
                 "ground_truth": s.ground_truth,
                 "correct": t.verdict == s.ground_truth,
                 "n_tool_calls": len(t.tool_calls),

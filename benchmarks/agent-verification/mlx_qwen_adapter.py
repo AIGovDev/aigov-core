@@ -100,6 +100,10 @@ class AgentTrace:
     raw_response: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     verdict: bool | None = None
+    # "model_tool"  — model called report_verdict explicitly
+    # "prose_parse" — verdict inferred from model prose (no tool call)
+    # "fallback"    — model never emitted a verdict; default=False applied
+    verdict_source: str = "fallback"
     reasoning: str = ""
     parse_error: str | None = None
     timeout: bool = False
@@ -414,8 +418,10 @@ class QwenAgent:
                         low = raw.lower()
                         if "authorized" in low and "correct" in low and "not" not in low[:100]:
                             trace.verdict = True
+                            trace.verdict_source = "prose_parse"
                         elif "unauthorized" in low or "invalid" in low or "not authorized" in low or "not correct" in low:
                             trace.verdict = False
+                            trace.verdict_source = "prose_parse"
                         else:
                             trace.parse_error = f"No tool call and no parseable verdict at step {step}"
                     break
@@ -439,6 +445,7 @@ class QwenAgent:
                 if tool_name == "report_verdict":
                     trace.verdict = bool(tool_args.get("authorized_and_correct", False))
                     trace.reasoning = tool_args.get("reasoning", "")
+                    trace.verdict_source = "model_tool"
                     verdict_reported = True
                     break
 
