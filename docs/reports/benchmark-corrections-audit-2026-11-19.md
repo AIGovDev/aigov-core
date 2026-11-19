@@ -6,7 +6,7 @@ PR #442 (`feat/benchmark-corrections` → `staging`) corrects three issues found
 
 Source: https://github.com/AIGovDev/aigov-core/pull/442
 
-## Changes
+## Evaluation gate
 
 ### 1. Staging E2E fixture — GOVAI_API_KEYS mismatch (python/tests/test_staging_e2e.py)
 
