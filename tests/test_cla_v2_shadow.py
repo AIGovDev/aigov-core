@@ -105,6 +105,18 @@ class ShadowTests(unittest.TestCase):
         with patch.object(cla, "get", return_value={"user": {"login": "dependabot[bot]", "id": 999}, "commits": 1}), patch.object(cla, "contributors", return_value={"dependabot[bot]": 999}), patch.object(cla, "signatures", return_value=set()):
             self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["dependabot[bot]"])
 
+    def test_bot_cross_paired_id_is_unsigned(self):
+        # dependabot[bot] with github-actions[bot]'s ID must not be exempted.
+        # Independent set membership (login in BOT_SET and uid in ID_SET) would
+        # incorrectly exempt this pair; a dict lookup does not.
+        actions_id = 41898282  # github-actions[bot]'s ID, NOT dependabot's
+        with patch.object(cla, "get", return_value={"user": {"login": "dependabot[bot]", "id": actions_id}, "commits": 1}), patch.object(cla, "contributors", return_value={"dependabot[bot]": actions_id}), patch.object(cla, "signatures", return_value=set()):
+            self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["dependabot[bot]"])
+
+    def test_correct_bot_identity_is_exempted(self):
+        with patch.object(cla, "get", return_value={"user": {"login": "dependabot[bot]", "id": 49699333}, "commits": 1}), patch.object(cla, "contributors", return_value={"dependabot[bot]": 49699333}), patch.object(cla, "signatures", return_value=set()):
+            self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], [])
+
     def test_api_error_fails_closed(self):
         with patch.object(cla, "get", return_value={"user": {"login": "alice", "id": 42}, "commits": 1}), patch.object(cla, "contributors", side_effect=cla.AuditError("API unavailable")):
             with self.assertRaises(cla.AuditError):

@@ -9,10 +9,12 @@ import urllib.request
 
 API = "https://api.github.com"
 ALLOWLIST = {("monikadvorackova", 95243292)}
-BOT_ALLOWLIST = {"dependabot[bot]", "github-actions[bot]"}
-# Never exempt a bot based on its display login alone. These are the GitHub
-# account IDs of the two official service identities.
-VERIFIED_BOT_IDS = {49699333, 41898282}
+# Maps each exempted bot login to its verified GitHub numeric account ID.
+# Never use independent login/ID sets — a cross-paired login+ID must not be exempt.
+BOT_IDENTITY_MAP = {
+    "dependabot[bot]": 49699333,
+    "github-actions[bot]": 41898282,
+}
 CONSENT = "I have read the CLA Document and I hereby sign the CLA"
 
 class AuditError(Exception):
@@ -128,7 +130,7 @@ def audit(repo, number):
         raise AuditError("Conflicting PR submitter identity")
     names[login] = uid
     signed = signatures(repo)
-    missing = sorted(login for login, uid in names.items() if (login.casefold(), uid) not in ALLOWLIST and not (login in BOT_ALLOWLIST and uid in VERIFIED_BOT_IDS) and (login.casefold(), uid) not in signed)
+    missing = sorted(login for login, uid in names.items() if (login.casefold(), uid) not in ALLOWLIST and not (login in BOT_IDENTITY_MAP and uid == BOT_IDENTITY_MAP[login]) and (login.casefold(), uid) not in signed)
     return {"approved": not missing, "authors": sorted(names), "unsigned": missing,
             "mode": "shadow-only", "legacy_signatures": True}
 
