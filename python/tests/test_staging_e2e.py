@@ -73,8 +73,11 @@ def _http(
 
 
 def _is_alive(url: str, key: str) -> bool:
-    code, _ = _http(f"{url}/ready", api_key=key, timeout=2.0)
-    return code == 200
+    try:
+        code, _ = _http(f"{url}/ready", api_key=key, timeout=2.0)
+        return code == 200
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +113,9 @@ def api_base() -> Generator[tuple[str, str], None, None]:
             api_key: TEST_TENANT,
             api_key_2: TEST_TENANT_2,
         }),
-        "GOVAI_API_KEYS": api_key,
+        # Both keys must appear in GOVAI_API_KEYS (comma-separated) or the binary
+        # logs a mismatch warning and returns 401 for the unregistered key.
+        "GOVAI_API_KEYS": f"{api_key},{api_key_2}",
         "AIGOV_ENVIRONMENT": "staging",
         "AIGOV_BIND": f"127.0.0.1:{port}",
         "AIGOV_POLICY_STRICT": "false",
