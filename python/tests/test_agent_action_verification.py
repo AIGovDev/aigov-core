@@ -441,3 +441,49 @@ def test_aav_14_payload_digest_is_stable_sha256_format() -> None:
     digest = proposal.payload_digest
     assert digest.startswith("sha256:")
     assert len(digest) == len("sha256:") + 64
+
+
+# ---------------------------------------------------------------------------
+# AAV-15: payload_intact detects substituted proposal body
+# ---------------------------------------------------------------------------
+
+def test_aav_15_payload_intact_detects_substituted_proposal() -> None:
+    """Approval is bound to proposal_A but the EvidencePackage carries proposal_B.
+
+    Before the fix, verify_evidence re-derived the digest from proposal_B and
+    compared it to proposal_B's own digest (a tautology — always PASS).  After
+    the fix it compares the re-derived digest of proposal_B against the digest
+    that was actually approved (proposal_A's digest), which is a mismatch.
+    """
+    # Build two proposals with different payloads.
+    proposal_a = _base_proposal()  # uses default _PROPOSED value
+    proposal_b = AgentProposal(   # substituted body — different proposed_value
+        proposal_id=str(uuid.uuid4()),
+        agent_id=_AGENT,
+        tenant_id=_TENANT,
+        record_id=_RECORD_ID,
+        field="deadline",
+        proposed_value="2099-12-31T00:00:00Z",
+        rationale="Substituted rationale.",
+    )
+    assert proposal_a.payload_digest != proposal_b.payload_digest
+
+    # Approval is legitimately issued for proposal_A.
+    gate = ApprovalGate()
+    approval_for_a = gate.issue(approver_id=_APPROVER, proposal=proposal_a)
+    assert approval_for_a.approved_payload_digest == proposal_a.payload_digest
+
+    # Package is built with proposal_B but approval_for_A — simulating substitution.
+    execution = _base_execution(executed_value="2099-12-31T00:00:00Z",
+                                readback="2099-12-31T00:00:00Z")
+    pkg = EvidencePackage(
+        evidence_id=str(uuid.uuid4()),
+        proposal=proposal_b,
+        approval=approval_for_a,
+        execution=execution,
+    )
+
+    result = verify_evidence(pkg)
+    assert result.checks["payload_intact"] == "FAIL", (
+        "payload_intact must FAIL when proposal body was substituted after approval"
+    )
