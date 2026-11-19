@@ -1,7 +1,7 @@
 # AIGov Core CI: portable runtime / evidence infrastructure (no hosted HTTP audit server).
 # Hosted SaaS lifecycle (GET /ready, background audit service) belongs to the GovAI Platform repo.
 
-name: govai-ci
+name: aigov-ci
 
 on:
   pull_request:
@@ -108,8 +108,8 @@ jobs:
       - name: Portable artifact bundle smoke (offline)
         run: |
           set -euo pipefail
-          RUN_ID="govai-ci-portable-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          ART="${RUNNER_TEMP}/govai-ci-artifacts"
+          RUN_ID="aigov-ci-portable-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ART="${RUNNER_TEMP}/aigov-ci-artifacts"
           rm -rf "${ART}"
           mkdir -p "${ART}"
           python3 scripts/ci_portable_artifact_bundle.py \
