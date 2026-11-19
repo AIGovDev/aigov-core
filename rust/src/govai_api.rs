@@ -405,14 +405,17 @@ async fn bundle_for_run(
     };
 
     if events.is_empty() {
-        return Json(json!({
-            "ok": false,
-            "error": "run_not_found",
-            "message": "No events for run_id in tenant ledger.",
-            "policy_version": policy_version,
-            "run_id": run_id,
-        }))
-        .into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "ok": false,
+                "error": "run_not_found",
+                "message": "No events for run_id in tenant ledger.",
+                "policy_version": policy_version,
+                "run_id": run_id,
+            })),
+        )
+            .into_response();
     }
 
     let doc = bundle_document_value(run_id, &policy_version, &log_path, &events);
@@ -548,14 +551,17 @@ async fn compliance_summary_for_run(
     };
 
     if events.is_empty() {
-        return Json(compliance_summary_error_json(
-            run_id,
-            &policy_version,
-            "run_not_found",
-            "No events for run_id in tenant ledger.",
-            None,
-        ))
-        .into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(compliance_summary_error_json(
+                run_id,
+                &policy_version,
+                "run_not_found",
+                "No events for run_id in tenant ledger.",
+                None,
+            )),
+        )
+            .into_response();
     }
 
     let artifact = find_model_artifact_path(&events);
@@ -665,13 +671,16 @@ async fn verify_ledger(
             if let Some(rid) = run_id_filter {
                 let events = collect_events_for_run(&log_path, rid).unwrap_or_default();
                 if events.is_empty() {
-                    return Json(json!({
-                        "ok": false,
-                        "error": "run_not_found",
-                        "message": "No events for run_id in tenant ledger.",
-                        "run_id": rid,
-                    }))
-                    .into_response();
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({
+                            "ok": false,
+                            "error": "run_not_found",
+                            "message": "No events for run_id in tenant ledger.",
+                            "run_id": rid,
+                        })),
+                    )
+                        .into_response();
                 }
             }
             Json(json!({ "ok": true, "message": "chain valid" })).into_response()
