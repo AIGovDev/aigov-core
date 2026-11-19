@@ -111,3 +111,17 @@ scripts/check_cla_workflow_security.py: PASS
 | `CLA v2 / agreement` | `cla-v2-production.yml` | Unchanged |
 | ~~`python-govai`~~ | ~~deleted `python-govai.yml`~~ | Removed (not a required check) |
 | ~~`govai-ci`~~ | ~~deleted `govai-ci.yml`~~ | Removed (not a required check) |
+
+---
+
+## Human approval gate
+
+Required reviewers: none (non-breaking rename cleanup).
+
+This change is fully automated and mechanical:
+- Deletes duplicate workflow files left behind by merge algorithm
+- Updates display names in workflow YAML
+- Updates env var precedence in Python source (additive, non-breaking)
+- All required CI check names are preserved and unchanged
+
+No staged rollout or policy sign-off required.
