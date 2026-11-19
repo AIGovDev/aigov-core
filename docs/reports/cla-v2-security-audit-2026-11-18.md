@@ -217,6 +217,37 @@ regression tests; it was not exploitable in production.
 
 ---
 
+## Evaluation gate
+
+| Test | Command | Result |
+|------|---------|--------|
+| CLA v2 unit suite | `python3 -m unittest discover -s tests -p 'test_cla_v2_*.py'` | 33 passed, 0 failed |
+| CLA workflow security guard | `python3 scripts/check_cla_workflow_security.py` | PASS |
+| Gate reports check | `python3 scripts/gate_reports.py` | PASS (after adding this heading) |
+| Cursor plugin smoke | `python3 scripts/smoke_cursor_plugin.py` | PASS |
+| Required status checks (main) | GitHub API — rulesets/18716261 | `aigov-core-portable`, `CLA v2 / agreement` |
+| Required status checks (staging) | GitHub API — rulesets/18716264 | `aigov-core-portable`, `cargo-audit`, `CLA v2 / agreement` |
+| Unsigned E2E | PR #108 `CLA v2 / agreement = failure` | 2026-11-18T15:18:31Z |
+| Signed E2E | PR #424 run 44090159750 `CLA v2 / agreement = success` | Verified |
+
+Findings: 1 low-severity code defect (bot identity cross-pairing, FINDING-1) — fixed in this PR.
+No critical or high-severity findings.
+
+---
+
+## Human approval gate
+
+A maintainer must:
+
+1. Inspect the diff in `fix/cla-v2-bot-identity-pairing` (PR #431) and confirm the
+   `BOT_IDENTITY_MAP` change correctly maps each bot login to its expected numeric ID.
+2. Confirm all required CI checks pass on PR #431 before merging.
+3. Confirm that FINDING-1 is acceptable as a low-severity fix (not exploitable in production).
+4. No change to rulesets, branch protection, or workflow permissions is authorized by this report.
+5. Merge authorization is the maintainer's responsibility; this report does not grant it.
+
+---
+
 ## Evidence references
 
 | Item | Reference |
