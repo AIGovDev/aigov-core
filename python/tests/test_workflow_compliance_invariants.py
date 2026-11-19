@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_govai_ci_is_portable_without_localhost_audit_orchestration() -> None:
-    p = REPO_ROOT / ".github/workflows/govai-ci.yml"
+    p = REPO_ROOT / ".github/workflows/aigov-ci.yml"
     t = p.read_text(encoding="utf-8")
     assert "aigov-core-portable" in t
     assert "ci_portable_artifact_bundle.py" in t
@@ -27,7 +27,7 @@ def test_compliance_workflow_does_not_poll_ready_or_start_local_audit() -> None:
 
 
 def test_govai_smoke_remains_manual_operator_workflow() -> None:
-    p = REPO_ROOT / ".github/workflows/govai-smoke.yml"
+    p = REPO_ROOT / ".github/workflows/aigov-smoke.yml"
     t = p.read_text(encoding="utf-8")
     assert "workflow_dispatch" in t
     assert "AIGov Core CI does NOT" in t or "manual" in t.lower()

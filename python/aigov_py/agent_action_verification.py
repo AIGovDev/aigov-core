@@ -224,12 +224,31 @@ class ApprovalGate:
 # Evidence recorder
 # ---------------------------------------------------------------------------
 
+def make_aigov_post_fn(client: Any) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """
+    Return a post_fn that submits evidence to the real AIGov HTTP API.
+
+    Usage:
+        from govai.client import GovAIClient
+        from govai.evidence import submit_event
+        client = GovAIClient(base_url=..., api_key=...)
+        recorder = EvidenceRecorder(post_fn=make_aigov_post_fn(client))
+
+    This wires EvidenceRecorder to the actual append-only ledger instead of
+    the in-memory stub used by unit tests and the portable demo.
+    """
+    from govai.evidence import submit_event  # type: ignore[import]
+    return lambda event: submit_event(client, event)
+
+
 class EvidenceRecorder:
     def __init__(
         self,
         post_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
-        self._post = post_fn or (lambda d: {"ok": True, "record_hash": "mocked"})
+        # When post_fn is None, evidence is recorded in memory only (portable/unit-test mode).
+        # For production use, pass post_fn=make_aigov_post_fn(client) to persist to the ledger.
+        self._post = post_fn or (lambda d: {"ok": True, "record_hash": "in-memory-only"})
         self._packages: list[EvidencePackage] = []
 
     def record(

@@ -207,3 +207,10 @@ class GovAIClient:
     ) -> Any:
         path = f"/api/functions/v2/{run_id}/governance-scorecard"
         return self.request_json("GET", path, headers=extra_headers, timeout=timeout)
+
+
+# Canonical AIGov alias — new code should prefer AIGovClient.
+AIGovClient = GovAIClient
+AIGovError = GovAIError
+AIGovHTTPError = GovAIHTTPError
+AIGovAPIError = GovAIAPIError

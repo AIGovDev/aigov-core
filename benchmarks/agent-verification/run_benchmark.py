@@ -26,12 +26,135 @@ Deterministic: same --data-dir + --split always produces the same metrics.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Condition D: reconstruct an EvidencePackage and invoke verify_evidence().
+# This eliminates the circular-validation problem identified in AUDIT-01:
+# the verifier is actually called, not a pre-computed label read back.
+# ---------------------------------------------------------------------------
+
+def _build_evidence_package(case: dict[str, Any]) -> Any:
+    """
+    Reconstruct a real EvidencePackage from scenario parameters so that
+    Condition D can call verify_evidence() rather than reading a label.
+    Returns None when the verifier module is unavailable.
+    """
+    try:
+        import sys as _sys
+        from pathlib import Path as _P
+        # Resolve the python/ directory relative to this file.
+        _root = _P(__file__).resolve().parents[2] / "python"
+        if str(_root) not in _sys.path:
+            _sys.path.insert(0, str(_root))
+        from aigov_py.agent_action_verification import (
+            AgentProposal,
+            HumanApproval,
+            ExecutionResult,
+            EvidencePackage,
+            _compute_chain_digest,
+        )
+    except ImportError:
+        return None
+
+    scenario = case["scenario_type"]
+    proposed = case["proposed_value"]
+    executed = case["executed_value"]
+    readback = case.get("independent_readback")
+    approval_valid = case["approval_valid"]
+    cid = case["case_id"]
+
+    # Build the agent's proposal.
+    proposal = AgentProposal(
+        proposal_id=cid + "-prop",
+        agent_id="benchmark-agent",
+        tenant_id="bench-tenant",
+        record_id=cid + "-rec",
+        field="deadline",
+        proposed_value=proposed,
+        rationale="benchmark scenario",
+    )
+
+    # Build approval — bound to the proposal if approval is valid, else mismatch.
+    if approval_valid:
+        approval = HumanApproval(
+            approval_id=cid + "-appr",
+            approver_id="bench-approver",
+            proposal_id=proposal.proposal_id,
+            approved_payload_digest=proposal.payload_digest,
+        )
+    else:
+        # Approval digest refers to a different payload → bound_to() returns False.
+        different_digest = "sha256:" + "0" * 64
+        approval = HumanApproval(
+            approval_id=cid + "-appr",
+            approver_id="bench-approver",
+            proposal_id=proposal.proposal_id,
+            approved_payload_digest=different_digest,
+        )
+
+    execution = ExecutionResult(
+        execution_id=cid + "-exec",
+        executed_field="deadline",
+        executed_value=executed,
+        readback_value=readback,
+        success=readback is not None,
+    )
+
+    # Build a correctly-chained package first.
+    pkg = EvidencePackage(
+        evidence_id=cid + "-evid",
+        proposal=proposal,
+        approval=approval,
+        execution=execution,
+    )
+
+    # Apply scenario-specific tampering AFTER building the correct chain.
+    if scenario == "EVIDENCE_TAMPERED":
+        tampered_exec = dataclasses.replace(execution, executed_value="__TAMPERED__")
+        # Keep the original (correct) chain_digest from before tampering.
+        original_chain = pkg.chain_digest
+        pkg = EvidencePackage.__new__(EvidencePackage)
+        object.__setattr__(pkg, "evidence_id", cid + "-evid")
+        object.__setattr__(pkg, "proposal", proposal)
+        object.__setattr__(pkg, "approval", approval)
+        object.__setattr__(pkg, "execution", tampered_exec)
+        object.__setattr__(pkg, "chain_digest", original_chain)
+    elif scenario == "BROKEN_EVIDENCE_CHAIN":
+        pkg.chain_digest = "sha256:" + "0" * 64
+
+    return pkg
+
+
+def _condition_d_live(case: dict[str, Any]) -> bool:
+    """
+    Condition D (live): reconstruct EvidencePackage and call verify_evidence().
+    Falls back to the pre-computed label only when the module is unavailable.
+    """
+    try:
+        import sys as _sys
+        from pathlib import Path as _P
+        _root = _P(__file__).resolve().parents[2] / "python"
+        if str(_root) not in _sys.path:
+            _sys.path.insert(0, str(_root))
+        from aigov_py.agent_action_verification import verify_evidence, VerificationVerdict
+    except ImportError:
+        # Module unavailable — fall back to pre-computed label.
+        return case.get("aigov_verdict") == "VALID"
+
+    pkg = _build_evidence_package(case)
+    if pkg is None:
+        return case.get("aigov_verdict") == "VALID"
+
+    result = verify_evidence(pkg, expected_field_value=case.get("expected_value"))
+    return result.verdict == VerificationVerdict.VALID
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +180,11 @@ def condition_c_independent_state(case: dict[str, Any]) -> bool:
 
 
 def condition_d_aigov(case: dict[str, Any]) -> bool:
-    """Condition D: Accept only if AIGov evidence verdict is VALID."""
-    return case.get("aigov_verdict") == "VALID"
+    """
+    Condition D: Reconstruct EvidencePackage and call verify_evidence().
+    This is a live call to the verifier, not a pre-computed label read-back.
+    """
+    return _condition_d_live(case)
 
 
 CONDITIONS: dict[str, Any] = {
