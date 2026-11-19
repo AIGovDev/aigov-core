@@ -30,7 +30,11 @@ def main() -> None:
     system = os.getenv("AIGOV_SYSTEM", "aigov_poc")
 
     endpoint = (
-        os.getenv("GOVAI_AUDIT_BASE_URL") or os.getenv("AIGOV_AUDIT_ENDPOINT") or os.getenv("AIGOV_AUDIT_URL") or "http://127.0.0.1:8088"
+        os.getenv("AIGOV_AUDIT_BASE_URL")
+        or os.getenv("AIGOV_AUDIT_ENDPOINT")
+        or os.getenv("AIGOV_AUDIT_URL")
+        or os.getenv("GOVAI_AUDIT_BASE_URL")
+        or "http://127.0.0.1:8088"
     ).rstrip("/")
     url = f"{endpoint}/evidence"
 

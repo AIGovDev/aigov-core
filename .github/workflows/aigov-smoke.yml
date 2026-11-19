@@ -6,7 +6,7 @@
 # GovAI Platform hosted SaaS is optional and not part of AIGov Core CI.
 #
 # AIGov Core CI does NOT start localhost:8088, poll GET /ready, or run this workflow automatically.
-# Portable Core validation: `.github/workflows/govai-ci.yml` and `compliance.yml` → `evidence_pack`.
+# Portable Core validation: `.github/workflows/aigov-ci.yml` and `compliance.yml` → `evidence_pack`.
 # -----------------------------------------------------------------------------
 #
 # Required configuration (manual runs only — Settings → Secrets and variables → Actions):
@@ -15,7 +15,7 @@
 # - Secrets:
 #   - GOVAI_API_KEY — Bearer token for the audit API
 #
-name: govai-smoke
+name: aigov-smoke
 
 on:
   workflow_dispatch:
