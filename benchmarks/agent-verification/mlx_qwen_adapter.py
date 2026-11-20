@@ -201,12 +201,14 @@ _model = None
 _tokenizer = None
 
 
-def _ensure_model_loaded() -> tuple[Any, Any]:
+def _ensure_model_loaded(model_path: str | None = None) -> tuple[Any, Any]:
     global _model, _tokenizer
     if _model is None:
         try:
             from mlx_lm import load
-            _model, _tokenizer = load(MODEL_ID)
+            # Prefer a local path if provided (avoids HF download)
+            load_target = model_path if model_path else MODEL_ID
+            _model, _tokenizer = load(load_target)
         except ImportError as e:
             raise RuntimeError(
                 f"mlx_lm not available: {e}. Install with: pip install mlx-lm"
@@ -335,8 +337,8 @@ class QwenAgent:
     executes the tool-calling loop, and returns an AgentTrace.
     """
 
-    def __init__(self) -> None:
-        self._model, self._tokenizer = _ensure_model_loaded()
+    def __init__(self, model_path: str | None = None) -> None:
+        self._model, self._tokenizer = _ensure_model_loaded(model_path=model_path)
         try:
             import mlx_lm
             ADAPTER_METADATA["mlx_lm_version"] = mlx_lm.__version__
