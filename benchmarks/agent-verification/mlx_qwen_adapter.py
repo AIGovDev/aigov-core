@@ -103,6 +103,7 @@ class AgentTrace:
     # "model_tool"  — model called report_verdict explicitly
     # "prose_parse" — verdict inferred from model prose (no tool call)
     # "fallback"    — model never emitted a verdict; default=False applied
+    # "fail_closed" — gate max_steps reached without all required tools; forced False
     verdict_source: str = "fallback"
     reasoning: str = ""
     parse_error: str | None = None
@@ -111,6 +112,9 @@ class AgentTrace:
     total_ms: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    # Condition F — set when mandatory gate is active
+    gate_blocks: list[dict] = field(default_factory=list)
+    gate_active: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +339,8 @@ class QwenAgent:
     Loads the model once and re-uses it across benchmark scenarios.
     Each call receives a scenario summary + scenario-specific tool state,
     executes the tool-calling loop, and returns an AgentTrace.
+
+    Pass gate=MandatoryVerificationGate() to run Condition F (gate-enforced).
     """
 
     def __init__(self, model_path: str | None = None) -> None:
@@ -350,6 +356,7 @@ class QwenAgent:
         scenario_id: str,
         scenario_summary: dict[str, Any],
         scenario_state: dict[str, Any],
+        gate: "Any | None" = None,
     ) -> AgentTrace:
         """
         Execute the agent loop for one scenario.
@@ -370,7 +377,10 @@ class QwenAgent:
             model_id=MODEL_ID,
             prompt=build_prompt(scenario_summary),
             raw_response="",
+            gate_active=gate is not None,
         )
+        if gate is not None:
+            gate.reset_for_scenario()
 
         executor = SandboxToolExecutor(scenario_state)
         tools_list = list(TOOL_REGISTRY.values())
@@ -442,12 +452,35 @@ class QwenAgent:
                     ))
                     continue
 
+                # Mandatory gate check: intercept report_verdict before accepting it
+                if tool_name == "report_verdict" and gate is not None:
+                    gate_result = gate.check(trace.tool_calls)
+                    if not gate_result.allowed:
+                        # Gate blocks verdict — record the block and feed back rejection
+                        trace.gate_blocks.append({
+                            "step": step,
+                            "missing_tools": gate_result.missing_tools,
+                            "satisfied_tools": gate_result.satisfied_tools,
+                            "attempted_verdict": bool(tool_args.get("authorized_and_correct", False)),
+                        })
+                        gate_response = gate_result.as_tool_response()
+                        messages.append({"role": "assistant", "content": raw})
+                        messages.append({
+                            "role": "tool",
+                            "content": json.dumps(gate_response),
+                            "name": tool_name,
+                        })
+                        # Don't record the ToolCall for the blocked verdict; continue loop
+                        continue
+
                 trace.tool_calls.append(ToolCall(name=tool_name, arguments=tool_args, result=result))
 
                 if tool_name == "report_verdict":
                     trace.verdict = bool(tool_args.get("authorized_and_correct", False))
                     trace.reasoning = tool_args.get("reasoning", "")
                     trace.verdict_source = "model_tool"
+                    if gate is not None:
+                        gate.record_forced_completion()
                     verdict_reported = True
                     break
 
@@ -460,9 +493,27 @@ class QwenAgent:
                 })
 
             if not verdict_reported and trace.verdict is None:
-                # Fallback: use report_verdict tool if still pending
-                trace.parse_error = (trace.parse_error or "") + " | verdict not reported; defaulting to False"
-                trace.verdict = False
+                # Fail-closed when gate is active and required tools not all called
+                if gate is not None:
+                    from mandatory_verification_gate import check_all_required_tools_called
+                    gate_result = check_all_required_tools_called(trace.tool_calls)
+                    if not gate_result.allowed:
+                        trace.parse_error = (
+                            (trace.parse_error or "")
+                            + f" | gate: max_steps reached without all required tools "
+                            f"(missing: {gate_result.missing_tools}); fail-closed → False"
+                        )
+                        trace.verdict = False
+                        trace.verdict_source = "fail_closed"
+                        gate.record_fail_closed()
+                    else:
+                        # All required tools called but no verdict emitted
+                        trace.parse_error = (trace.parse_error or "") + " | verdict not reported after gate satisfied; defaulting to False"
+                        trace.verdict = False
+                else:
+                    # Fallback for non-gated run
+                    trace.parse_error = (trace.parse_error or "") + " | verdict not reported; defaulting to False"
+                    trace.verdict = False
 
         except Exception as exc:
             trace.parse_error = f"Inference error: {traceback.format_exc(limit=2)}"

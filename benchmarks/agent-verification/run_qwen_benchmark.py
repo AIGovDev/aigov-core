@@ -43,10 +43,12 @@ from independent_benchmark import (
     condition_b,
     condition_c,
     condition_d,
+    condition_f_scripted,
     compute_metrics,
     mcnemar_test,
 )
 from mlx_qwen_adapter import ADAPTER_METADATA, AgentTrace, QwenAgent
+from mandatory_verification_gate import MandatoryVerificationGate
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +181,7 @@ def run_qwen_benchmark(
     full: bool = False,
     model_path: str | None = None,
     out_path: str | None = None,
+    run_condition_f: bool = False,
 ) -> dict[str, Any]:
 
     if full:
@@ -207,6 +210,7 @@ def run_qwen_benchmark(
         print(f"Weights:   {model_path}")
     print(f"Dataset:   {dataset_label} ({n} scenarios, hash={ds_hash})")
     print(f"Platform:  {platform.machine()} / {platform.system()} {platform.release()}")
+    print(f"Condition F (gated): {'enabled' if run_condition_f else 'disabled (pass --condition-f to enable)'}")
     print()
 
     # Load model once
@@ -243,7 +247,7 @@ def run_qwen_benchmark(
     mem_peak, _ = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    # --- Scripted baselines (conditions A, B, C, D) ---
+    # --- Scripted baselines (conditions A, B, C, D, F_scripted) ---
     print("\nScripted baselines:")
     baseline_results: dict[str, Any] = {}
     for cond_name, cond_fn in [
@@ -251,6 +255,7 @@ def run_qwen_benchmark(
         ("B_tool_response", condition_b),
         ("C_external_state", condition_c),
         ("D_aigov_evidence", condition_d),
+        ("F_scripted_oracle", condition_f_scripted),
     ]:
         t0 = time.perf_counter()
         preds = [cond_fn(s) for s in dataset]
@@ -392,6 +397,99 @@ def run_qwen_benchmark(
             print(f"  {cat:<35} TP={m['tp']} FP={m['fp']} TN={m['tn']} FN={m['fn']} "
                   f"FAR={m['far']:.3f}")
 
+    # --- Condition F (Qwen + mandatory verification gate) ---
+    gated_metrics: dict[str, Any] = {}
+    gated_traces: list[AgentTrace] = []
+    gated_preds: list[bool | None] = []
+    gate_global_stats: dict[str, Any] = {}
+
+    if run_condition_f:
+        print("\nRunning Condition F (Qwen + mandatory verification gates)...")
+        gate = MandatoryVerificationGate()
+        t_f_start = time.perf_counter()
+
+        for i, s in enumerate(dataset):
+            print(f"  F[{i+1:2d}/{n}] {s.scenario_id}", end=" ", flush=True)
+            summary = build_scenario_summary(s)
+            state = build_scenario_state(s)
+            trace_f = agent.run(s.scenario_id, summary, state, gate=gate)
+            gated_traces.append(trace_f)
+            gated_preds.append(trace_f.verdict)
+
+            status = "✓" if trace_f.verdict == s.ground_truth else "✗"
+            gate_info = f" [blocked {len(trace_f.gate_blocks)}x]" if trace_f.gate_blocks else ""
+            print(
+                f"pred={trace_f.verdict!s:5} gt={s.ground_truth!s:5} {status} "
+                f"({trace_f.total_ms:.0f}ms){gate_info}"
+            )
+
+        f_total_ms = (time.perf_counter() - t_f_start) * 1000
+        gated_metrics = compute_confusion(gated_preds, gts)
+        gated_metrics["total_ms"] = round(f_total_ms, 1)
+        gated_metrics["avg_inference_ms"] = round(
+            sum(t.inference_ms for t in gated_traces) / n if n > 0 else 0, 1
+        )
+        gated_metrics["n_parse_errors"] = sum(1 for t in gated_traces if t.parse_error)
+        gated_metrics["n_tool_calls"] = sum(len(t.tool_calls) for t in gated_traces)
+        gated_metrics["n_gate_blocks"] = sum(len(t.gate_blocks) for t in gated_traces)
+        gated_metrics["n_fail_closed"] = sum(
+            1 for t in gated_traces if t.verdict_source == "fail_closed"
+        )
+
+        # Verdict source breakdown for Condition F
+        f_n_model_tool = sum(1 for t in gated_traces if t.verdict_source == "model_tool")
+        f_n_fallback = sum(1 for t in gated_traces if t.verdict_source == "fallback")
+        f_n_fail_closed = sum(1 for t in gated_traces if t.verdict_source == "fail_closed")
+        gated_metrics["verdict_source_counts"] = {
+            "model_tool": f_n_model_tool,
+            "fallback": f_n_fallback,
+            "fail_closed": f_n_fail_closed,
+        }
+
+        gate_global_stats = {
+            "total_blocks": gate.stats.total_blocks,
+            "scenarios_blocked": gate.stats.scenarios_blocked,
+            "scenarios_forced_complete": gate.stats.scenarios_forced_complete,
+            "extra_steps": gate.stats.extra_steps,
+            "fail_closed_verdicts": gate.stats.fail_closed_verdicts,
+        }
+
+        # Latency delta: Condition F vs E
+        e_avg = qwen_metrics.get("avg_inference_ms", 0)
+        f_avg = gated_metrics.get("avg_inference_ms", 0)
+        gated_metrics["latency_overhead_vs_e_pct"] = round(
+            100.0 * (f_avg - e_avg) / e_avg if e_avg > 0 else 0.0, 1
+        )
+
+        print(f"\nCondition F (Qwen + gate):")
+        print(
+            f"  F1={gated_metrics['f1']:.3f}  FAR={gated_metrics['far']:.3f}  "
+            f"Acc={gated_metrics['accuracy']:.3f} "
+            f"[{gated_metrics['accuracy_ci_95'][0]:.3f},{gated_metrics['accuracy_ci_95'][1]:.3f}]"
+        )
+        print(f"  Gate blocks: {gate.stats.total_blocks}  "
+              f"Scenarios blocked: {gate.stats.scenarios_blocked}  "
+              f"Forced completions: {gate.stats.scenarios_forced_complete}  "
+              f"Fail-closed: {gate.stats.fail_closed_verdicts}")
+        print(f"  Latency overhead vs E: {gated_metrics['latency_overhead_vs_e_pct']:+.1f}%")
+
+        # Unsafe actions blocked by gate (FAs in E that become TNs in F)
+        unsafe_blocked = sum(
+            1 for t_e, t_f, s in zip(traces, gated_traces, dataset)
+            if not s.ground_truth and t_e.verdict is True and t_f.verdict is False
+        )
+        # Legitimate actions incorrectly blocked by gate (TPs in E → FNs in F)
+        legit_blocked = sum(
+            1 for t_e, t_f, s in zip(traces, gated_traces, dataset)
+            if s.ground_truth and t_e.verdict is True and t_f.verdict is False
+        )
+        gated_metrics["unsafe_actions_blocked"] = unsafe_blocked
+        gated_metrics["legitimate_actions_blocked"] = legit_blocked
+        print(f"  Unsafe actions blocked: {unsafe_blocked}  "
+              f"Legitimate actions incorrectly blocked: {legit_blocked}")
+    else:
+        print("\nCondition F skipped (pass --condition-f to enable the gated run).")
+
     # --- McNemar: paired D vs E comparison ---
     preds_d = [condition_d(s) for s in dataset]
     preds_e = [t.verdict for t in traces]
@@ -400,6 +498,22 @@ def run_qwen_benchmark(
           f"sig={mcnemar_de['significant_p05']} (n_discordant={mcnemar_de['n_discordant']})")
     print(f"  b (D correct, E wrong)={mcnemar_de['b']}  "
           f"c (D wrong, E correct)={mcnemar_de['c']}")
+
+    # --- McNemar: D vs F and E vs F (only if Condition F was run) ---
+    mcnemar_df: dict[str, Any] = {}
+    mcnemar_ef: dict[str, Any] = {}
+    if run_condition_f and gated_preds:
+        preds_f = [t.verdict for t in gated_traces]
+        mcnemar_df = mcnemar_test(preds_d, preds_f, gts)
+        mcnemar_ef = mcnemar_test(preds_e, preds_f, gts)
+        print(f"\nMcNemar D vs F: chi2={mcnemar_df['chi2']} p={mcnemar_df['p_value']} "
+              f"sig={mcnemar_df['significant_p05']} (n_discordant={mcnemar_df['n_discordant']})")
+        print(f"  b (D correct, F wrong)={mcnemar_df['b']}  "
+              f"c (D wrong, F correct)={mcnemar_df['c']}")
+        print(f"McNemar E vs F: chi2={mcnemar_ef['chi2']} p={mcnemar_ef['p_value']} "
+              f"sig={mcnemar_ef['significant_p05']} (n_discordant={mcnemar_ef['n_discordant']})")
+        print(f"  b (E correct, F wrong)={mcnemar_ef['b']}  "
+              f"c (E wrong, F correct)={mcnemar_ef['c']}")
 
     # --- Git metadata ---
     git_sha = "unknown"
@@ -430,8 +544,13 @@ def run_qwen_benchmark(
         "conditions": {
             **baseline_results,
             "E_qwen_local": qwen_metrics,
+            **({"F_qwen_gated": gated_metrics} if run_condition_f else {}),
         },
         "mcnemar_D_vs_E": mcnemar_de,
+        **({"mcnemar_D_vs_F": mcnemar_df} if run_condition_f else {}),
+        **({"mcnemar_E_vs_F": mcnemar_ef} if run_condition_f else {}),
+        **({"gate_stats": gate_global_stats} if run_condition_f else {}),
+        "condition_f_enabled": run_condition_f,
         "category_results": category_results,
         "failures": failures,
         "traces": [
@@ -453,6 +572,26 @@ def run_qwen_benchmark(
             }
             for t, s in zip(traces, dataset)
         ],
+        **({"traces_f": [
+            {
+                "scenario_id": t.scenario_id,
+                "verdict": t.verdict,
+                "verdict_source": t.verdict_source,
+                "ground_truth": s.ground_truth,
+                "correct": t.verdict == s.ground_truth,
+                "n_tool_calls": len(t.tool_calls),
+                "tool_calls": [
+                    {"name": tc.name, "result": tc.result, "error": tc.error}
+                    for tc in t.tool_calls
+                ],
+                "gate_blocks": t.gate_blocks,
+                "parse_error": t.parse_error,
+                "reasoning": getattr(t, "reasoning", ""),
+                "inference_ms": round(t.inference_ms, 1),
+                "total_ms": round(t.total_ms, 1),
+            }
+            for t, s in zip(gated_traces, dataset)
+        ]} if run_condition_f else {}),
     }
 
     if out_path:
@@ -470,6 +609,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke", action="store_true", help="Run only 3 scenarios")
     parser.add_argument("--full", action="store_true", help="Use full 70-scenario dataset")
+    parser.add_argument("--condition-f", action="store_true", help="Run Condition F (Qwen + mandatory verification gates)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model-path", default=None, help="Local model weights path")
     parser.add_argument("--out", default=None, help="JSON output path")
@@ -481,9 +621,15 @@ if __name__ == "__main__":
         full=args.full,
         model_path=args.model_path,
         out_path=args.out,
+        run_condition_f=args.condition_f,
     )
 
     print(f"\n{'='*60}")
     print("BENCHMARK COMPLETE")
-    print(f"  Real-agent (Qwen E_local): F1={report['conditions']['E_qwen_local']['f1']:.3f}")
-    print(f"  Scripted baseline (D AIGov): F1={report['conditions']['D_aigov_evidence']['f1']:.3f}")
+    print(f"  Scripted baseline (D AIGov):        F1={report['conditions']['D_aigov_evidence']['f1']:.3f}")
+    print(f"  Real-agent (E Qwen, ungated):       F1={report['conditions']['E_qwen_local']['f1']:.3f}")
+    if report.get("condition_f_enabled"):
+        f_metrics = report["conditions"].get("F_qwen_gated", {})
+        print(f"  Real-agent (F Qwen, gated):         F1={f_metrics.get('f1', 'N/A')}")
+        print(f"  Unsafe actions blocked by gate:     {f_metrics.get('unsafe_actions_blocked', 'N/A')}")
+        print(f"  Legitimate actions blocked by gate: {f_metrics.get('legitimate_actions_blocked', 'N/A')}")
