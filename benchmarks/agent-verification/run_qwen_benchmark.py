@@ -8,11 +8,14 @@ The external-state oracle is fully independent of:
   - the AIGov verifier (verify_evidence)
 
 Usage:
-    python run_qwen_benchmark.py [--smoke] [--seed 42] [--out results_qwen.json]
+    python run_qwen_benchmark.py [--smoke] [--seed 42] [--full] [--out results_qwen.json]
+                                 [--model-path PATH]
 
-    --smoke   Run only the first 3 scenarios (fast validation)
-    --seed N  Scenario dataset seed (default: 42)
-    --out     Write full JSON results to file
+    --smoke        Run only the first 3 scenarios (fast validation)
+    --seed N       Scenario dataset seed (default: 42)
+    --full         Use the full 70-scenario dataset (base 20 + expanded 50)
+    --model-path   Path to local model weights (default: ~/models/Qwen2.5-3B-Instruct-4bit)
+    --out          Write full JSON results to file
 """
 
 from __future__ import annotations
@@ -35,11 +38,13 @@ sys.path.insert(0, str(REPO_ROOT / "python"))
 from independent_benchmark import (
     Scenario,
     build_dataset,
+    build_full_dataset,
     condition_a,
     condition_b,
     condition_c,
     condition_d,
     compute_metrics,
+    mcnemar_test,
 )
 from mlx_qwen_adapter import ADAPTER_METADATA, AgentTrace, QwenAgent
 
@@ -171,28 +176,44 @@ def compute_confusion(preds: list[bool | None], gts: list[bool]) -> dict[str, An
 def run_qwen_benchmark(
     seed: int = 42,
     smoke: bool = False,
+    full: bool = False,
+    model_path: str | None = None,
     out_path: str | None = None,
 ) -> dict[str, Any]:
 
-    dataset = build_dataset(seed=seed)
+    if full:
+        dataset = build_full_dataset(seed_base=seed, seed_expanded=7)
+        dataset_label = f"full-70 (base seed={seed}, expanded seed=7)"
+    else:
+        dataset = build_dataset(seed=seed)
+        dataset_label = f"base-20 (seed={seed})"
+
     if smoke:
-        # Smoke test: first 3 scenarios (1 positive, 2 negatives)
         dataset = dataset[:3]
+        dataset_label += " [SMOKE]"
+
+    # Dataset hash — reproducibility anchor
+    import hashlib as _hl
+    ds_hash = _hl.sha256(
+        json.dumps([s.scenario_id for s in dataset]).encode()
+    ).hexdigest()[:16]
 
     n = len(dataset)
     print(f"\n{'='*60}")
     print(f"AIGov Real-Agent Benchmark — Qwen2.5-3B-Instruct-4bit via MLX")
     print(f"{'='*60}")
-    print(f"Model:    {ADAPTER_METADATA['model_id']}")
-    print(f"Scenarios: {n} (seed={seed}){' [SMOKE TEST]' if smoke else ''}")
-    print(f"Platform: {platform.machine()} / {platform.system()} {platform.release()}")
+    print(f"Model:     {ADAPTER_METADATA['model_id']}")
+    if model_path:
+        print(f"Weights:   {model_path}")
+    print(f"Dataset:   {dataset_label} ({n} scenarios, hash={ds_hash})")
+    print(f"Platform:  {platform.machine()} / {platform.system()} {platform.release()}")
     print()
 
     # Load model once
     t_load_start = time.perf_counter()
     print("Loading model...", flush=True)
     tracemalloc.start()
-    agent = QwenAgent()
+    agent = QwenAgent(model_path=model_path)
     load_ms = (time.perf_counter() - t_load_start) * 1000
     mem_after_load, _ = tracemalloc.get_traced_memory()
     print(f"Model loaded in {load_ms:.0f} ms\n")
@@ -291,24 +312,94 @@ def run_qwen_benchmark(
           f"| avg per scenario: {qwen_metrics['avg_inference_ms']:.0f} ms")
     print(f"  Peak memory (traced): {qwen_metrics['peak_memory_mb']:.1f} MB")
 
-    # --- Failure analysis ---
+    # --- Failure analysis (false acceptances and false rejections) ---
     failures = []
     for trace, s in zip(traces, dataset):
         if trace.verdict != s.ground_truth:
+            is_fa = trace.verdict is True and s.ground_truth is False
+            is_fr = trace.verdict is False and s.ground_truth is True
+            # Classify FA root cause
+            # NOTE: approval_identity_valid and external_state_valid are scenario
+            # parameters; we use them to determine whether calling the skipped tool
+            # would have changed the outcome.
+            fa_root_cause = None
+            if is_fa:
+                tool_names_called = {tc.name for tc in trace.tool_calls}
+                called_approval = "verify_approval" in tool_names_called
+                called_external = "read_external_state" in tool_names_called
+                # Would calling verify_approval have revealed the problem?
+                approval_would_catch = not (s.approval_identity_valid and s.approval_not_expired)
+                # Would calling read_external_state have revealed the problem?
+                external_would_catch = not s.external_state_valid
+
+                if not tool_names_called:
+                    fa_root_cause = "no_tools_called"
+                elif not called_approval and approval_would_catch:
+                    # Skipped approval AND it would have caught the issue
+                    fa_root_cause = "skipped_approval_check_decisive"
+                elif not called_external and external_would_catch:
+                    # Approval was (or would be) valid; only external state catches it
+                    fa_root_cause = "skipped_external_state_decisive"
+                elif not called_approval and not approval_would_catch:
+                    # Skipped approval but approval would return valid anyway (e.g. F2)
+                    fa_root_cause = "skipped_approval_check_nondecisive"
+                else:
+                    fa_root_cause = "incorrect_reasoning"
             failures.append({
                 "scenario_id": s.scenario_id,
                 "ground_truth": s.ground_truth,
                 "predicted": trace.verdict,
+                "failure_type": "FA" if is_fa else ("FR" if is_fr else "abstain"),
+                "fa_root_cause": fa_root_cause,
                 "tags": s.tags,
                 "parse_error": trace.parse_error,
                 "n_tool_calls": len(trace.tool_calls),
+                "tools_called": [tc.name for tc in trace.tool_calls],
+                "reasoning": getattr(trace, "reasoning", ""),
+                "verdict_source": trace.verdict_source,
             })
 
+    fa_count = sum(1 for f in failures if f["failure_type"] == "FA")
+    fr_count = sum(1 for f in failures if f["failure_type"] == "FR")
+
     if failures:
-        print(f"\nFailures ({len(failures)}):")
+        print(f"\nFailures ({len(failures)}: FA={fa_count} FR={fr_count}):")
         for f in failures:
+            rc_str = f" [{f['fa_root_cause']}]" if f.get("fa_root_cause") else ""
             print(f"  {f['scenario_id']}: gt={f['ground_truth']} pred={f['predicted']} "
-                  f"tags={f['tags']} parse_err={'yes' if f['parse_error'] else 'no'}")
+                  f"type={f['failure_type']}{rc_str} "
+                  f"src={f['verdict_source']} parse_err={'yes' if f['parse_error'] else 'no'}")
+
+    # --- Per-category breakdown (expanded dataset only) ---
+    category_results: dict[str, Any] = {}
+    if full:
+        for cat_prefix, cat_name in [
+            ("F1-", "invalid_approver_identity"),
+            ("F2-", "only_external_contradicts"),
+            ("F3-", "missing_audit_record"),
+            ("E", "expanded_positives"),
+        ]:
+            cat_scenarios = [(t, s) for t, s in zip(traces, dataset)
+                             if s.scenario_id.startswith(cat_prefix)]
+            if cat_scenarios:
+                cat_preds = [t.verdict for t, s in cat_scenarios]
+                cat_gts = [s.ground_truth for t, s in cat_scenarios]
+                cat_m = compute_confusion(cat_preds, cat_gts)
+                category_results[cat_name] = cat_m
+
+        print("\nPer-category breakdown (expanded dataset):")
+        for cat, m in category_results.items():
+            print(f"  {cat:<35} TP={m['tp']} FP={m['fp']} TN={m['tn']} FN={m['fn']} "
+                  f"FAR={m['far']:.3f}")
+
+    # --- McNemar: paired D vs E comparison ---
+    preds_d = [condition_d(s) for s in dataset]
+    preds_e = [t.verdict for t in traces]
+    mcnemar_de = mcnemar_test(preds_d, preds_e, gts)
+    print(f"\nMcNemar D vs E: chi2={mcnemar_de['chi2']} p={mcnemar_de['p_value']} "
+          f"sig={mcnemar_de['significant_p05']} (n_discordant={mcnemar_de['n_discordant']})")
+    print(f"  b (D correct, E wrong)={mcnemar_de['b']}  "
+          f"c (D wrong, E correct)={mcnemar_de['c']}")
 
     # --- Git metadata ---
     git_sha = "unknown"
@@ -325,17 +416,23 @@ def run_qwen_benchmark(
         "git_sha": git_sha,
         "seed": seed,
         "smoke_test": smoke,
+        "full_dataset": full,
+        "dataset_label": dataset_label,
+        "dataset_hash": ds_hash,
         "n_scenarios": n,
         "n_positive": sum(1 for s in dataset if s.ground_truth),
         "n_negative": sum(1 for s in dataset if not s.ground_truth),
         "model": {
             **ADAPTER_METADATA,
             "load_ms": round(load_ms, 1),
+            "model_path": model_path,
         },
         "conditions": {
             **baseline_results,
             "E_qwen_local": qwen_metrics,
         },
+        "mcnemar_D_vs_E": mcnemar_de,
+        "category_results": category_results,
         "failures": failures,
         "traces": [
             {
@@ -350,6 +447,7 @@ def run_qwen_benchmark(
                     for tc in t.tool_calls
                 ],
                 "parse_error": t.parse_error,
+                "reasoning": getattr(t, "reasoning", ""),
                 "inference_ms": round(t.inference_ms, 1),
                 "total_ms": round(t.total_ms, 1),
             }
@@ -371,11 +469,19 @@ def run_qwen_benchmark(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke", action="store_true", help="Run only 3 scenarios")
+    parser.add_argument("--full", action="store_true", help="Use full 70-scenario dataset")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--model-path", default=None, help="Local model weights path")
     parser.add_argument("--out", default=None, help="JSON output path")
     args = parser.parse_args()
 
-    report = run_qwen_benchmark(seed=args.seed, smoke=args.smoke, out_path=args.out)
+    report = run_qwen_benchmark(
+        seed=args.seed,
+        smoke=args.smoke,
+        full=args.full,
+        model_path=args.model_path,
+        out_path=args.out,
+    )
 
     print(f"\n{'='*60}")
     print("BENCHMARK COMPLETE")
