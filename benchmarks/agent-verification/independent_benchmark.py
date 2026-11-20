@@ -526,6 +526,21 @@ def condition_c(s: Scenario) -> bool:
     return s.external_state_valid
 
 
+def condition_f_scripted(s: Scenario) -> bool:
+    """
+    Condition F — scripted oracle representing perfect mandatory gate enforcement.
+
+    This models the IDEAL outcome when mandatory verification is applied: an agent
+    that calls ALL three required evidence tools and reasons correctly from their results.
+    It is equivalent to Condition D (all evidence checked deterministically), so their
+    metrics are identical by construction.
+
+    Used as the theoretical upper bound for Condition F (Qwen + gate), and to anchor
+    the McNemar D/E/F comparison against a known-perfect baseline.
+    """
+    return condition_d(s)
+
+
 def condition_d(s: Scenario) -> bool:
     """AIGov evidence verification: live call to verify_evidence()."""
     pkg = _build_evidence_package_for_scenario(s)
