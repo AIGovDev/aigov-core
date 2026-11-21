@@ -44,11 +44,16 @@ from independent_benchmark import (
     condition_c,
     condition_d,
     condition_f_scripted,
+    condition_g_scripted,
     compute_metrics,
     mcnemar_test,
 )
-from mlx_qwen_adapter import ADAPTER_METADATA, AgentTrace, QwenAgent
+from mlx_qwen_adapter import ADAPTER_METADATA, AgentTrace, QwenAgent, SandboxToolExecutor
 from mandatory_verification_gate import MandatoryVerificationGate
+from deterministic_verification_orchestrator import (
+    DeterministicVerificationOrchestrator,
+    DVOStats,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +187,7 @@ def run_qwen_benchmark(
     model_path: str | None = None,
     out_path: str | None = None,
     run_condition_f: bool = False,
+    run_condition_g: bool = False,
 ) -> dict[str, Any]:
 
     if full:
@@ -211,6 +217,7 @@ def run_qwen_benchmark(
     print(f"Dataset:   {dataset_label} ({n} scenarios, hash={ds_hash})")
     print(f"Platform:  {platform.machine()} / {platform.system()} {platform.release()}")
     print(f"Condition F (gated): {'enabled' if run_condition_f else 'disabled (pass --condition-f to enable)'}")
+    print(f"Condition G (DVO):   {'enabled' if run_condition_g else 'disabled (pass --condition-g to enable)'}")
     print()
 
     # Load model once
@@ -256,6 +263,7 @@ def run_qwen_benchmark(
         ("C_external_state", condition_c),
         ("D_aigov_evidence", condition_d),
         ("F_scripted_oracle", condition_f_scripted),
+        ("G_scripted_oracle", condition_g_scripted),
     ]:
         t0 = time.perf_counter()
         preds = [cond_fn(s) for s in dataset]
@@ -490,6 +498,148 @@ def run_qwen_benchmark(
     else:
         print("\nCondition F skipped (pass --condition-f to enable the gated run).")
 
+    # --- Condition G: Qwen + Deterministic Verification Orchestrator ---
+    g_metrics: dict[str, Any] = {}
+    g_traces: list[AgentTrace] = []
+    g_preds: list[bool | None] = []
+    dvo_global_stats: dict[str, Any] = {}
+
+    if run_condition_g:
+        print("\nRunning Condition G (Qwen + Deterministic Verification Orchestrator)...")
+        dvo_stats = DVOStats()
+        t_g_start = time.perf_counter()
+
+        for i, s in enumerate(dataset):
+            print(f"  G[{i+1:2d}/{n}] {s.scenario_id}", end=" ", flush=True)
+            summary = build_scenario_summary(s)
+            state = build_scenario_state(s)
+
+            # Canonical params: from Scenario definition — never from model output
+            canonical = {
+                "proposal_id": s.proposal_id,
+                "approval_id": s.approval_id,
+                "record_id": "proc-2026-001",
+                "field": "deadline",
+            }
+
+            # DVO runs with its own SandboxToolExecutor (same state, independent instance)
+            dvo_executor = SandboxToolExecutor(state)
+            orchestrator = DeterministicVerificationOrchestrator(dvo_executor)
+
+            trace_g = agent.run(
+                s.scenario_id, summary, state,
+                orchestrator=orchestrator,
+                canonical_params=canonical,
+            )
+            g_traces.append(trace_g)
+            g_preds.append(trace_g.verdict)
+
+            # Record DVO stats
+            evidence = trace_g.dvo_evidence
+            if evidence is not None:
+                dvo_stats.record(
+                    evidence=evidence,
+                    model_verdict=None if trace_g.verdict_source in ("dvo_rejected", "dvo_fallback")
+                                 else trace_g.verdict,
+                    final_verdict=trace_g.verdict is True,
+                )
+
+            status = "✓" if trace_g.verdict == s.ground_truth else "✗"
+            dvo_info = ""
+            if evidence is not None:
+                dvo_flag = "DVO=Y" if evidence.dvo_authorized else "DVO=N"
+                fail = f" [{evidence.failure_reasons[0]}]" if evidence.failure_reasons else ""
+                dvo_info = f" [{dvo_flag}{fail}]"
+            print(
+                f"pred={trace_g.verdict!s:5} gt={s.ground_truth!s:5} {status} "
+                f"({trace_g.total_ms:.0f}ms){dvo_info} src={trace_g.verdict_source}"
+            )
+
+        g_total_ms = (time.perf_counter() - t_g_start) * 1000
+        g_metrics = compute_confusion(g_preds, gts)
+        g_metrics["total_ms"] = round(g_total_ms, 1)
+        g_metrics["avg_inference_ms"] = round(
+            sum(t.inference_ms for t in g_traces) / n if n > 0 else 0, 1
+        )
+        g_metrics["n_parse_errors"] = sum(1 for t in g_traces if t.parse_error)
+        g_metrics["n_tool_calls"] = sum(len(t.tool_calls) for t in g_traces)
+        g_metrics["n_dvo_authorized"] = dvo_stats.dvo_authorized_count
+        g_metrics["n_dvo_rejected"] = dvo_stats.dvo_rejected_count
+        g_metrics["n_model_rejected_dvo_ok"] = dvo_stats.model_rejected_on_dvo_ok
+
+        # Verdict source breakdown
+        g_n_dvo_orchestrated = sum(1 for t in g_traces if t.verdict_source == "dvo_orchestrated")
+        g_n_dvo_rejected = sum(1 for t in g_traces if t.verdict_source == "dvo_rejected")
+        g_n_model_rejected = sum(1 for t in g_traces if t.verdict_source == "model_rejected_dvo_ok")
+        g_n_dvo_fallback = sum(1 for t in g_traces if t.verdict_source == "dvo_fallback")
+        g_metrics["verdict_source_counts"] = {
+            "dvo_orchestrated": g_n_dvo_orchestrated,
+            "dvo_rejected": g_n_dvo_rejected,
+            "model_rejected_dvo_ok": g_n_model_rejected,
+            "dvo_fallback": g_n_dvo_fallback,
+        }
+
+        # Unsafe actions blocked by DVO (FAs in E → TN in G)
+        g_unsafe_blocked = sum(
+            1 for t_e, t_g, s in zip(traces, g_traces, dataset)
+            if not s.ground_truth and t_e.verdict is True and t_g.verdict is False
+        )
+        # Legitimate actions incorrectly rejected (TPs in E → FNs in G)
+        g_legit_blocked = sum(
+            1 for t_e, t_g, s in zip(traces, g_traces, dataset)
+            if s.ground_truth and t_e.verdict is True and t_g.verdict is False
+        )
+        g_metrics["unsafe_actions_blocked"] = g_unsafe_blocked
+        g_metrics["legitimate_actions_blocked"] = g_legit_blocked
+
+        # Latency: DVO orchestration overhead vs E
+        e_avg = qwen_metrics.get("avg_inference_ms", 0)
+        g_avg = g_metrics.get("avg_inference_ms", 0)
+        g_avg_dvo = round(dvo_stats.total_orchestration_ms / n if n > 0 else 0, 1)
+        g_metrics["avg_dvo_orchestration_ms"] = g_avg_dvo
+        g_metrics["latency_overhead_vs_e_pct"] = round(
+            100.0 * (g_avg - e_avg) / e_avg if e_avg > 0 else 0.0, 1
+        )
+
+        dvo_global_stats = {
+            "total_scenarios": dvo_stats.total_scenarios,
+            "dvo_authorized_count": dvo_stats.dvo_authorized_count,
+            "dvo_rejected_count": dvo_stats.dvo_rejected_count,
+            "model_rejected_on_dvo_ok": dvo_stats.model_rejected_on_dvo_ok,
+            "final_accepted": dvo_stats.final_accepted,
+            "final_rejected_by_dvo": dvo_stats.final_rejected_by_dvo,
+            "final_rejected_by_model": dvo_stats.final_rejected_by_model,
+            "tool_errors": dvo_stats.tool_errors,
+            "avg_orchestration_ms": g_avg_dvo,
+        }
+
+        print(f"\nCondition G (Qwen + DVO):")
+        print(
+            f"  F1={g_metrics['f1']:.3f}  FAR={g_metrics['far']:.3f}  "
+            f"Acc={g_metrics['accuracy']:.3f} "
+            f"[{g_metrics['accuracy_ci_95'][0]:.3f},{g_metrics['accuracy_ci_95'][1]:.3f}]"
+        )
+        print(
+            f"  DVO authorized: {dvo_stats.dvo_authorized_count}  "
+            f"DVO rejected: {dvo_stats.dvo_rejected_count}  "
+            f"Model rejected (DVO ok): {dvo_stats.model_rejected_on_dvo_ok}"
+        )
+        print(
+            f"  Verdict sources: dvo_orchestrated={g_n_dvo_orchestrated}  "
+            f"dvo_rejected={g_n_dvo_rejected}  "
+            f"model_rejected={g_n_model_rejected}  dvo_fallback={g_n_dvo_fallback}"
+        )
+        print(
+            f"  Unsafe actions blocked: {g_unsafe_blocked}  "
+            f"Legitimate actions incorrectly blocked: {g_legit_blocked}"
+        )
+        print(
+            f"  Avg DVO orchestration: {g_avg_dvo:.1f} ms  "
+            f"Latency overhead vs E: {g_metrics['latency_overhead_vs_e_pct']:+.1f}%"
+        )
+    else:
+        print("\nCondition G skipped (pass --condition-g to enable the DVO run).")
+
     # --- McNemar: paired D vs E comparison ---
     preds_d = [condition_d(s) for s in dataset]
     preds_e = [t.verdict for t in traces]
@@ -514,6 +664,29 @@ def run_qwen_benchmark(
               f"sig={mcnemar_ef['significant_p05']} (n_discordant={mcnemar_ef['n_discordant']})")
         print(f"  b (E correct, F wrong)={mcnemar_ef['b']}  "
               f"c (E wrong, F correct)={mcnemar_ef['c']}")
+
+    # --- McNemar: D vs G, E vs G, F vs G (only if Condition G was run) ---
+    mcnemar_dg: dict[str, Any] = {}
+    mcnemar_eg: dict[str, Any] = {}
+    mcnemar_fg: dict[str, Any] = {}
+    if run_condition_g and g_preds:
+        preds_g = [t.verdict for t in g_traces]
+        mcnemar_dg = mcnemar_test(preds_d, preds_g, gts)
+        mcnemar_eg = mcnemar_test(preds_e, preds_g, gts)
+        print(f"\nMcNemar D vs G: chi2={mcnemar_dg['chi2']} p={mcnemar_dg['p_value']} "
+              f"sig={mcnemar_dg['significant_p05']} (n_discordant={mcnemar_dg['n_discordant']})")
+        print(f"  b (D correct, G wrong)={mcnemar_dg['b']}  "
+              f"c (D wrong, G correct)={mcnemar_dg['c']}")
+        print(f"McNemar E vs G: chi2={mcnemar_eg['chi2']} p={mcnemar_eg['p_value']} "
+              f"sig={mcnemar_eg['significant_p05']} (n_discordant={mcnemar_eg['n_discordant']})")
+        print(f"  b (E correct, G wrong)={mcnemar_eg['b']}  "
+              f"c (E wrong, G correct)={mcnemar_eg['c']}")
+        if run_condition_f and gated_preds:
+            mcnemar_fg = mcnemar_test([t.verdict for t in gated_traces], preds_g, gts)
+            print(f"McNemar F vs G: chi2={mcnemar_fg['chi2']} p={mcnemar_fg['p_value']} "
+                  f"sig={mcnemar_fg['significant_p05']} (n_discordant={mcnemar_fg['n_discordant']})")
+            print(f"  b (F correct, G wrong)={mcnemar_fg['b']}  "
+                  f"c (F wrong, G correct)={mcnemar_fg['c']}")
 
     # --- Git metadata ---
     git_sha = "unknown"
@@ -545,12 +718,18 @@ def run_qwen_benchmark(
             **baseline_results,
             "E_qwen_local": qwen_metrics,
             **({"F_qwen_gated": gated_metrics} if run_condition_f else {}),
+            **({"G_qwen_dvo": g_metrics} if run_condition_g else {}),
         },
         "mcnemar_D_vs_E": mcnemar_de,
         **({"mcnemar_D_vs_F": mcnemar_df} if run_condition_f else {}),
         **({"mcnemar_E_vs_F": mcnemar_ef} if run_condition_f else {}),
+        **({"mcnemar_D_vs_G": mcnemar_dg} if run_condition_g else {}),
+        **({"mcnemar_E_vs_G": mcnemar_eg} if run_condition_g else {}),
+        **({"mcnemar_F_vs_G": mcnemar_fg} if (run_condition_f and run_condition_g) else {}),
         **({"gate_stats": gate_global_stats} if run_condition_f else {}),
+        **({"dvo_stats": dvo_global_stats} if run_condition_g else {}),
         "condition_f_enabled": run_condition_f,
+        "condition_g_enabled": run_condition_g,
         "category_results": category_results,
         "failures": failures,
         "traces": [
@@ -592,6 +771,29 @@ def run_qwen_benchmark(
             }
             for t, s in zip(gated_traces, dataset)
         ]} if run_condition_f else {}),
+        **({"traces_g": [
+            {
+                "scenario_id": t.scenario_id,
+                "verdict": t.verdict,
+                "verdict_source": t.verdict_source,
+                "ground_truth": s.ground_truth,
+                "correct": t.verdict == s.ground_truth,
+                "dvo_authorized": t.dvo_authorized,
+                "dvo_failure_reasons": (
+                    t.dvo_evidence.failure_reasons if t.dvo_evidence else []
+                ),
+                "n_tool_calls": len(t.tool_calls),
+                "tool_calls": [
+                    {"name": tc.name, "result": tc.result, "error": tc.error}
+                    for tc in t.tool_calls
+                ],
+                "parse_error": t.parse_error,
+                "reasoning": getattr(t, "reasoning", ""),
+                "inference_ms": round(t.inference_ms, 1),
+                "total_ms": round(t.total_ms, 1),
+            }
+            for t, s in zip(g_traces, dataset)
+        ]} if run_condition_g else {}),
     }
 
     if out_path:
@@ -610,6 +812,7 @@ if __name__ == "__main__":
     parser.add_argument("--smoke", action="store_true", help="Run only 3 scenarios")
     parser.add_argument("--full", action="store_true", help="Use full 70-scenario dataset")
     parser.add_argument("--condition-f", action="store_true", help="Run Condition F (Qwen + mandatory verification gates)")
+    parser.add_argument("--condition-g", action="store_true", help="Run Condition G (Qwen + deterministic verification orchestrator)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model-path", default=None, help="Local model weights path")
     parser.add_argument("--out", default=None, help="JSON output path")
@@ -622,6 +825,7 @@ if __name__ == "__main__":
         model_path=args.model_path,
         out_path=args.out,
         run_condition_f=args.condition_f,
+        run_condition_g=args.condition_g,
     )
 
     print(f"\n{'='*60}")
@@ -632,4 +836,11 @@ if __name__ == "__main__":
         f_metrics = report["conditions"].get("F_qwen_gated", {})
         print(f"  Real-agent (F Qwen, gated):         F1={f_metrics.get('f1', 'N/A')}")
         print(f"  Unsafe actions blocked by gate:     {f_metrics.get('unsafe_actions_blocked', 'N/A')}")
+        print(f"  Legit actions incorrectly blocked:  {f_metrics.get('legitimate_actions_blocked', 'N/A')}")
+    if report.get("condition_g_enabled"):
+        g_metrics_out = report["conditions"].get("G_qwen_dvo", {})
+        print(f"  Real-agent (G Qwen, DVO):           F1={g_metrics_out.get('f1', 'N/A')}")
+        print(f"  FAR={g_metrics_out.get('far', 'N/A')}  FRR={g_metrics_out.get('frr', 'N/A')}")
+        print(f"  Unsafe actions blocked by DVO:      {g_metrics_out.get('unsafe_actions_blocked', 'N/A')}")
+        print(f"  Legit actions incorrectly blocked:  {g_metrics_out.get('legitimate_actions_blocked', 'N/A')}")
         print(f"  Legitimate actions blocked by gate: {f_metrics.get('legitimate_actions_blocked', 'N/A')}")
