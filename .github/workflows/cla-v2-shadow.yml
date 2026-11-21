@@ -1,10 +1,14 @@
 # On untrusted PRs, execute tests without any GitHub API token.
 # The trusted shadow audit is activated only after this code reaches staging.
-name: CLA v2 shadow tests
+name: Contributor agreements — unit tests
 
 on:
   pull_request:
     types: [opened, reopened, synchronize]
+    paths:
+      - '.github/workflows/cla-v2-*.yml'
+      - 'scripts/cla_v2_*.py'
+      - 'tests/test_cla_v2_*.py'
 
 permissions: {}
 
