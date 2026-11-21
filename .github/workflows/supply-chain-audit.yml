@@ -20,19 +20,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python dependencies for config check
-        working-directory: python
-        run: |
-          set -euo pipefail
-          python -m venv .venv
-          . .venv/bin/activate
-          pip install -U pip
-          pip install -e ".[dev]"
+      # The Dependabot validator imports only PyYAML beyond the stdlib.
+      # Avoid installing the full Python SDK and dev dependency tree.
+      - name: Install YAML parser
+        run: python -m pip install 'PyYAML>=6,<7'
 
       - name: Validate Dependabot targets staging
         run: |
           set -euo pipefail
-          . python/.venv/bin/activate
           make dependabot-config-check
 
   cargo-audit:
