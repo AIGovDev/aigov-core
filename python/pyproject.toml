@@ -49,7 +49,7 @@ dev = [
   "PyYAML>=6.0.0",
 ]
 runs-postgres = [
-  "psycopg[binary]>=3.2.0",
+  "psycopg[binary]>=3.3.9",
 ]
 
 [build-system]
