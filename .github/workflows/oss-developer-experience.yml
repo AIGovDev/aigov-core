@@ -31,22 +31,18 @@ jobs:
           pip install -U pip
           pip install -e ".[dev]"
 
-      - name: Cursor plugin bundle (validate + smoke)
-        run: |
-          set -euo pipefail
-          make cursor-plugin-check
-
-      - name: Public SDK packages check
-        run: |
-          set -euo pipefail
-          mkdir -p .oss-ci-out
-          make public-sdk-packages-check
-          python3 scripts/public_sdk_packages_check.py --json > .oss-ci-out/public-sdk-packages.json
-
-      - name: Core readiness (gate + runtime contracts + benchmark)
+      # enterprise-readiness-check already runs cursor-plugin-check and
+      # public-sdk-packages-check. Do not run these expensive checks twice.
+      - name: Core readiness (gate + SDK + Cursor + runtime contracts + benchmark)
         run: |
           set -euo pipefail
           make enterprise-readiness-check
+
+      - name: Export public SDK check JSON
+        run: |
+          set -euo pipefail
+          mkdir -p .oss-ci-out
+          python3 scripts/public_sdk_packages_check.py --json > .oss-ci-out/public-sdk-packages.json
 
       - name: Upload OSS check JSON artifacts
         if: success()
