@@ -202,8 +202,7 @@ def eval_i_sandbox(s: AdversarialScenario, provider: TrustedPolicyProvider) -> d
 def eval_i_model(
     s: AdversarialScenario,
     provider: TrustedPolicyProvider,
-    model: "Any",
-    tokenizer: "Any",
+    model_path: str,
     replay_registry: "Any | None" = None,
     revocation_list: "Any | None" = None,
 ) -> dict[str, Any]:
@@ -239,15 +238,15 @@ def eval_i_model(
         "field": "value",
     }
 
-    # Build a minimal scenario_summary (no oracle fields)
     scenario_summary = {
+        "description": s.description,
         "proposal_id": s.proposal_id,
-        "action_type": s.action_type,
-        "resource_id": s.resource_id,
-        "tenant_id": s.tenant_id,
+        "approval_id": s.approval_id,
+        "record_id": s.record_id,
+        "executed_value": s.audit_executed_value or "2026-12-31",
     }
 
-    agent = QwenAgent(model, tokenizer)
+    agent = QwenAgent(model_path=model_path)
     trace = agent.run(
         scenario_id=s.scenario_id,
         scenario_summary=scenario_summary,
@@ -272,8 +271,7 @@ def eval_i_model(
 
 def eval_h_model(
     s: AdversarialScenario,
-    model: "Any",
-    tokenizer: "Any",
+    model_path: str,
 ) -> dict[str, Any]:
     """
     Run Condition H with real model inference on an adversarial scenario.
@@ -295,13 +293,14 @@ def eval_h_model(
         "field": "value",
     }
     scenario_summary = {
+        "description": s.description,
         "proposal_id": s.proposal_id,
-        "action_type": s.action_type,
-        "resource_id": s.resource_id,
-        "tenant_id": s.tenant_id,
+        "approval_id": s.approval_id,
+        "record_id": s.record_id,
+        "executed_value": s.audit_executed_value or "2026-12-31",
     }
 
-    agent = QwenAgent(model, tokenizer)
+    agent = QwenAgent(model_path=model_path)
     trace = agent.run(
         scenario_id=s.scenario_id,
         scenario_summary=scenario_summary,
@@ -440,13 +439,12 @@ def run_adversarial_benchmark(
 
     provider = TrustedPolicyProvider(POLICY_FIXTURE)
 
-    # Load model if requested (requires mlx-lm)
-    model_obj = None
-    tokenizer_obj = None
+    # Validate model path early (actual loading happens inside QwenAgent.__init__ via cache)
     if model_path is not None:
-        from mlx_qwen_adapter import _ensure_model_loaded
-        model_obj, tokenizer_obj = _ensure_model_loaded(model_path)
-        print(f"[adversarial_benchmark] Model loaded: {model_path}")
+        from pathlib import Path as _Path
+        if not _Path(model_path).exists():
+            raise FileNotFoundError(f"Model not found: {model_path}")
+        print(f"[adversarial_benchmark] Model: {model_path}")
 
     n_pos = sum(1 for s in scenarios if s.ground_truth)
     n_neg = sum(1 for s in scenarios if not s.ground_truth)
@@ -471,14 +469,14 @@ def run_adversarial_benchmark(
 
     # --- Condition H ---
     if run_condition_h_holdout:
-        mode = "model" if model_obj is not None else "scripted"
+        mode = "model" if model_path is not None else "scripted"
         print(f"\nCondition H (Enhanced Policy — flat identity list on adversarial holdout) [{mode}]:")
         h_metrics = ConditionMetrics()
         h_results: list[dict[str, Any]] = []
         t0 = time.perf_counter()
         for idx, s in enumerate(scenarios):
-            if model_obj is not None:
-                r = eval_h_model(s, model_obj, tokenizer_obj)
+            if model_path is not None:
+                r = eval_h_model(s, model_path)
             else:
                 r = eval_h_sandbox(s)
             h_metrics.record(r["prediction"], r["ground_truth"])
@@ -505,14 +503,14 @@ def run_adversarial_benchmark(
 
     # --- Condition I ---
     if run_condition_i:
-        mode = "model" if model_obj is not None else "scripted"
+        mode = "model" if model_path is not None else "scripted"
         print(f"\nCondition I (Trusted Policy Source on adversarial holdout) [{mode}]:")
         i_metrics = ConditionMetrics()
         i_results: list[dict[str, Any]] = []
         t0 = time.perf_counter()
         for idx, s in enumerate(scenarios):
-            if model_obj is not None:
-                r = eval_i_model(s, provider, model_obj, tokenizer_obj)
+            if model_path is not None:
+                r = eval_i_model(s, provider, model_path)
             else:
                 r = eval_i_sandbox(s, provider)
             i_metrics.record(r["prediction"], r["ground_truth"])

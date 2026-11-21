@@ -295,6 +295,50 @@ load; a changed hash indicates dataset drift.
 
 ## 7. Measured results
 
+### 7.0 Real model inference (Phase 2)
+
+**Model:** Qwen2.5-3B-Instruct-4bit via mlx-lm, temperature=0.0 (greedy), seed=42  
+**Results file:** `benchmarks/agent-verification/results_adversarial_holdout_I.json`  
+**Dataset hash verified:** `dedcf881f564bacf...` (unchanged)
+
+| Metric | Condition H (model) | Condition I (model) |
+|---|---|---|
+| TP | 30 | 30 |
+| FP | 70 | 0 |
+| TN | 70 | 140 |
+| FN | 0 | 0 |
+| Precision | 0.300 | 1.000 |
+| Recall | 1.000 | 1.000 |
+| **F1** | **0.462** | **1.000** |
+| **FAR** | **0.500 (70/140)** | **0.000 (0/140)** |
+| **FRR** | **0.000 (0/30)** | **0.000 (0/30)** |
+| False authorizations | 70 | **0** |
+| False rejections | 0 | 0 |
+
+**McNemar H vs I (model):** χ²=68.01, p<0.0001 (b=0, c=70)  
+I never makes an incorrect decision that H got right. H makes 70 false authorizations that I correctly rejects.
+
+**Latency:** H=1883 ms/scenario, I=1952 ms/scenario; policy lookup overhead=**68 ms/scenario** (3.6% increase).
+
+**Category breakdown with model (H FPs):**
+
+| Category | H model FP | I model FP |
+|---|---|---|
+| `cross_tenant_substitution` | 15 | 0 |
+| `revoked_policy` | 15 | 0 |
+| `expired_policy` | 10 | 0 |
+| `missing_policy` | 10 | 0 |
+| `policy_superseded` | 10 | 0 |
+| `unauthorized_approver` | 10 | 0 |
+| `wrong_action_scope` | **0** (model caught) | 0 |
+| `wrong_resource_scope` | **0** (model caught) | 0 |
+| `evidence_replay` | 0 | 0 |
+| `forged_evidence` | 0 | 0 |
+| `authorized_legitimate` | 0 | 0 |
+| `requires_review_ambiguous` | 0 | 0 |
+
+**Key finding:** The model reduces H's FP count from 100 (scripted) to 70 (inference), catching `wrong_action_scope` (15) and `wrong_resource_scope` (15) via semantic reasoning. However, the model cannot detect lifecycle attacks (revocation, expiry, supersession) or cross-tenant substitution — these require structured policy enforcement. I catches all 70.
+
 ### 7.1 Adversarial holdout: Condition H vs I (scripted)
 
 **Dataset:** 170 scenarios, 30 positives, 140 negatives
@@ -558,28 +602,65 @@ is printed at module import and must match for reproducibility.
 
 ---
 
+## Reproduction instructions (updated)
+
+```bash
+git checkout feat/condition-i-trusted-policy
+cd benchmarks/agent-verification
+
+# Real model inference — adversarial holdout (H + I)
+uv run --with mlx-lm python3 run_adversarial_benchmark.py \
+  --condition-h --condition-i \
+  --model ~/models/Qwen2.5-3B-Instruct-4bit \
+  --out results_adversarial_holdout_I.json
+
+# Scripted only (no MLX required)
+uv run python3 run_adversarial_benchmark.py \
+  --condition-h --condition-i \
+  --out results_adversarial_holdout_I_scripted.json
+
+# Tests
+cd ../../
+uv run --with pytest python -m pytest \
+  python/tests/test_deterministic_orchestrator.py \
+  python/tests/test_condition_i.py -v
+
+# Full suite with optional deps
+uv run --with pytest --with 'PyNaCl>=1.5.0' --with 'sigstore>=4.2.0' \
+  python -m pytest python/tests/ --ignore=python/tests/test_f1_real_api_integration.py
+```
+
+Dataset hash `dedcf881f564bacf...` is printed at module import and must match.
+
 ## Evaluation gate
 
 - [x] Adversarial holdout frozen: 170 scenarios, hash `dedcf881f564bacf...`
 - [x] POLICY_FIXTURE defined before scenarios; ground truth derived from policy, not labels
 - [x] Oracle isolation test: `TestPolicyOracleIsolation` (4 tests) — ground_truth never reads `approval_identity_valid`
-- [x] H vs I on adversarial holdout: FAR(H)=0.714, FAR(I)=0.000
-- [x] McNemar H vs I: χ²=98.01, p<0.0001 (b=0, c=100 — I never breaks a correct H prediction)
-- [x] 100 scenarios where H=False-auth and I=DENY, explained by structural gaps (tenant/scope/lifecycle)
+- [x] H vs I scripted on adversarial holdout: FAR(H)=0.714, FAR(I)=0.000
+- [x] **H vs I model inference on adversarial holdout: FAR(H)=0.500, FAR(I)=0.000** (§7.0)
+- [x] McNemar H vs I (scripted): χ²=98.01, p<0.0001 (b=0, c=100)
+- [x] McNemar H vs I (model): χ²=68.01, p<0.0001 (b=0, c=70)
+- [x] 100 scripted / 70 model scenarios where H=False-auth and I=DENY, all explained by structural gaps (tenant/scope/lifecycle) — not by hyperparameter tuning
+- [x] Model reduces H's FP from 100→70 by catching scope violations semantically; lifecycle/tenant attacks require structured policy (I catches all)
+- [x] Results file: `benchmarks/agent-verification/results_adversarial_holdout_I.json` (dataset hash verified)
 - [x] 86 tests pass: policy integrity, revocation, expiry, tenant isolation, scope constraints, oracle isolation, security invariants, replay protection, runtime revocation, key rotation (up from 54)
 - [x] Existing 83+1 tests (H and earlier conditions) unchanged
 - [x] No production data modified
 - [x] No oracle/ground-truth fields used in runtime authorization
 - [x] Security hardening implemented (§9): replay protection (ApprovalNonce, ReplayRegistry), runtime revocation (RevocationList), key management abstraction (PolicyKeyProvider with rotation)
 - [x] Hardening integration tests: TestReplayProtection (9), TestRevocationList (8), TestPolicyKeyProvider (8), TestHardeningIntegration (7)
-- [x] Remaining gaps documented (§10): static fixture, HSM wiring, principal identity, persistent nonce store, no INDETERMINATE scenarios in holdout, no model inference on holdout
+- [x] Collection errors (9 files): pre-existing environment gap — `nacl`/`sigstore` missing from bare uv invocation; full suite passes (766 passed) with `PyNaCl>=1.5.0` + `sigstore>=4.2.0`
+- [x] Remaining gaps documented (§10): static fixture, HSM wiring, principal identity, persistent nonce store
 
 **Evaluation verdict: PASS.**  
 Condition I demonstrates a structurally sound authorization improvement over
 Condition H with statistically significant (p<0.0001) false-authorization
-reduction on a held-out adversarial dataset. The improvement is explained by
-concrete, qualitatively distinct trust-boundary capabilities (revocation, tenant
-isolation, scope, lifecycle) that are independent of dataset construction.
+reduction on a held-out adversarial dataset measured with real Qwen2.5-3B
+inference. The improvement is explained by concrete, qualitatively distinct
+trust-boundary capabilities (revocation, tenant isolation, scope, lifecycle)
+that are independent of dataset construction, confirmed by model inference.
+Latency overhead is 68 ms/scenario (3.6%).
 
 ---
 
@@ -589,6 +670,6 @@ isolation, scope, lifecycle) that are independent of dataset construction.
 - No production data was changed during this evaluation
 - Do not merge without authorization
 - Do not deploy without authorization
-- Full MLX inference evaluation on adversarial holdout: **NOT RUN** — deferred; see §6.1
+- Full MLX inference on adversarial holdout: **COMPLETE** — H FAR=0.500, I FAR=0.000; results in `results_adversarial_holdout_I.json`
 - Results on original 70-scenario dataset with real Qwen inference: **H=I** (identical, by design)
-- Tests: 169 passed (83 existing + 86 new), several expected skips (nacl/sigstore in other test files)
+- Tests: 169 passed (83 existing + 86 new), 1 expected skip; full suite 766 passed with PyNaCl+sigstore
