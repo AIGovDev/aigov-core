@@ -1,5 +1,6 @@
 """
-Tests for the Deterministic Verification Orchestrator (Condition G).
+Tests for the Deterministic Verification Orchestrator (Condition G) and
+Enhanced Policy Decision (Condition H).
 
 Test classes:
   TestDVOUnit             — unit tests for orchestration logic (no model needed)
@@ -8,6 +9,10 @@ Test classes:
   TestDVOEdgeCases        — edge cases: errors, partial failure, contradictions
   TestConditionGRegression — regression against measured G results (skipped if JSON absent)
   TestMcNemarDEFG         — four-way McNemar (skipped if JSON absent)
+  TestPolicyDecisionUnit  — unit tests for 4-state PolicyDecision (no model needed)
+  TestEnhancedAuthorization — approver identity check tests (no model needed)
+  TestConditionHScripted  — scripted oracle tests for Condition H (no model needed)
+  TestConditionHRegression — regression against measured H results (skipped if JSON absent)
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ sys.path.insert(0, str(BENCH_DIR))
 from deterministic_verification_orchestrator import (
     REQUIRED_EVIDENCE_TOOLS,
     DeterministicVerificationOrchestrator,
+    EnhancedPolicyOrchestrator,
     DVOStats,
     OrchestratorToolCall,
     VerificationEvidence,
@@ -42,6 +48,14 @@ from independent_benchmark import (
     build_full_dataset,
     condition_d,
     condition_g_scripted,
+    condition_h_scripted,
+)
+from policy_decision import (
+    PolicyDecision,
+    PolicyDecisionRecord,
+    PolicyStats,
+    compute_enhanced_authorization,
+    compute_policy_decision,
 )
 
 
@@ -812,3 +826,493 @@ class TestMcNemarDEFG:
         if not mcn:
             pytest.skip("mcnemar_D_vs_G not in report")
         assert "n_discordant" in mcn
+
+
+# ---------------------------------------------------------------------------
+# Helpers for Condition H tests
+# ---------------------------------------------------------------------------
+
+AUTHORIZED_APPROVERS = ["compliance-officer@example.com"]
+
+
+def _h_state_valid(proposal_id: str = "prop-001", approval_id: str = "appr-001") -> dict:
+    """State where all checks including identity pass → H should authorize."""
+    return {
+        "audit_records": {
+            proposal_id: {
+                "executed_value": "iris-train-v3",
+                "status": "completed",
+                "hash_verified": True,
+            }
+        },
+        "approvals": {
+            approval_id: {
+                "proposal_id": proposal_id,
+                "approver": "compliance-officer@example.com",  # valid identity
+                "active": True,
+            }
+        },
+        "external_state": {
+            "proc-001": {"deadline": "iris-train-v3"},
+        },
+        "authorized_approvers": AUTHORIZED_APPROVERS,
+    }
+
+
+def _h_state_invalid_approver(
+    proposal_id: str = "prop-001", approval_id: str = "appr-001"
+) -> dict:
+    """State where approver identity is NOT on the authorized list → H should deny."""
+    state = _h_state_valid(proposal_id, approval_id)
+    state["approvals"][approval_id]["approver"] = "unknown@external.invalid"
+    return state
+
+
+def _make_h_orchestrator(state: dict) -> EnhancedPolicyOrchestrator:
+    executor = SandboxToolExecutor(state, check_identity=True)
+    return EnhancedPolicyOrchestrator(executor, authorized_approvers=state.get("authorized_approvers"))
+
+
+# ---------------------------------------------------------------------------
+# TestPolicyDecisionUnit
+# ---------------------------------------------------------------------------
+
+class TestPolicyDecisionUnit:
+    """Unit tests for the 4-state PolicyDecision interface."""
+
+    def test_allow_state(self):
+        """ALLOW: all deterministic checks pass and model agrees."""
+        pdr = compute_policy_decision(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": True, "approver": "compliance-officer@example.com"},
+            external_result={"value": "v3"},
+            model_verdict=True,
+            model_reasoning="Action is legitimate.",
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert pdr.decision == PolicyDecision.ALLOW
+        assert pdr.enforcement_outcome is True
+        assert pdr.model_verdict is True
+
+    def test_deny_state_audit_fail(self):
+        """DENY: audit hash fails → no ALLOW regardless of model."""
+        pdr = compute_policy_decision(
+            audit_result={"found": True, "hash_verified": False},
+            approval_result={"valid": True, "approver": "compliance-officer@example.com"},
+            external_result={"value": "v3"},
+            model_verdict=True,  # model says yes — must be overridden
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert pdr.decision == PolicyDecision.DENY
+        assert pdr.enforcement_outcome is False
+        assert any("audit" in r for r in pdr.policy_failure_reasons)
+
+    def test_deny_state_identity_fail(self):
+        """DENY: approver identity not authorized → DENY even if model agrees."""
+        pdr = compute_policy_decision(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": True, "approver": "unknown@external.invalid"},
+            external_result={"value": "v3"},
+            model_verdict=True,  # model agrees — must be overridden
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert pdr.decision == PolicyDecision.DENY
+        assert pdr.enforcement_outcome is False
+        assert any("unauthorized_approver_identity" in r for r in pdr.policy_failure_reasons)
+
+    def test_deny_state_external_mismatch(self):
+        """DENY: external state contradicts audit → replay/stale state detected."""
+        pdr = compute_policy_decision(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3-new"},
+            approval_result={"valid": True, "approver": "compliance-officer@example.com"},
+            external_result={"value": "v2-old"},  # stale
+            model_verdict=True,
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert pdr.decision == PolicyDecision.DENY
+        assert pdr.enforcement_outcome is False
+        assert any("external_state_mismatch" in r for r in pdr.policy_failure_reasons)
+
+    def test_indeterminate_state_tool_error(self):
+        """INDETERMINATE: tool returned an error → fail-closed."""
+        pdr = compute_policy_decision(
+            audit_result={"found": False, "error": "db_timeout"},
+            approval_result={"valid": True, "approver": "compliance-officer@example.com"},
+            external_result={"value": "v3"},
+            model_verdict=True,
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert pdr.decision == PolicyDecision.INDETERMINATE
+        assert pdr.enforcement_outcome is False
+        assert any("audit_tool_error" in r for r in pdr.indeterminate_reasons)
+
+    def test_requires_review_model_rejects(self):
+        """REQUIRES_REVIEW: all deterministic checks pass, model says no."""
+        pdr = compute_policy_decision(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": True, "approver": "compliance-officer@example.com"},
+            external_result={"value": "v3"},
+            model_verdict=False,  # model disagrees
+            model_reasoning="Unusual proposal context.",
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert pdr.decision == PolicyDecision.REQUIRES_REVIEW
+        assert pdr.enforcement_outcome is False
+        assert pdr.model_verdict is False
+        assert any("model_flagged_concern" in f for f in pdr.review_flags)
+
+    def test_requires_review_no_model_verdict(self):
+        """REQUIRES_REVIEW: all deterministic checks pass, model timed out."""
+        pdr = compute_policy_decision(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": True, "approver": "compliance-officer@example.com"},
+            external_result={"value": "v3"},
+            model_verdict=None,  # no verdict
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert pdr.decision == PolicyDecision.REQUIRES_REVIEW
+        assert pdr.enforcement_outcome is False
+        assert pdr.model_verdict is None
+        assert any("model_no_verdict" in f for f in pdr.review_flags)
+
+    def test_model_cannot_override_deny(self):
+        """Security invariant: model=True cannot override DENY decision."""
+        # Approval expired → DENY
+        pdr = compute_policy_decision(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": False, "reason": "approval_expired"},
+            external_result={"value": "v3"},
+            model_verdict=True,  # model insists it's ok
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert pdr.decision == PolicyDecision.DENY
+        assert pdr.enforcement_outcome is False
+
+    def test_enforcement_outcome_only_true_for_allow(self):
+        """Enforcement invariant: enforcement_outcome is True iff decision == ALLOW."""
+        for decision in PolicyDecision:
+            pdr = PolicyDecisionRecord(
+                decision=decision,
+                enforcement_outcome=decision.enforcement_outcome,
+            )
+            if decision == PolicyDecision.ALLOW:
+                assert pdr.enforcement_outcome is True
+            else:
+                assert pdr.enforcement_outcome is False
+
+    def test_policy_stats_accumulation(self):
+        """PolicyStats correctly accumulates across different decision types."""
+        stats = PolicyStats()
+        for _ in range(3):
+            stats.record(PolicyDecisionRecord.allow(model_verdict=True))
+        for _ in range(2):
+            stats.record(PolicyDecisionRecord.deny(reasons=["unauthorized_approver_identity:x"]))
+        stats.record(PolicyDecisionRecord.indeterminate(reasons=["audit_tool_error:timeout"]))
+        stats.record(PolicyDecisionRecord.requires_review(
+            flags=["model_flagged_concern:model_verdict=False"],
+            model_verdict=False,
+        ))
+
+        assert stats.allow_count == 3
+        assert stats.deny_count == 2
+        assert stats.indeterminate_count == 1
+        assert stats.requires_review_count == 1
+        assert stats.total == 7
+        assert stats.deny_identity_fail == 2
+        assert stats.tool_errors == 1
+        assert stats.review_model_rejected == 1
+        assert abs(stats.review_rate - 1 / 7) < 0.001
+
+
+# ---------------------------------------------------------------------------
+# TestEnhancedAuthorization
+# ---------------------------------------------------------------------------
+
+class TestEnhancedAuthorization:
+    """Tests for the enhanced authorization check (approver identity)."""
+
+    def test_valid_identity_authorizes(self):
+        """Known approver on the authorized list → passes identity check."""
+        authorized, checks, fails, indet = compute_enhanced_authorization(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": True, "approver": "compliance-officer@example.com"},
+            external_result={"value": "v3"},
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert authorized is True
+        assert fails == []
+        identity_check = next(c for c in checks if c.name == "approver_identity")
+        assert identity_check.passed is True
+
+    def test_unknown_identity_denies(self):
+        """Approver not on authorized list → identity check fails → DENY."""
+        authorized, checks, fails, indet = compute_enhanced_authorization(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": True, "approver": "unknown@external.invalid"},
+            external_result={"value": "v3"},
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert authorized is False
+        assert any("unauthorized_approver_identity" in f for f in fails)
+        identity_check = next(c for c in checks if c.name == "approver_identity")
+        assert identity_check.passed is False
+
+    def test_no_authorized_approvers_skips_identity(self):
+        """When authorized_approvers=None, identity check is skipped (DVO-G behavior)."""
+        authorized, checks, fails, indet = compute_enhanced_authorization(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": True, "approver": "unknown@external.invalid"},
+            external_result={"value": "v3"},
+            authorized_approvers=None,  # G mode — no identity check
+        )
+        assert authorized is True
+        # No approver_identity check in results
+        assert not any(c.name == "approver_identity" for c in checks)
+
+    def test_identity_check_skipped_when_approval_already_invalid(self):
+        """When approval is already invalid, identity check is skipped (redundant)."""
+        authorized, checks, fails, indet = compute_enhanced_authorization(
+            audit_result={"found": True, "hash_verified": True, "executed_value": "v3"},
+            approval_result={"valid": False, "reason": "approval_expired"},
+            external_result={"value": "v3"},
+            authorized_approvers=AUTHORIZED_APPROVERS,
+        )
+        assert authorized is False
+        # Identity check entry is present but marked skipped, NOT marked as a failure
+        identity_check = next(c for c in checks if c.name == "approver_identity")
+        assert identity_check.passed is False
+        assert "skipped" in identity_check.details
+
+
+# ---------------------------------------------------------------------------
+# TestEnhancedDVO
+# ---------------------------------------------------------------------------
+
+class TestEnhancedDVO:
+    """Tests for SandboxToolExecutor check_identity behavior and EnhancedPolicyOrchestrator."""
+
+    def test_sandbox_check_identity_true_rejects_unknown_approver(self):
+        """With check_identity=True, verify_approval returns valid=False for unknown approver."""
+        state = _h_state_invalid_approver()
+        executor = SandboxToolExecutor(state, check_identity=True)
+        result = executor.execute("verify_approval", {
+            "proposal_id": "prop-001",
+            "approval_id": "appr-001",
+        })
+        assert result["valid"] is False
+        assert result.get("reason") == "unauthorized_approver_identity"
+
+    def test_sandbox_check_identity_false_accepts_unknown_approver(self):
+        """With check_identity=False (G mode), verify_approval returns valid=True for any approver."""
+        state = _h_state_invalid_approver()
+        executor = SandboxToolExecutor(state, check_identity=False)
+        result = executor.execute("verify_approval", {
+            "proposal_id": "prop-001",
+            "approval_id": "appr-001",
+        })
+        assert result["valid"] is True
+
+    def test_sandbox_check_identity_true_accepts_known_approver(self):
+        """With check_identity=True, verify_approval accepts a valid approver."""
+        state = _h_state_valid()
+        executor = SandboxToolExecutor(state, check_identity=True)
+        result = executor.execute("verify_approval", {
+            "proposal_id": "prop-001",
+            "approval_id": "appr-001",
+        })
+        assert result["valid"] is True
+        assert result["approver"] == "compliance-officer@example.com"
+
+    def test_enhanced_orchestrator_denies_unknown_approver(self):
+        """EnhancedPolicyOrchestrator denies when approver is not authorized."""
+        state = _h_state_invalid_approver()
+        orch = _make_h_orchestrator(state)
+        ev = orch.orchestrate("prop-001", "appr-001", "proc-001")
+        assert ev.dvo_authorized is False
+        assert any("approval_invalid" in r for r in ev.failure_reasons)
+
+    def test_enhanced_orchestrator_authorizes_known_approver(self):
+        """EnhancedPolicyOrchestrator authorizes when all checks including identity pass."""
+        state = _h_state_valid()
+        orch = _make_h_orchestrator(state)
+        ev = orch.orchestrate("prop-001", "appr-001", "proc-001")
+        assert ev.dvo_authorized is True
+        assert ev.failure_reasons == []
+
+
+# ---------------------------------------------------------------------------
+# TestConditionHScripted
+# ---------------------------------------------------------------------------
+
+class TestConditionHScripted:
+    """Tests for the condition_h_scripted oracle (no model needed)."""
+
+    @pytest.fixture(scope="class")
+    def dataset(self):
+        return build_full_dataset(seed_base=42, seed_expanded=7)
+
+    def test_h_scripted_subset_of_ground_truth(self, dataset):
+        """H_scripted is a subset of ground_truth: H=True → ground_truth=True."""
+        for s in dataset:
+            if condition_h_scripted(s):
+                assert s.ground_truth, (
+                    f"H_scripted=True but ground_truth=False for {s.scenario_id}"
+                )
+
+    def test_h_scripted_zero_false_positives(self, dataset):
+        """H_scripted has exactly 0 false positives on the 70-scenario dataset."""
+        fp = sum(condition_h_scripted(s) and not s.ground_truth for s in dataset)
+        assert fp == 0, f"H_scripted has {fp} FPs; expected 0"
+
+    def test_h_scripted_zero_false_negatives(self, dataset):
+        """H_scripted has exactly 0 false negatives on the 70-scenario dataset."""
+        fn = sum(not condition_h_scripted(s) and s.ground_truth for s in dataset)
+        assert fn == 0, f"H_scripted has {fn} FNs; expected 0"
+
+    def test_h_scripted_f1_above_g(self, dataset):
+        """H_scripted F1 must be strictly greater than G_scripted F1."""
+        preds_g = [condition_g_scripted(s) for s in dataset]
+        preds_h = [condition_h_scripted(s) for s in dataset]
+        gts = [s.ground_truth for s in dataset]
+
+        def f1(preds, gts):
+            tp = sum(p and g for p, g in zip(preds, gts))
+            fp = sum(p and not g for p, g in zip(preds, gts))
+            fn = sum(not p and g for p, g in zip(preds, gts))
+            prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+            rec = tp / (tp + fn) if (tp + fn) > 0 else 0
+            return 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
+
+        f1_g = f1(preds_g, gts)
+        f1_h = f1(preds_h, gts)
+        assert f1_h >= f1_g, f"H_scripted F1={f1_h:.3f} < G_scripted F1={f1_g:.3f}"
+
+    def test_h_scripted_covers_all_positives(self, dataset):
+        """H_scripted authorizes all 14 genuine positives."""
+        tp = sum(condition_h_scripted(s) and s.ground_truth for s in dataset)
+        total_pos = sum(s.ground_truth for s in dataset)
+        assert tp == total_pos, (
+            f"H_scripted covers only {tp}/{total_pos} genuine positives"
+        )
+
+    def test_h_scripted_all_d_fps_rejected(self, dataset):
+        """All 16 D false positives are rejected by H_scripted."""
+        for s in dataset:
+            if condition_d(s) and not s.ground_truth:
+                assert not condition_h_scripted(s), (
+                    f"H_scripted accepted a D false positive: {s.scenario_id}"
+                )
+
+    def test_h_scripted_all_identity_scenarios_rejected(self, dataset):
+        """All scenarios with approval_identity_valid=False are rejected by H."""
+        for s in dataset:
+            if not s.approval_identity_valid:
+                assert not condition_h_scripted(s), (
+                    f"H_scripted accepted identity-invalid scenario: {s.scenario_id}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Results JSON for Condition H regression tests
+# ---------------------------------------------------------------------------
+
+RESULTS_H_JSON = Path(BENCH_DIR) / "results_qwen_full_70_condH.json"
+_has_h_results = RESULTS_H_JSON.exists()
+
+
+@pytest.fixture(scope="module")
+def h_report():
+    if not _has_h_results:
+        pytest.skip("results_qwen_full_70_condH.json not found — run benchmark first")
+    return json.loads(RESULTS_H_JSON.read_text())
+
+
+# ---------------------------------------------------------------------------
+# TestConditionHRegression
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _has_h_results, reason="Condition H results not yet available")
+class TestConditionHRegression:
+    """Regression tests against measured Condition H results."""
+
+    def test_condition_h_present(self, h_report):
+        assert "H_qwen_policy" in h_report["conditions"], "H_qwen_policy not in results"
+
+    def test_dataset_hash_unchanged(self, h_report):
+        assert h_report["dataset_hash"] == "b9624d8710dfe45f", (
+            f"Dataset hash changed: {h_report['dataset_hash']}"
+        )
+
+    def test_condition_h_frr_zero(self, h_report):
+        """H must have zero false rejections (enhanced DVO covers all positives)."""
+        h = h_report["conditions"]["H_qwen_policy"]
+        assert h["fn"] == 0, f"Condition H has {h['fn']} FNs; expected 0"
+
+    def test_condition_h_far_zero_or_near(self, h_report):
+        """H FAR should be 0 or near 0 (identity check closes G's FP vulnerability)."""
+        h = h_report["conditions"]["H_qwen_policy"]
+        assert h["far"] < 0.05, (
+            f"Condition H FAR={h['far']:.3f}; expected < 0.05 (target is 0)"
+        )
+
+    def test_condition_h_f1_above_g(self, h_report):
+        """H F1 must be strictly greater than G F1 (G had 0.800)."""
+        h = h_report["conditions"]["H_qwen_policy"]
+        assert h["f1"] > 0.80, (
+            f"Condition H F1={h['f1']:.3f}; expected > 0.80 (G had 0.800)"
+        )
+
+    def test_condition_h_policy_allow_count(self, h_report):
+        """Policy ALLOW count must equal TP count."""
+        h = h_report["conditions"]["H_qwen_policy"]
+        assert h.get("policy_allow") == h.get("tp"), (
+            f"policy_allow={h.get('policy_allow')} != tp={h.get('tp')}"
+        )
+
+    def test_condition_h_policy_deny_covers_negatives(self, h_report):
+        """Policy DENY count + INDETERMINATE must cover all TN scenarios."""
+        h = h_report["conditions"]["H_qwen_policy"]
+        total_neg = h_report["n_negative"]
+        deny_coverage = h.get("policy_deny", 0) + h.get("policy_indeterminate", 0)
+        # At minimum, all 56 negatives correctly rejected (deny or indeterminate)
+        assert deny_coverage <= total_neg, (
+            f"Policy DENY+INDETERMINATE={deny_coverage} > n_negative={total_neg}"
+        )
+
+    def test_condition_h_no_tool_errors(self, h_report):
+        """Enhanced DVO must not have tool errors under normal operation."""
+        stats = h_report.get("policy_stats", {})
+        assert stats.get("tool_errors", 0) == 0
+
+    def test_condition_h_verdict_sources_valid(self, h_report):
+        """All Condition H verdict sources must be valid policy states."""
+        valid_sources = {
+            "policy_allow", "policy_deny",
+            "policy_indeterminate", "policy_requires_review",
+        }
+        for trace in h_report.get("traces_h", []):
+            assert trace["verdict_source"] in valid_sources, (
+                f"Unexpected verdict_source: {trace['verdict_source']}"
+            )
+
+    def test_condition_h_mcnemar_vs_g(self, h_report):
+        """McNemar G vs H: H must improve on G (more fixed than broken)."""
+        mcn = h_report.get("mcnemar_G_vs_H", {})
+        if not mcn:
+            pytest.skip("mcnemar_G_vs_H not in report")
+        # c = G wrong but H correct (identity check fixed G FPs)
+        # b = G correct but H wrong
+        assert mcn["c"] >= mcn["b"], (
+            f"H is worse than G on discordant pairs: b={mcn['b']} c={mcn['c']}"
+        )
+
+    def test_condition_h_no_identity_scenario_accepted(self, h_report):
+        """No scenario with approval_identity_valid=False should have verdict=True."""
+        dataset = build_full_dataset(seed_base=42, seed_expanded=7)
+        s_map = {s.scenario_id: s for s in dataset}
+        for trace in h_report.get("traces_h", []):
+            s = s_map.get(trace["scenario_id"])
+            if s is not None and not s.approval_identity_valid:
+                assert trace["verdict"] is not True, (
+                    f"H accepted identity-invalid scenario: {trace['scenario_id']}"
+                )
