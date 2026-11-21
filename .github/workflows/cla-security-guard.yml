@@ -1,4 +1,4 @@
-name: CLA workflow security guard
+name: Contributor agreements — workflow security
 
 on:
   pull_request:
