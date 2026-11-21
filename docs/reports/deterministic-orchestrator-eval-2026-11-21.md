@@ -212,6 +212,19 @@ from the verifier, the DVO, or the model.
 - DVO tool calls should be parallelized
 - Full E2E integration test with the actual AIGov production API
 
+## Evaluation gate
+
+**Status: NOT VERIFIED — Condition G inference and paired evaluation are still pending.**
+
+- Model-independent verification: 34/34 tests passed in the reported local run.
+- Existing Python suite: 653 passed, 17 skipped in the reported local run.
+- Relevant Rust test: 1 passed in the reported local run.
+- Real Condition G 70-scenario results: pending; do not treat the scripted oracle as measured model performance.
+- Regression tests dependent on the Condition G results artifact: pending.
+- Human review, CI completion, and merge authorization: pending.
+
+**Release decision: BLOCKED** until the real Condition G result artifact, regression assertions, statistical analysis, and required CI checks are verified. No production deployment is authorized.
+
 ## Human approval gate
 
 - Human code-review and merge authorization: **PENDING**
