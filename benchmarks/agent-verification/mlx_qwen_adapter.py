@@ -124,6 +124,14 @@ class AgentTrace:
     dvo_authorized: bool | None = None
     dvo_evidence: "Any | None" = None   # VerificationEvidence object
     dvo_active: bool = False
+    # Condition H — set when enhanced policy decision is active
+    # verdict_source values added for H:
+    #   "policy_allow"          — PolicyDecision.ALLOW (all checks + model)
+    #   "policy_deny"           — PolicyDecision.DENY (deterministic check failed)
+    #   "policy_indeterminate"  — PolicyDecision.INDETERMINATE (tool error)
+    #   "policy_requires_review" — PolicyDecision.REQUIRES_REVIEW (model concerns)
+    policy_decision: "Any | None" = None   # PolicyDecisionRecord
+    policy_active: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +143,19 @@ class SandboxToolExecutor:
 
     Tool inputs come from the agent; tool outputs are independent of
     both the agent's self-report and the AIGov verifier.
+
+    Args:
+        scenario_state: Sandbox state dict with audit_records, approvals,
+                        external_state, and optionally authorized_approvers.
+        check_identity:  If True, verify_approval checks the approver's identity
+                         against the state's authorized_approvers list.
+                         Condition G: False (preserved baseline behavior).
+                         Condition H: True (enhanced authorization).
     """
 
-    def __init__(self, scenario_state: dict[str, Any]) -> None:
+    def __init__(self, scenario_state: dict[str, Any], check_identity: bool = False) -> None:
         self._state = scenario_state
+        self._check_identity = check_identity
 
     def execute(self, name: str, arguments: dict[str, Any]) -> Any:
         if name not in TOOL_REGISTRY:
@@ -161,7 +178,14 @@ class SandboxToolExecutor:
                 return {"valid": False, "reason": "approval_mismatch"}
             if not approval.get("active", True):
                 return {"valid": False, "reason": "approval_expired"}
-            return {"valid": True, "approver": approval.get("approver", "unknown")}
+            actual_approver = approval.get("approver", "unknown")
+            # Condition H: check approver identity against authorized list
+            if self._check_identity:
+                authorized = self._state.get("authorized_approvers", [])
+                if authorized and actual_approver not in authorized:
+                    return {"valid": False, "reason": "unauthorized_approver_identity",
+                            "approver": actual_approver}
+            return {"valid": True, "approver": actual_approver}
 
         elif name == "read_external_state":
             rid = arguments.get("record_id", "")
@@ -368,6 +392,7 @@ class QwenAgent:
         gate: "Any | None" = None,
         orchestrator: "Any | None" = None,
         canonical_params: "dict[str, Any] | None" = None,
+        policy_orchestrator: "Any | None" = None,
     ) -> AgentTrace:
         """
         Execute the agent loop for one scenario.
@@ -383,6 +408,9 @@ class QwenAgent:
             canonical_params: Canonical scenario identifiers for the DVO
                               (proposal_id, approval_id, record_id). Must come from the
                               Scenario definition — NOT from model output.
+            policy_orchestrator: Optional EnhancedPolicyOrchestrator for Condition H.
+                                 When provided, overrides orchestrator for the DVO run
+                                 and applies 4-state policy decision after model inference.
 
         Returns:
             AgentTrace with verdict, tool calls, and execution metadata.
@@ -394,7 +422,8 @@ class QwenAgent:
             prompt=build_prompt(scenario_summary),
             raw_response="",
             gate_active=gate is not None,
-            dvo_active=orchestrator is not None,
+            dvo_active=orchestrator is not None or policy_orchestrator is not None,
+            policy_active=policy_orchestrator is not None,
         )
         if gate is not None:
             gate.reset_for_scenario()
@@ -412,6 +441,20 @@ class QwenAgent:
             )
             trace.dvo_authorized = dvo_evidence.dvo_authorized
             trace.dvo_evidence = dvo_evidence
+
+        # --- Condition H: Enhanced policy orchestrator runs first ---
+        # Uses enhanced SandboxToolExecutor (check_identity=True) so approver
+        # identity is verified at the DVO level, not delegated to the model.
+        h_evidence = None
+        if policy_orchestrator is not None and canonical_params is not None:
+            h_evidence = policy_orchestrator.orchestrate(
+                proposal_id=canonical_params["proposal_id"],
+                approval_id=canonical_params["approval_id"],
+                record_id=canonical_params.get("record_id", "proc-2026-001"),
+                field=canonical_params.get("field", "deadline"),
+            )
+            trace.dvo_authorized = h_evidence.dvo_authorized
+            trace.dvo_evidence = h_evidence
         tools_list = list(TOOL_REGISTRY.values())
         for t, schema in zip(tools_list, TOOL_REGISTRY.keys()):
             t["name"] = schema  # inject name into schema for prompt
@@ -421,13 +464,14 @@ class QwenAgent:
             {"role": "user", "content": trace.prompt},
         ]
 
-        # --- Condition G: pre-inject DVO evidence into conversation context ---
+        # --- Conditions G and H: pre-inject DVO evidence into conversation context ---
         # The model sees these as if it had already called the tools, allowing
         # it to reason from pre-verified evidence and call report_verdict directly.
         # Security: injected results come from DVO's canonical-ID tool calls, not
         # from the model's argument generation.
-        if dvo_evidence is not None:
-            injected = dvo_evidence.as_injected_messages()
+        active_evidence = h_evidence if h_evidence is not None else dvo_evidence
+        if active_evidence is not None:
+            injected = active_evidence.as_injected_messages()
             messages.extend(injected)
 
         try:
@@ -558,7 +602,7 @@ class QwenAgent:
             # and the DVO's independent authorization decision.
             # Security invariant: DVO-NO always overrides model-YES.
             # Final verdict = dvo_authorized AND model_verdict.
-            if dvo_evidence is not None:
+            if dvo_evidence is not None and h_evidence is None:
                 model_verdict = trace.verdict
                 if not dvo_evidence.dvo_authorized:
                     # DVO rejected — override regardless of model verdict
@@ -573,6 +617,28 @@ class QwenAgent:
                     # Model's conservative judgment is honored when DVO passes.
                     trace.verdict = False
                     trace.verdict_source = "dvo_fallback" if model_verdict is None else "model_rejected_dvo_ok"
+
+            # --- Condition H: apply 4-state policy decision ---
+            # DVO-H runs with identity checks. Only ALLOW authorizes execution.
+            # DENY: deterministic policy says no (model not consulted).
+            # INDETERMINATE: tool error (fail-closed).
+            # REQUIRES_REVIEW: policy passes, model has concerns → human review.
+            # ALLOW: all checks pass, model agrees.
+            if h_evidence is not None:
+                from policy_decision import compute_policy_decision, PolicyDecision
+                model_verdict_h = trace.verdict
+                pdr = compute_policy_decision(
+                    audit_result=h_evidence.audit_result,
+                    approval_result=h_evidence.approval_result,
+                    external_result=h_evidence.external_result,
+                    model_verdict=model_verdict_h,
+                    model_reasoning=trace.reasoning,
+                    authorized_approvers=policy_orchestrator.authorized_approvers,
+                    orchestration_ms=h_evidence.orchestration_ms,
+                )
+                trace.policy_decision = pdr
+                trace.verdict = pdr.enforcement_outcome
+                trace.verdict_source = f"policy_{pdr.decision.value}"
 
         except Exception as exc:
             trace.parse_error = f"Inference error: {traceback.format_exc(limit=2)}"

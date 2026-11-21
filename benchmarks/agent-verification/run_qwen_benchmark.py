@@ -45,6 +45,7 @@ from independent_benchmark import (
     condition_d,
     condition_f_scripted,
     condition_g_scripted,
+    condition_h_scripted,
     compute_metrics,
     mcnemar_test,
 )
@@ -52,8 +53,10 @@ from mlx_qwen_adapter import ADAPTER_METADATA, AgentTrace, QwenAgent, SandboxToo
 from mandatory_verification_gate import MandatoryVerificationGate
 from deterministic_verification_orchestrator import (
     DeterministicVerificationOrchestrator,
+    EnhancedPolicyOrchestrator,
     DVOStats,
 )
+from policy_decision import PolicyDecision, PolicyStats
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +80,10 @@ def build_scenario_state(s: Scenario) -> dict[str, Any]:
     approvals: dict[str, Any] = {}
     audit_records: dict[str, Any] = {}
     external_state: dict[str, Any] = {}
+    # Authorized approvers list — available to Condition H identity check.
+    # Condition G SandboxToolExecutor ignores this (check_identity=False).
+    # Condition H SandboxToolExecutor uses this (check_identity=True).
+    authorized_approvers = ["compliance-officer@example.com"]
 
     # Build approvals table
     if s.approval_id != "MISSING":
@@ -112,6 +119,7 @@ def build_scenario_state(s: Scenario) -> dict[str, Any]:
         "audit_records": audit_records,
         "approvals": approvals,
         "external_state": external_state,
+        "authorized_approvers": authorized_approvers,
     }
 
 
@@ -188,6 +196,7 @@ def run_qwen_benchmark(
     out_path: str | None = None,
     run_condition_f: bool = False,
     run_condition_g: bool = False,
+    run_condition_h: bool = False,
 ) -> dict[str, Any]:
 
     if full:
@@ -218,6 +227,7 @@ def run_qwen_benchmark(
     print(f"Platform:  {platform.machine()} / {platform.system()} {platform.release()}")
     print(f"Condition F (gated): {'enabled' if run_condition_f else 'disabled (pass --condition-f to enable)'}")
     print(f"Condition G (DVO):   {'enabled' if run_condition_g else 'disabled (pass --condition-g to enable)'}")
+    print(f"Condition H (policy):{'enabled' if run_condition_h else 'disabled (pass --condition-h to enable)'}")
     print()
 
     # Load model once
@@ -264,6 +274,7 @@ def run_qwen_benchmark(
         ("D_aigov_evidence", condition_d),
         ("F_scripted_oracle", condition_f_scripted),
         ("G_scripted_oracle", condition_g_scripted),
+        ("H_scripted_oracle", condition_h_scripted),
     ]:
         t0 = time.perf_counter()
         preds = [cond_fn(s) for s in dataset]
@@ -640,6 +651,127 @@ def run_qwen_benchmark(
     else:
         print("\nCondition G skipped (pass --condition-g to enable the DVO run).")
 
+    # --- Condition H: Qwen + Enhanced Policy Decision (4-state) ---
+    h_metrics: dict[str, Any] = {}
+    h_traces: list[AgentTrace] = []
+    h_preds: list[bool | None] = []
+    policy_global_stats: dict[str, Any] = {}
+
+    if run_condition_h:
+        print("\nRunning Condition H (Qwen + Enhanced Policy Decision)...")
+        policy_stats = PolicyStats()
+        t_h_start = time.perf_counter()
+
+        for i, s in enumerate(dataset):
+            print(f"  H[{i+1:2d}/{n}] {s.scenario_id}", end=" ", flush=True)
+            summary = build_scenario_summary(s)
+            state = build_scenario_state(s)
+
+            canonical = {
+                "proposal_id": s.proposal_id,
+                "approval_id": s.approval_id,
+                "record_id": "proc-2026-001",
+                "field": "deadline",
+            }
+
+            # Enhanced executor: check_identity=True verifies approver against list
+            h_executor = SandboxToolExecutor(state, check_identity=True)
+            policy_orch = EnhancedPolicyOrchestrator(
+                h_executor,
+                authorized_approvers=state.get("authorized_approvers"),
+            )
+
+            trace_h = agent.run(
+                s.scenario_id, summary, state,
+                policy_orchestrator=policy_orch,
+                canonical_params=canonical,
+            )
+            h_traces.append(trace_h)
+            h_preds.append(trace_h.verdict)
+
+            # Record policy stats
+            if trace_h.policy_decision is not None:
+                policy_stats.record(trace_h.policy_decision)
+
+            status = "✓" if trace_h.verdict == s.ground_truth else "✗"
+            pdr = trace_h.policy_decision
+            pd_info = ""
+            if pdr is not None:
+                pd_info = f" [Policy={pdr.decision.value.upper()}]"
+                if pdr.policy_failure_reasons:
+                    pd_info += f" [{pdr.policy_failure_reasons[0][:40]}]"
+                elif pdr.review_flags:
+                    pd_info += f" [{pdr.review_flags[0][:40]}]"
+            print(
+                f"pred={trace_h.verdict!s:5} gt={s.ground_truth!s:5} {status} "
+                f"({trace_h.total_ms:.0f}ms){pd_info} src={trace_h.verdict_source}"
+            )
+
+        h_total_ms = (time.perf_counter() - t_h_start) * 1000
+        h_metrics = compute_confusion(h_preds, gts)
+        h_metrics["total_ms"] = round(h_total_ms, 1)
+        h_metrics["avg_inference_ms"] = round(
+            sum(t.inference_ms for t in h_traces) / n if n > 0 else 0, 1
+        )
+        h_metrics["n_parse_errors"] = sum(1 for t in h_traces if t.parse_error)
+        h_metrics["n_tool_calls"] = sum(len(t.tool_calls) for t in h_traces)
+
+        # Policy decision breakdown
+        h_metrics["policy_allow"] = policy_stats.allow_count
+        h_metrics["policy_deny"] = policy_stats.deny_count
+        h_metrics["policy_indeterminate"] = policy_stats.indeterminate_count
+        h_metrics["policy_requires_review"] = policy_stats.requires_review_count
+        h_metrics["review_rate"] = round(policy_stats.review_rate, 4)
+        h_metrics["coverage"] = round(policy_stats.coverage, 4)
+
+        # Verdict sources
+        h_vsc = {}
+        for vs in ("policy_allow", "policy_deny", "policy_indeterminate", "policy_requires_review"):
+            h_vsc[vs] = sum(1 for t in h_traces if t.verdict_source == vs)
+        h_metrics["verdict_source_counts"] = h_vsc
+
+        # Unsafe blocked / legit blocked vs E baseline
+        h_unsafe_blocked = sum(
+            1 for t_e, t_h, s in zip(traces, h_traces, dataset)
+            if not s.ground_truth and t_e.verdict is True and t_h.verdict is False
+        )
+        h_legit_blocked = sum(
+            1 for t_e, t_h, s in zip(traces, h_traces, dataset)
+            if s.ground_truth and t_e.verdict is True and t_h.verdict is False
+        )
+        h_metrics["unsafe_actions_blocked"] = h_unsafe_blocked
+        h_metrics["legitimate_actions_blocked"] = h_legit_blocked
+
+        e_avg = qwen_metrics.get("avg_inference_ms", 0)
+        h_avg = h_metrics.get("avg_inference_ms", 0)
+        h_metrics["latency_overhead_vs_e_pct"] = round(
+            100.0 * (h_avg - e_avg) / e_avg if e_avg > 0 else 0.0, 1
+        )
+
+        policy_global_stats = policy_stats.to_dict()
+
+        print(f"\nCondition H (Qwen + Enhanced Policy Decision):")
+        print(
+            f"  F1={h_metrics['f1']:.3f}  FAR={h_metrics['far']:.3f}  "
+            f"Acc={h_metrics['accuracy']:.3f} "
+            f"[{h_metrics['accuracy_ci_95'][0]:.3f},{h_metrics['accuracy_ci_95'][1]:.3f}]"
+        )
+        print(
+            f"  Policy: ALLOW={policy_stats.allow_count}  DENY={policy_stats.deny_count}  "
+            f"INDETERMINATE={policy_stats.indeterminate_count}  "
+            f"REQUIRES_REVIEW={policy_stats.requires_review_count}"
+        )
+        print(
+            f"  Review rate: {policy_stats.review_rate:.1%}  "
+            f"Coverage: {policy_stats.coverage:.1%}"
+        )
+        print(
+            f"  Unsafe actions blocked: {h_unsafe_blocked}  "
+            f"Legitimate actions incorrectly blocked: {h_legit_blocked}"
+        )
+    else:
+        print("\nCondition H skipped (pass --condition-h to enable the policy run).")
+
     # --- McNemar: paired D vs E comparison ---
     preds_d = [condition_d(s) for s in dataset]
     preds_e = [t.verdict for t in traces]
@@ -669,6 +801,9 @@ def run_qwen_benchmark(
     mcnemar_dg: dict[str, Any] = {}
     mcnemar_eg: dict[str, Any] = {}
     mcnemar_fg: dict[str, Any] = {}
+    mcnemar_dh: dict[str, Any] = {}
+    mcnemar_eh: dict[str, Any] = {}
+    mcnemar_gh: dict[str, Any] = {}
     if run_condition_g and g_preds:
         preds_g = [t.verdict for t in g_traces]
         mcnemar_dg = mcnemar_test(preds_d, preds_g, gts)
@@ -687,6 +822,25 @@ def run_qwen_benchmark(
                   f"sig={mcnemar_fg['significant_p05']} (n_discordant={mcnemar_fg['n_discordant']})")
             print(f"  b (F correct, G wrong)={mcnemar_fg['b']}  "
                   f"c (F wrong, G correct)={mcnemar_fg['c']}")
+
+    # --- McNemar: D vs H, E vs H, G vs H (only if Condition H was run) ---
+    if run_condition_h and h_preds:
+        mcnemar_dh = mcnemar_test(preds_d, h_preds, gts)
+        mcnemar_eh = mcnemar_test(preds_e, h_preds, gts)
+        print(f"\nMcNemar D vs H: chi2={mcnemar_dh['chi2']} p={mcnemar_dh['p_value']} "
+              f"sig={mcnemar_dh['significant_p05']} (n_discordant={mcnemar_dh['n_discordant']})")
+        print(f"  b (D correct, H wrong)={mcnemar_dh['b']}  "
+              f"c (D wrong, H correct)={mcnemar_dh['c']}")
+        print(f"McNemar E vs H: chi2={mcnemar_eh['chi2']} p={mcnemar_eh['p_value']} "
+              f"sig={mcnemar_eh['significant_p05']} (n_discordant={mcnemar_eh['n_discordant']})")
+        print(f"  b (E correct, H wrong)={mcnemar_eh['b']}  "
+              f"c (E wrong, H correct)={mcnemar_eh['c']}")
+        if run_condition_g and preds_g:
+            mcnemar_gh = mcnemar_test(preds_g, h_preds, gts)
+            print(f"McNemar G vs H: chi2={mcnemar_gh['chi2']} p={mcnemar_gh['p_value']} "
+                  f"sig={mcnemar_gh['significant_p05']} (n_discordant={mcnemar_gh['n_discordant']})")
+            print(f"  b (G correct, H wrong)={mcnemar_gh['b']}  "
+                  f"c (G wrong, H correct)={mcnemar_gh['c']}")
 
     # --- Git metadata ---
     git_sha = "unknown"
@@ -719,6 +873,7 @@ def run_qwen_benchmark(
             "E_qwen_local": qwen_metrics,
             **({"F_qwen_gated": gated_metrics} if run_condition_f else {}),
             **({"G_qwen_dvo": g_metrics} if run_condition_g else {}),
+            **({"H_qwen_policy": h_metrics} if run_condition_h else {}),
         },
         "mcnemar_D_vs_E": mcnemar_de,
         **({"mcnemar_D_vs_F": mcnemar_df} if run_condition_f else {}),
@@ -726,10 +881,15 @@ def run_qwen_benchmark(
         **({"mcnemar_D_vs_G": mcnemar_dg} if run_condition_g else {}),
         **({"mcnemar_E_vs_G": mcnemar_eg} if run_condition_g else {}),
         **({"mcnemar_F_vs_G": mcnemar_fg} if (run_condition_f and run_condition_g) else {}),
+        **({"mcnemar_D_vs_H": mcnemar_dh} if run_condition_h else {}),
+        **({"mcnemar_E_vs_H": mcnemar_eh} if run_condition_h else {}),
+        **({"mcnemar_G_vs_H": mcnemar_gh} if (run_condition_g and run_condition_h) else {}),
         **({"gate_stats": gate_global_stats} if run_condition_f else {}),
         **({"dvo_stats": dvo_global_stats} if run_condition_g else {}),
+        **({"policy_stats": policy_global_stats} if run_condition_h else {}),
         "condition_f_enabled": run_condition_f,
         "condition_g_enabled": run_condition_g,
+        "condition_h_enabled": run_condition_h,
         "category_results": category_results,
         "failures": failures,
         "traces": [
@@ -794,6 +954,32 @@ def run_qwen_benchmark(
             }
             for t, s in zip(g_traces, dataset)
         ]} if run_condition_g else {}),
+        **({"traces_h": [
+            {
+                "scenario_id": t.scenario_id,
+                "verdict": t.verdict,
+                "verdict_source": t.verdict_source,
+                "ground_truth": s.ground_truth,
+                "correct": t.verdict == s.ground_truth,
+                "dvo_authorized": t.dvo_authorized,
+                "dvo_failure_reasons": (
+                    t.dvo_evidence.failure_reasons if t.dvo_evidence else []
+                ),
+                "policy_decision": (
+                    t.policy_decision.to_dict() if t.policy_decision is not None else None
+                ),
+                "n_tool_calls": len(t.tool_calls),
+                "tool_calls": [
+                    {"name": tc.name, "result": tc.result, "error": tc.error}
+                    for tc in t.tool_calls
+                ],
+                "parse_error": t.parse_error,
+                "reasoning": getattr(t, "reasoning", ""),
+                "inference_ms": round(t.inference_ms, 1),
+                "total_ms": round(t.total_ms, 1),
+            }
+            for t, s in zip(h_traces, dataset)
+        ]} if run_condition_h else {}),
     }
 
     if out_path:
@@ -813,6 +999,7 @@ if __name__ == "__main__":
     parser.add_argument("--full", action="store_true", help="Use full 70-scenario dataset")
     parser.add_argument("--condition-f", action="store_true", help="Run Condition F (Qwen + mandatory verification gates)")
     parser.add_argument("--condition-g", action="store_true", help="Run Condition G (Qwen + deterministic verification orchestrator)")
+    parser.add_argument("--condition-h", action="store_true", help="Run Condition H (Qwen + enhanced policy decision, 4-state)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model-path", default=None, help="Local model weights path")
     parser.add_argument("--out", default=None, help="JSON output path")
@@ -826,6 +1013,7 @@ if __name__ == "__main__":
         out_path=args.out,
         run_condition_f=args.condition_f,
         run_condition_g=args.condition_g,
+        run_condition_h=args.condition_h,
     )
 
     print(f"\n{'='*60}")
@@ -843,4 +1031,13 @@ if __name__ == "__main__":
         print(f"  FAR={g_metrics_out.get('far', 'N/A')}  FRR={g_metrics_out.get('frr', 'N/A')}")
         print(f"  Unsafe actions blocked by DVO:      {g_metrics_out.get('unsafe_actions_blocked', 'N/A')}")
         print(f"  Legit actions incorrectly blocked:  {g_metrics_out.get('legitimate_actions_blocked', 'N/A')}")
-        print(f"  Legitimate actions blocked by gate: {f_metrics.get('legitimate_actions_blocked', 'N/A')}")
+    if report.get("condition_h_enabled"):
+        h_metrics_out = report["conditions"].get("H_qwen_policy", {})
+        print(f"  Real-agent (H Qwen, Policy):        F1={h_metrics_out.get('f1', 'N/A')}")
+        print(f"  FAR={h_metrics_out.get('far', 'N/A')}  FRR={h_metrics_out.get('frr', 'N/A')}")
+        print(f"  Policy: ALLOW={h_metrics_out.get('policy_allow', 'N/A')}  "
+              f"DENY={h_metrics_out.get('policy_deny', 'N/A')}  "
+              f"INDETERMINATE={h_metrics_out.get('policy_indeterminate', 'N/A')}  "
+              f"REQUIRES_REVIEW={h_metrics_out.get('policy_requires_review', 'N/A')}")
+        print(f"  Unsafe actions blocked:             {h_metrics_out.get('unsafe_actions_blocked', 'N/A')}")
+        print(f"  Legit actions incorrectly blocked:  {h_metrics_out.get('legitimate_actions_blocked', 'N/A')}")

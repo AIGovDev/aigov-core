@@ -331,6 +331,54 @@ class DeterministicVerificationOrchestrator:
 
 
 # ---------------------------------------------------------------------------
+# Enhanced Policy Orchestrator (Condition H)
+# ---------------------------------------------------------------------------
+
+class EnhancedPolicyOrchestrator(DeterministicVerificationOrchestrator):
+    """
+    Extended DVO for Condition H: adds approver identity verification.
+
+    Uses SandboxToolExecutor with check_identity=True, which checks the
+    approver's email against the scenario's authorized_approvers list.
+    This closes the security gap in Condition G where verify_approval
+    returned valid=True for any structurally valid approval regardless
+    of whether the approver was on the authorized list.
+
+    Root cause it fixes:
+      Condition G: 13 DVO FPs (S04 + 12 F1 scenarios) where
+        approval_identity_valid=False but verify_approval returned valid=True.
+      Condition H: These 13 scenarios → verify_approval returns valid=False
+        (unauthorized_approver_identity) → DVO immediately DENIES them.
+
+    authorized_approvers is passed from the scenario state so it comes from
+    the same trusted source (scenario definition) as the canonical IDs.
+    """
+
+    def __init__(
+        self,
+        executor: "SandboxToolExecutor",
+        authorized_approvers: list[str] | None = None,
+    ) -> None:
+        super().__init__(executor)
+        self.authorized_approvers = authorized_approvers
+
+    def orchestrate(
+        self,
+        proposal_id: str,
+        approval_id: str,
+        record_id: str,
+        field: str = "deadline",
+    ) -> VerificationEvidence:
+        """
+        Same as DVO-G but approval result now includes identity check.
+        The enhanced SandboxToolExecutor (check_identity=True) rejects
+        approvers not in authorized_approvers before this method even
+        reaches the authorization computation.
+        """
+        return super().orchestrate(proposal_id, approval_id, record_id, field)
+
+
+# ---------------------------------------------------------------------------
 # DVO stats
 # ---------------------------------------------------------------------------
 

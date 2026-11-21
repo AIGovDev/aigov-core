@@ -572,6 +572,39 @@ def condition_g_scripted(s: Scenario) -> bool:
     return condition_d(s) and s.ground_truth
 
 
+def condition_h_scripted(s: Scenario) -> bool:
+    """
+    Condition H scripted oracle: enhanced DVO + perfect model reasoning.
+
+    Condition H extends Condition G with approver identity verification.
+    The enhanced authorization predicate requires:
+      1. audit.found AND audit.hash_verified
+      2. approval.valid (proposal_id match, not expired)
+      3. approval.approver is on the authorized list (NEW vs G)
+      4. external.value == audit.executed_value (consistency check)
+
+    When all 4 hold for a positive scenario (ground_truth=True), and
+    a perfect model agrees, the oracle returns True.
+    When any check fails (all 56 negatives), it returns False.
+
+    For the 70-scenario dataset, condition_h_scripted(s) = s.ground_truth
+    because the enhanced authorization predicate covers all 56 negatives:
+      - All 16 D FPs (ext=False): caught by external state check
+      - All 12 F1 + S04 (ident=False): caught by identity check
+      - All other negatives: caught by existing checks
+
+    Result: F1=1.0, FAR=0.000, FRR=0.000 (oracle upper bound for Condition H).
+    """
+    # Enhanced predicate: hash + approval + identity + external state
+    enhanced_pass = (
+        s.expected_hash_valid
+        and s.approval_identity_valid
+        and s.approval_not_expired
+        and s.external_state_valid
+    )
+    return enhanced_pass and s.ground_truth
+
+
 def condition_d(s: Scenario) -> bool:
     """AIGov evidence verification: live call to verify_evidence()."""
     pkg = _build_evidence_package_for_scenario(s)
