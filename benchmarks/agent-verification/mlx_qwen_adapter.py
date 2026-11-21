@@ -115,6 +115,15 @@ class AgentTrace:
     # Condition F — set when mandatory gate is active
     gate_blocks: list[dict] = field(default_factory=list)
     gate_active: bool = False
+    # Condition G — set when DVO orchestrator is active
+    # verdict_source values added for G:
+    #   "dvo_orchestrated"      — DVO=YES, model=YES → accepted
+    #   "dvo_rejected"          — DVO=NO → rejected (overrides model)
+    #   "model_rejected_dvo_ok" — DVO=YES, model=NO → rejected (model conservative)
+    #   "dvo_fallback"          — DVO=YES, model no verdict → rejected (fail safe)
+    dvo_authorized: bool | None = None
+    dvo_evidence: "Any | None" = None   # VerificationEvidence object
+    dvo_active: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +366,8 @@ class QwenAgent:
         scenario_summary: dict[str, Any],
         scenario_state: dict[str, Any],
         gate: "Any | None" = None,
+        orchestrator: "Any | None" = None,
+        canonical_params: "dict[str, Any] | None" = None,
     ) -> AgentTrace:
         """
         Execute the agent loop for one scenario.
@@ -367,6 +378,11 @@ class QwenAgent:
                               Must NOT contain oracle labels.
             scenario_state: Sandbox state for tool execution (audit_records, approvals,
                             external_state). Independent of the agent's self-report.
+            gate: Optional MandatoryVerificationGate for Condition F.
+            orchestrator: Optional DeterministicVerificationOrchestrator for Condition G.
+            canonical_params: Canonical scenario identifiers for the DVO
+                              (proposal_id, approval_id, record_id). Must come from the
+                              Scenario definition — NOT from model output.
 
         Returns:
             AgentTrace with verdict, tool calls, and execution metadata.
@@ -378,11 +394,24 @@ class QwenAgent:
             prompt=build_prompt(scenario_summary),
             raw_response="",
             gate_active=gate is not None,
+            dvo_active=orchestrator is not None,
         )
         if gate is not None:
             gate.reset_for_scenario()
 
         executor = SandboxToolExecutor(scenario_state)
+
+        # --- Condition G: DVO runs first with canonical IDs ---
+        dvo_evidence = None
+        if orchestrator is not None and canonical_params is not None:
+            dvo_evidence = orchestrator.orchestrate(
+                proposal_id=canonical_params["proposal_id"],
+                approval_id=canonical_params["approval_id"],
+                record_id=canonical_params.get("record_id", "proc-2026-001"),
+                field=canonical_params.get("field", "deadline"),
+            )
+            trace.dvo_authorized = dvo_evidence.dvo_authorized
+            trace.dvo_evidence = dvo_evidence
         tools_list = list(TOOL_REGISTRY.values())
         for t, schema in zip(tools_list, TOOL_REGISTRY.keys()):
             t["name"] = schema  # inject name into schema for prompt
@@ -391,6 +420,15 @@ class QwenAgent:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": trace.prompt},
         ]
+
+        # --- Condition G: pre-inject DVO evidence into conversation context ---
+        # The model sees these as if it had already called the tools, allowing
+        # it to reason from pre-verified evidence and call report_verdict directly.
+        # Security: injected results come from DVO's canonical-ID tool calls, not
+        # from the model's argument generation.
+        if dvo_evidence is not None:
+            injected = dvo_evidence.as_injected_messages()
+            messages.extend(injected)
 
         try:
             from mlx_lm import generate
@@ -514,6 +552,27 @@ class QwenAgent:
                     # Fallback for non-gated run
                     trace.parse_error = (trace.parse_error or "") + " | verdict not reported; defaulting to False"
                     trace.verdict = False
+
+            # --- Condition G: apply DVO security override ---
+            # This runs AFTER the agentic loop so we have both the model's verdict
+            # and the DVO's independent authorization decision.
+            # Security invariant: DVO-NO always overrides model-YES.
+            # Final verdict = dvo_authorized AND model_verdict.
+            if dvo_evidence is not None:
+                model_verdict = trace.verdict
+                if not dvo_evidence.dvo_authorized:
+                    # DVO rejected — override regardless of model verdict
+                    trace.verdict = False
+                    trace.verdict_source = "dvo_rejected"
+                elif model_verdict is True:
+                    # DVO accepted AND model accepted → accept
+                    trace.verdict = True
+                    trace.verdict_source = "dvo_orchestrated"
+                else:
+                    # DVO accepted but model rejected (or no verdict) → reject
+                    # Model's conservative judgment is honored when DVO passes.
+                    trace.verdict = False
+                    trace.verdict_source = "dvo_fallback" if model_verdict is None else "model_rejected_dvo_ok"
 
         except Exception as exc:
             trace.parse_error = f"Inference error: {traceback.format_exc(limit=2)}"

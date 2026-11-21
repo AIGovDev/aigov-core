@@ -541,6 +541,37 @@ def condition_f_scripted(s: Scenario) -> bool:
     return condition_d(s)
 
 
+def condition_g_scripted(s: Scenario) -> bool:
+    """
+    Condition G — scripted oracle representing perfect DVO + model reasoning.
+
+    Models the IDEAL outcome when deterministic verification orchestration is applied:
+    1. DVO independently gathers all evidence (same logic as condition_d).
+    2. A perfect model reasons correctly from the pre-injected evidence.
+
+    Security invariant: DVO-NO always overrides model-YES.
+    Final = dvo_authorized AND perfect_model_verdict.
+
+    For a perfectly correct model:
+      - On positives (ground_truth=True): DVO=YES (D FRR=0), model=YES → G=YES → TP
+      - On D FPs (DVO=YES, ground_truth=False): perfect model=NO → G=NO → TN
+        (the DVO passes the evidence check but a correct model rejects the action)
+      - On D TNs (DVO=NO): G=NO → TN (DVO blocks regardless)
+
+    Result: G_scripted = condition_d(s) AND s.ground_truth.
+    This eliminates all D FPs via perfect model reasoning, achieving F1=1.0 (oracle).
+
+    Note: G_scripted is an *upper bound* — the theoretical best achievable by
+    DVO + any model. The real Condition G (Qwen2.5-3B) will fall short because
+    the model's reasoning is imperfect. G_scripted vs G_actual quantifies the
+    model's reasoning gap on DVO-authorized scenarios.
+    """
+    # dvo_authorized AND perfect_model_verdict
+    # dvo_authorized = condition_d(s)
+    # perfect_model_verdict = s.ground_truth (oracle)
+    return condition_d(s) and s.ground_truth
+
+
 def condition_d(s: Scenario) -> bool:
     """AIGov evidence verification: live call to verify_evidence()."""
     pkg = _build_evidence_package_for_scenario(s)
