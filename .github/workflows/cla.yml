@@ -11,7 +11,7 @@
 # - Do not add PERSONAL_ACCESS_TOKEN here unless using a remote signatures repository;
 #   a long-lived PAT on pull_request_target expands blast radius if the action is compromised.
 
-name: CLA Assistant
+name: Contributor agreements — retired legacy workflow
 
 on:
   issue_comment:
