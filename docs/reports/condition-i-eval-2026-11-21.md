@@ -417,50 +417,115 @@ overhead: <1 ms for a fixture of this size. No network round-trips.
 
 ---
 
-## 9. Limitations and production-readiness gaps
+## 9. Security hardening: implemented controls
+
+The following hardening was implemented after the initial Condition I delivery
+(all controls are in `benchmarks/agent-verification/`):
+
+### 9.1 Replay protection (`replay_protection.py`)
+
+`ApprovalNonce` binds an approval to its full execution context (5 fields:
+`approval_id`, `tenant_id`, `action_type`, `resource_id`, `proposal_id`). The
+nonce string is a SHA-256 hash of the canonical JSON of these fields.
+
+`ReplayRegistry` provides atomic check-and-consume semantics under a
+`threading.Lock`. `try_consume(nonce)` returns `True` on first use and `False`
+on any subsequent call with the same composite key — the replay is detected and
+returns a `replay_detected` failure reason before the policy lookup runs.
+
+**Thread-safety verified**: `TestReplayProtection::test_concurrent_consume_exactly_one_succeeds`
+confirms that 10 concurrent `try_consume()` calls with the same nonce result in
+exactly 1 True and 9 False.
+
+### 9.2 Runtime approval revocation (`revocation_list.py`)
+
+`RevocationList` maintains approval-level revocation state independently of
+`PolicyRecord.revoked` (which is a fixture-time policy-level flag). An approval
+can be revoked at runtime (e.g., approver account compromised between issuance
+and execution) without changing the POLICY_FIXTURE.
+
+Revocation is tenant-scoped: same `approval_id` in different tenants is treated
+as independent. `revoke()` is idempotent: first revocation wins. The check runs
+after the approval validity check but before the policy lookup; a revoked
+approval returns a `approval_revoked_at_runtime:<reason>` failure.
+
+### 9.3 Key management abstraction (`trusted_policy_provider.py`)
+
+`PolicyKeyProvider` wraps multi-key HMAC with rotation support:
+- `rotate(new_key_id, new_key_bytes)` adds a new key and sets it as active;
+  old keys are retained for verification of records signed with them.
+- `verify_integrity(fields, digest, key_id)` returns `False` for unknown
+  `key_id` (fail-closed) using `hmac.compare_digest` for constant-time
+  comparison.
+- `key_id` is included in `PolicyRecord.to_signable_dict()` to prevent
+  key-swap attacks: an attacker cannot keep a valid HMAC while swapping the
+  `key_id` reference on a record.
+- Dataset hash unchanged after `key_id` addition: `compute_adversarial_dataset_hash()`
+  hashes only `AdversarialScenario` fields, not `PolicyRecord.integrity_digest`.
+
+### 9.4 Trust-boundary integration tests (`test_condition_i.py`)
+
+86 tests pass (up from 54):
+- `TestReplayProtection` (9 tests): first use, replay detection, tenant/action/
+  resource/proposal isolation, reset semantics, `is_consumed` non-consuming,
+  concurrent thread safety
+- `TestRevocationList` (8 tests): unknown-not-revoked, revoke→is_revoked, tenant
+  scope, entry data, state hash change, idempotency, entry count
+- `TestPolicyKeyProvider` (8 tests): default key, rotation, old-record
+  verification after rotation, unknown-key-fail, explicit key_id compute, cross-
+  provider fail, key_id in record
+- `TestHardeningIntegration` (7 tests): replay attack blocked, runtime revocation
+  block, legitimate pass without hardening, replay/revocation checked flags,
+  replay blocked before policy lookup, flag unset without list
+
+---
+
+## 10. Limitations and remaining production-readiness gaps
 
 1. **Static POLICY_FIXTURE in benchmark.** Real deployments need an audited
    policy store (e.g., append-only signed log) with live revocation push.
+   **(Not addressed in this PR — out of scope for benchmark.)**
 
-2. **Shared HMAC key.** `POLICY_HMAC_KEY` is a constant in source code.
-   Production systems require HSM-backed keys with rotation and access control.
+2. **Shared HMAC key in source code.** `PolicyKeyProvider.DEFAULT_KEY` is a
+   benchmark constant. Production systems require HSM-backed keys with rotation
+   and access control. `PolicyKeyProvider` is designed for HSM drop-in (swap
+   `__init__` to accept key handles instead of raw bytes).
+   **(Key rotation abstraction implemented; actual HSM wiring is out of scope.)**
 
 3. **Principal identity is email address.** A real system would use a
    cryptographic identifier (certificate subject, OIDC `sub` claim, or hardware
    attestation) resistant to email aliasing and spoofing.
+   **(Not addressed — out of scope for benchmark.)**
 
-4. **No replay protection at the policy layer.** An approval that was once valid
-   could be replayed if the approval's `active` field is not checked in
-   conjunction with an approval-instance nonce. The `evidence_replay` scenarios
-   test external state consistency but not nonce uniqueness.
+4. **Replay registry is in-memory per-benchmark-run.** A production deployment
+   needs a persistent distributed nonce store (e.g., Redis `SET NX EX`) so
+   replays are detected across restarts and replicas.
+   **(In-memory `ReplayRegistry` implemented; persistent backing is out of scope.)**
 
-5. **Policy lookup does not check approval timestamp.** A scenario where the
-   policy was valid at approval time but has since been revoked still results in
-   DENY. This is the correct fail-closed behavior, but it means previously
-   issued approvals require re-issuance if the policy changes — a potential
-   operational friction point.
-
-6. **No INDETERMINATE scenarios in this dataset.** All policy records have valid
-   integrity digests. Tampered-record behavior is tested in
+5. **No INDETERMINATE scenarios in adversarial holdout.** All policy records
+   have valid integrity digests. Tampered-record behavior is tested in
    `TestTrustedPolicyProvider::test_integrity_check_failed` but not represented
-   in the adversarial holdout. A production evaluation should include tampered
+   in the 170-scenario holdout. A production evaluation should include tampered
    store scenarios.
 
-7. **No model inference on adversarial holdout.** Only scripted results are
+6. **No model inference on adversarial holdout.** Only scripted results are
    reported for Condition I on the 170-scenario holdout (see §6.1 for
    justification). Model effects are limited to the REQUIRES_REVIEW path.
 
 ---
 
-## 10. Files
+## 11. Files
 
 | File | Purpose |
 |---|---|
-| `benchmarks/agent-verification/trusted_policy_provider.py` | PolicyRecord, TrustedPolicyProvider, HMAC integrity |
+| `benchmarks/agent-verification/trusted_policy_provider.py` | PolicyRecord, PolicyKeyProvider, TrustedPolicyProvider, HMAC integrity |
+| `benchmarks/agent-verification/replay_protection.py` | ApprovalNonce, ReplayRegistry (atomic nonce check-and-consume) |
+| `benchmarks/agent-verification/revocation_list.py` | RevocationEntry, RevocationList (runtime approval revocation) |
 | `benchmarks/agent-verification/adversarial_dataset.py` | POLICY_FIXTURE, AdversarialScenario, 170 holdout scenarios |
 | `benchmarks/agent-verification/condition_i_orchestrator.py` | ConditionIOrchestrator, compute_policy_i_decision |
-| `benchmarks/agent-verification/run_adversarial_benchmark.py` | Benchmark runner (scripted + optional MLX) |
-| `python/tests/test_condition_i.py` | 54 tests: policy provider, oracle isolation, security invariants |
+| `benchmarks/agent-verification/run_adversarial_benchmark.py` | Benchmark runner (scripted + optional MLX model inference) |
+| `benchmarks/agent-verification/mlx_qwen_adapter.py` | QwenAgent with condition_i_orchestrator parameter |
+| `python/tests/test_condition_i.py` | 86 tests: policy provider, oracle isolation, security invariants, hardening |
 
 ---
 
@@ -472,12 +537,17 @@ cd benchmarks/agent-verification
 
 # Scripted H vs I on adversarial holdout
 uv run python3 run_adversarial_benchmark.py \
-  --condition-h-holdout --condition-i \
-  --out results_adversarial_holdout_I.json
+  --condition-h --condition-i
 
-# Tests
+# With real MLX model inference (requires mlx-lm and Qwen2.5-3B-Instruct-4bit)
+uv run python3 run_adversarial_benchmark.py \
+  --condition-h --condition-i \
+  --model mlx-community/Qwen2.5-3B-Instruct-4bit
+
+# Tests (nacl and sigstore required for other test files)
 cd ../../
-uv run --with pytest python -m pytest \
+uv run --with pytest --with 'PyNaCl>=1.5.0' --with 'sigstore>=4.2.0' \
+  python -m pytest \
   python/tests/test_deterministic_orchestrator.py \
   python/tests/test_condition_i.py \
   -v
@@ -496,11 +566,13 @@ is printed at module import and must match for reproducibility.
 - [x] H vs I on adversarial holdout: FAR(H)=0.714, FAR(I)=0.000
 - [x] McNemar H vs I: χ²=98.01, p<0.0001 (b=0, c=100 — I never breaks a correct H prediction)
 - [x] 100 scenarios where H=False-auth and I=DENY, explained by structural gaps (tenant/scope/lifecycle)
-- [x] 54 tests pass: policy integrity, revocation, expiry, tenant isolation, scope constraints, oracle isolation, security invariants
+- [x] 86 tests pass: policy integrity, revocation, expiry, tenant isolation, scope constraints, oracle isolation, security invariants, replay protection, runtime revocation, key rotation (up from 54)
 - [x] Existing 83+1 tests (H and earlier conditions) unchanged
 - [x] No production data modified
 - [x] No oracle/ground-truth fields used in runtime authorization
-- [x] Limitations documented (§9): static fixture, shared HMAC key, no nonce, no model inference on holdout
+- [x] Security hardening implemented (§9): replay protection (ApprovalNonce, ReplayRegistry), runtime revocation (RevocationList), key management abstraction (PolicyKeyProvider with rotation)
+- [x] Hardening integration tests: TestReplayProtection (9), TestRevocationList (8), TestPolicyKeyProvider (8), TestHardeningIntegration (7)
+- [x] Remaining gaps documented (§10): static fixture, HSM wiring, principal identity, persistent nonce store, no INDETERMINATE scenarios in holdout, no model inference on holdout
 
 **Evaluation verdict: PASS.**  
 Condition I demonstrates a structurally sound authorization improvement over
@@ -519,4 +591,4 @@ isolation, scope, lifecycle) that are independent of dataset construction.
 - Do not deploy without authorization
 - Full MLX inference evaluation on adversarial holdout: **NOT RUN** — deferred; see §6.1
 - Results on original 70-scenario dataset with real Qwen inference: **H=I** (identical, by design)
-- Tests: 137 passed (83 existing + 54 new), 1 expected skip
+- Tests: 169 passed (83 existing + 86 new), several expected skips (nacl/sigstore in other test files)

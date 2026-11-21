@@ -196,6 +196,133 @@ def eval_i_sandbox(s: AdversarialScenario, provider: TrustedPolicyProvider) -> d
 
 
 # ---------------------------------------------------------------------------
+# Model inference evaluation (requires mlx-lm)
+# ---------------------------------------------------------------------------
+
+def eval_i_model(
+    s: AdversarialScenario,
+    provider: TrustedPolicyProvider,
+    model: "Any",
+    tokenizer: "Any",
+    replay_registry: "Any | None" = None,
+    revocation_list: "Any | None" = None,
+) -> dict[str, Any]:
+    """
+    Run Condition I with real model inference on an adversarial scenario.
+
+    Uses ConditionIOrchestrator to pre-inject trusted evidence, then runs
+    QwenAgent for a semantic verdict, then applies compute_policy_i_decision.
+
+    Optimization: if the DVO deterministically denies (dvo_authorized=False),
+    model inference is skipped (the DENY is not overridable by the model).
+    """
+    from mlx_qwen_adapter import QwenAgent
+    from adversarial_dataset import _NOW
+
+    state = build_adversarial_state(s)
+    executor = SandboxToolExecutor(state, check_identity=False)
+    orchestrator = ConditionIOrchestrator(
+        executor=executor,
+        policy_provider=provider,
+        action_type=s.action_type,
+        resource_id=s.resource_id,
+        tenant_id=s.tenant_id,
+        current_time=_NOW,
+        replay_registry=replay_registry,
+        revocation_list=revocation_list,
+    )
+
+    canonical_params = {
+        "proposal_id": s.proposal_id,
+        "approval_id": s.approval_id,
+        "record_id": s.record_id,
+        "field": "value",
+    }
+
+    # Build a minimal scenario_summary (no oracle fields)
+    scenario_summary = {
+        "proposal_id": s.proposal_id,
+        "action_type": s.action_type,
+        "resource_id": s.resource_id,
+        "tenant_id": s.tenant_id,
+    }
+
+    agent = QwenAgent(model, tokenizer)
+    trace = agent.run(
+        scenario_id=s.scenario_id,
+        scenario_summary=scenario_summary,
+        scenario_state=state,
+        condition_i_orchestrator=orchestrator,
+        canonical_params=canonical_params,
+    )
+
+    pdr = trace.policy_decision
+    final_verdict = pdr.decision.enforcement_outcome if pdr is not None else False
+    return {
+        "scenario_id": s.scenario_id,
+        "prediction": final_verdict,
+        "ground_truth": s.ground_truth,
+        "policy_decision": pdr.decision.value if pdr is not None else "unknown",
+        "failure_reasons": getattr(trace, "failure_reasons", []),
+        "model_verdict": trace.verdict if pdr is None else None,
+        "latency_ms": round(trace.total_ms, 1) if hasattr(trace, "total_ms") else 0,
+        "correct": final_verdict == s.ground_truth,
+    }
+
+
+def eval_h_model(
+    s: AdversarialScenario,
+    model: "Any",
+    tokenizer: "Any",
+) -> dict[str, Any]:
+    """
+    Run Condition H with real model inference on an adversarial scenario.
+    Uses EnhancedPolicyOrchestrator with ADVERSARIAL_AUTHORIZED_APPROVERS.
+    """
+    from mlx_qwen_adapter import QwenAgent
+
+    state = build_adversarial_state(s)
+    executor = SandboxToolExecutor(state, check_identity=True)
+    orchestrator = EnhancedPolicyOrchestrator(
+        executor,
+        authorized_approvers=ADVERSARIAL_AUTHORIZED_APPROVERS,
+    )
+
+    canonical_params = {
+        "proposal_id": s.proposal_id,
+        "approval_id": s.approval_id,
+        "record_id": s.record_id,
+        "field": "value",
+    }
+    scenario_summary = {
+        "proposal_id": s.proposal_id,
+        "action_type": s.action_type,
+        "resource_id": s.resource_id,
+        "tenant_id": s.tenant_id,
+    }
+
+    agent = QwenAgent(model, tokenizer)
+    trace = agent.run(
+        scenario_id=s.scenario_id,
+        scenario_summary=scenario_summary,
+        scenario_state=state,
+        policy_orchestrator=orchestrator,
+        canonical_params=canonical_params,
+    )
+
+    pdr = trace.policy_decision
+    final_verdict = pdr.decision.enforcement_outcome if pdr is not None else trace.verdict or False
+    return {
+        "scenario_id": s.scenario_id,
+        "prediction": final_verdict,
+        "ground_truth": s.ground_truth,
+        "policy_decision": pdr.decision.value if pdr is not None else "unknown",
+        "latency_ms": round(trace.total_ms, 1) if hasattr(trace, "total_ms") else 0,
+        "correct": final_verdict == s.ground_truth,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Metrics computation
 # ---------------------------------------------------------------------------
 
@@ -313,6 +440,14 @@ def run_adversarial_benchmark(
 
     provider = TrustedPolicyProvider(POLICY_FIXTURE)
 
+    # Load model if requested (requires mlx-lm)
+    model_obj = None
+    tokenizer_obj = None
+    if model_path is not None:
+        from mlx_qwen_adapter import _ensure_model_loaded
+        model_obj, tokenizer_obj = _ensure_model_loaded(model_path)
+        print(f"[adversarial_benchmark] Model loaded: {model_path}")
+
     n_pos = sum(1 for s in scenarios if s.ground_truth)
     n_neg = sum(1 for s in scenarios if not s.ground_truth)
     h_fp_exposure = sum(1 for s in scenarios if s.h_would_authorize and not s.ground_truth)
@@ -336,12 +471,16 @@ def run_adversarial_benchmark(
 
     # --- Condition H ---
     if run_condition_h_holdout:
-        print("\nCondition H (Enhanced Policy — flat identity list on adversarial holdout):")
+        mode = "model" if model_obj is not None else "scripted"
+        print(f"\nCondition H (Enhanced Policy — flat identity list on adversarial holdout) [{mode}]:")
         h_metrics = ConditionMetrics()
         h_results: list[dict[str, Any]] = []
         t0 = time.perf_counter()
         for idx, s in enumerate(scenarios):
-            r = eval_h_sandbox(s)
+            if model_obj is not None:
+                r = eval_h_model(s, model_obj, tokenizer_obj)
+            else:
+                r = eval_h_sandbox(s)
             h_metrics.record(r["prediction"], r["ground_truth"])
             h_results.append(r)
             status = "✓" if r["correct"] else "✗"
@@ -366,16 +505,20 @@ def run_adversarial_benchmark(
 
     # --- Condition I ---
     if run_condition_i:
-        print("\nCondition I (Trusted Policy Source on adversarial holdout):")
+        mode = "model" if model_obj is not None else "scripted"
+        print(f"\nCondition I (Trusted Policy Source on adversarial holdout) [{mode}]:")
         i_metrics = ConditionMetrics()
         i_results: list[dict[str, Any]] = []
         t0 = time.perf_counter()
         for idx, s in enumerate(scenarios):
-            r = eval_i_sandbox(s, provider)
+            if model_obj is not None:
+                r = eval_i_model(s, provider, model_obj, tokenizer_obj)
+            else:
+                r = eval_i_sandbox(s, provider)
             i_metrics.record(r["prediction"], r["ground_truth"])
             i_results.append(r)
             status = "✓" if r["correct"] else "✗"
-            pr = r.get("policy_failure_reason", "")
+            pr = r.get("policy_failure_reason", r.get("policy_decision", ""))
             print(f"  I[{idx+1}/{len(scenarios)}] {s.scenario_id} "
                   f"pred={r['prediction']} gt={s.ground_truth} {status}"
                   + (f" [{pr}]" if pr and pr != "allow" else ""))
