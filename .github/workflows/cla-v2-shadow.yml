@@ -1,6 +1,6 @@
 # On untrusted PRs, execute tests without any GitHub API token.
 # The trusted shadow audit is activated only after this code reaches staging.
-name: Contributor agreements — unit tests
+name: CLA v2 — Tests
 
 on:
   pull_request:
