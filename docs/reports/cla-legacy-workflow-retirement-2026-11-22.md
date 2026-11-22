@@ -22,6 +22,17 @@ context, the co-author policy, or signature records.
    `docs/operations/cla-signatures.md`, and added a status note to
    `docs/security/cla-enforcement-review.md`. Dated reports are not rewritten.
 
+## Evaluation gate
+
+Status: **BLOCKED** on `CLA v2 / agreement` (see the co-author section). All other
+gates were evaluated as listed below.
+
+- `report_gate` and `report_content`: pass after this report was added.
+- `oss-developer-experience-checks`: failed on the earlier head because this
+  report lacked the required headings. Re-evaluated on the next push.
+- `CLA-v2-tests`, `CLA-v2-trusted-shadow`, `cla-security-guard`: pass.
+- `CLA-v2-enforcement`: fails with the co-author gate error below.
+
 ## Verification
 
 | Check | Result |
@@ -59,7 +70,7 @@ Also found: 22 historical commits carry `Co-Authored-By: Claude Sonnet 5`, which
 also absent from the allowlist. Any PR that includes those commits will hit the
 same gate. The owner should decide on this together with the Haiku request.
 
-## Human approval required
+## Human approval gate
 
 Choose one:
 
