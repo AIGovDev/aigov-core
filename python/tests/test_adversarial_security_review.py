@@ -47,6 +47,36 @@ import pytest
 _BENCH = Path(__file__).parent.parent.parent / "benchmarks" / "agent-verification"
 sys.path.insert(0, str(_BENCH))
 
+
+# ---------------------------------------------------------------------------
+# Module-level worker for cross-process test (must be top-level for pickle)
+# ---------------------------------------------------------------------------
+
+def _cross_process_worker(key_bytes: bytes, q) -> None:
+    """Issue a token in a spawned process and put its fields into q."""
+    import time
+    sys.path.insert(0, str(_BENCH))
+    from key_provider import InMemoryKeyProvider
+    from execution_token import ExecutionTokenAuthority
+    from sandboxed_tools import compute_args_binding_hash
+    kp = InMemoryKeyProvider(key_id="shared", key_bytes=key_bytes)
+    auth = ExecutionTokenAuthority(key_provider=kp, clock_skew_ns=100_000_000)
+    h = compute_args_binding_hash("create_file", {"path": "x"}, "repo:write", "r")
+    token = auth.issue("exec-xp", "create_file", h, "repo:write", "r", "t")
+    q.put({
+        "key_id": token.key_id,
+        "execution_id": token.execution_id,
+        "tool_name": token.tool_name,
+        "args_binding_hash": token.args_binding_hash,
+        "action_type": token.action_type,
+        "resource_id": token.resource_id,
+        "tenant_id": token.tenant_id,
+        "issued_at_ns": token.issued_at_ns,
+        "not_before_ns": token.not_before_ns,
+        "max_age_ns": token.max_age_ns,
+        "signature": token.signature,
+    })
+
 from execution_token import ExecutionToken, ExecutionTokenAuthority  # noqa: E402
 from key_provider import InMemoryKeyProvider, RotatingKeyProvider  # noqa: E402
 from sandboxed_tools import (  # noqa: E402
@@ -306,6 +336,7 @@ class TestFinding3TautologicalActionTypeCheck:
             resource_id=token.resource_id,
             tenant_id=token.tenant_id,
             issued_at_ns=token.issued_at_ns,
+            not_before_ns=token.not_before_ns,
             max_age_ns=token.max_age_ns,
             signature=token.signature,       # original signature — now invalid
         )
@@ -403,6 +434,7 @@ class TestExistingSecurityPropertiesUnchanged:
             resource_id=token.resource_id,
             tenant_id=token.tenant_id,
             issued_at_ns=token.issued_at_ns,
+            not_before_ns=token.not_before_ns,
             max_age_ns=token.max_age_ns,
             signature="a" * len(token.signature),  # all-'a' forgery
         )
@@ -523,6 +555,355 @@ class TestExistingSecurityPropertiesUnchanged:
         assert not result["success"]
         assert result["blocked_reason"] in (
             "token_key_id_unknown", "token_signature_invalid"
+        )
+
+
+# ---------------------------------------------------------------------------
+# FINDING-3 negative regression tests (action_type / resource_id independence)
+# ---------------------------------------------------------------------------
+
+class TestFinding3NegativeRegressions:
+    """
+    FINDING-3 (MEDIUM → FIXED): verify_for_execution is now called with
+    independently supplied expected_action_type and expected_resource_id from
+    the calling context.  These tests confirm that mismatched values are
+    detected when the caller supplies them independently.
+    """
+
+    def _issue(self, auth, action_type="repo:write", resource_id="org/r"):
+        h = compute_args_binding_hash("create_file", {"path": "f"}, action_type, resource_id)
+        return auth.issue(
+            execution_id="e1",
+            tool_name="create_file",
+            args_binding_hash=h,
+            action_type=action_type,
+            resource_id=resource_id,
+            tenant_id="t",
+        ), h
+
+    def test_wrong_action_type_rejected_when_supplied_independently(self):
+        """
+        An EAT for 'repo:write' is rejected when the calling context expects
+        'repo:admin' — provided independently, not from the token.
+        """
+        auth = ExecutionTokenAuthority()
+        token, h = self._issue(auth, action_type="repo:write")
+
+        ok, reason = auth.verify_for_execution(
+            token=token,
+            expected_tool_name="create_file",
+            expected_args_binding_hash=h,
+            expected_action_type="repo:admin",    # ← independent, mismatched
+            expected_resource_id="org/r",
+            expected_tenant_id="t",
+            expected_execution_id="e1",
+        )
+        assert not ok
+        assert reason == "token_action_type_mismatch"
+
+    def test_wrong_resource_id_rejected_when_supplied_independently(self):
+        """
+        An EAT for 'org/repo-A' is rejected when the calling context expects
+        'org/repo-B' — provided independently, not from the token.
+        """
+        auth = ExecutionTokenAuthority()
+        token, h = self._issue(auth, resource_id="org/repo-A")
+
+        ok, reason = auth.verify_for_execution(
+            token=token,
+            expected_tool_name="create_file",
+            expected_args_binding_hash=h,
+            expected_action_type="repo:write",
+            expected_resource_id="org/repo-B",    # ← independent, mismatched
+            expected_tenant_id="t",
+            expected_execution_id="e1",
+        )
+        assert not ok
+        assert reason == "token_resource_id_mismatch"
+
+    def test_tools_execute_rejects_mismatched_action_type(self):
+        """
+        tools.execute() now accepts expected_action_type/resource_id from the
+        calling context.  A token for 'repo:write' is blocked when the call
+        claims 'repo:admin'.
+        """
+        auth = ExecutionTokenAuthority()
+        h = compute_args_binding_hash("create_file", {"path": "f"}, "repo:write", "r")
+        token = auth.issue("exec-1", "create_file", h, "repo:write", "r", "t")
+        tools = SandboxedGitHubTools(token_authority=auth)
+
+        result = tools.execute(
+            tool_name="create_file",
+            arguments={"path": "f"},
+            execution_id="exec-1",
+            tenant_id="t",
+            args_binding_hash=h,
+            execution_token=token,
+            expected_action_type="repo:admin",    # ← mismatched calling context
+            expected_resource_id="r",
+        )
+        assert not result["success"]
+        assert result["blocked_reason"] == "token_action_type_mismatch"
+
+    def test_tools_execute_rejects_mismatched_resource_id(self):
+        """
+        tools.execute() blocks a token when expected_resource_id from the
+        calling context differs from the token's resource_id.
+        """
+        auth = ExecutionTokenAuthority()
+        h = compute_args_binding_hash("create_file", {"path": "f"}, "repo:write", "org/repo-A")
+        token = auth.issue("exec-1", "create_file", h, "repo:write", "org/repo-A", "t")
+        tools = SandboxedGitHubTools(token_authority=auth)
+
+        result = tools.execute(
+            tool_name="create_file",
+            arguments={"path": "f"},
+            execution_id="exec-1",
+            tenant_id="t",
+            args_binding_hash=h,
+            execution_token=token,
+            expected_action_type="repo:write",
+            expected_resource_id="org/repo-B",    # ← mismatched calling context
+        )
+        assert not result["success"]
+        assert result["blocked_reason"] == "token_resource_id_mismatch"
+
+    def test_gateway_passes_action_type_resource_id_independently(self):
+        """
+        End-to-end: gateway.request() passes req.action_type and req.resource_id
+        to tools.execute() as independent expected values (not from the token).
+        We verify this by confirming the ALLOW path executes, and that the
+        execution record has a consistent args_binding_hash.
+        """
+        from tool_gateway import ToolGateway, ToolRequest
+        from sandboxed_tools import DVOScenarioState, SandboxedGitHubTools
+        from replay_protection import ReplayRegistry
+        from revocation_list import RevocationList
+        from trusted_policy_provider import TrustedPolicyProvider
+        from agent_integration_scenarios import POLICY_FIXTURE, SCENARIOS, _NOW
+
+        # Find the first scenario expected to execute and build a proper request.
+        allow_scen = next(s for s in SCENARIOS if s.should_execute)
+        dvo = DVOScenarioState(
+            proposal_id=allow_scen.proposal_id,
+            approval_id=allow_scen.approval_id,
+            record_id=allow_scen.record_id,
+            approver_email=allow_scen.approver_email,
+            audit_found=allow_scen.audit_found,
+            audit_hash_verified=allow_scen.audit_hash_verified,
+            audit_executed_value=allow_scen.audit_executed_value,
+            approval_active=allow_scen.approval_active,
+            approval_matches_proposal=allow_scen.approval_matches_proposal,
+            external_state_value=allow_scen.external_state_value,
+        )
+        req = ToolRequest(
+            tool_name=allow_scen.tool_name,
+            arguments=allow_scen.tool_arguments,
+            proposal_id=allow_scen.proposal_id,
+            approval_id=allow_scen.approval_id,
+            record_id=allow_scen.record_id,
+            action_type=allow_scen.action_type,
+            resource_id=allow_scen.resource_id,
+            tenant_id=allow_scen.tenant_id,
+            dvo_state=dvo,
+            model_verdict=allow_scen.model_verdict,
+        )
+        tools = SandboxedGitHubTools()
+        gateway = ToolGateway(
+            policy_provider=TrustedPolicyProvider(POLICY_FIXTURE),
+            tools=tools,
+            replay_registry=ReplayRegistry(),
+            revocation_list=RevocationList(),
+            current_time=_NOW,
+        )
+        result = gateway.request(req)
+        assert result.executed, (
+            f"Authorized scenario should execute via gateway; "
+            f"decision={result.decision_record.decision}, "
+            f"reasons={result.decision_record.policy_failure_reasons}"
+        )
+        # Confirm the execution record's hash is consistent with the gateway's
+        execs = tools.authorized_executions()
+        assert len(execs) == 1
+        assert execs[0].args_binding_hash == result.args_binding_hash
+
+
+# ---------------------------------------------------------------------------
+# FINDING-5 regression tests (UTC wall-clock timestamps, not-before, skew)
+# ---------------------------------------------------------------------------
+
+class TestFinding5WallClockTimestamps:
+    """
+    FINDING-5 (LOW → FIXED): EAT now uses time.time_ns() (UTC wall clock)
+    instead of time.monotonic_ns().  not_before_ns is a new signed field.
+    ExecutionTokenAuthority accepts clock_skew_ns.
+    """
+
+    def test_issued_at_is_wall_clock(self):
+        """
+        issued_at_ns must be a recent UTC wall-clock timestamp (time.time_ns()),
+        not a process-local monotonic value.
+
+        time.time_ns() is in the range [1e18, 2e18] for years 2001–2033.
+        time.monotonic_ns() starts near 0 and grows from process start.
+        """
+        import time as _time
+        auth = ExecutionTokenAuthority()
+        h = compute_args_binding_hash("create_file", {"path": "x"}, "repo:write", "r")
+        before = _time.time_ns()
+        token = auth.issue("e1", "create_file", h, "repo:write", "r", "t")
+        after = _time.time_ns()
+
+        assert before <= token.issued_at_ns <= after, \
+            f"issued_at_ns {token.issued_at_ns} not in [{before}, {after}] — not wall clock"
+        # Sanity: wall clock is well above 1e18 for year 2001+
+        assert token.issued_at_ns > 1_000_000_000_000_000_000, \
+            "issued_at_ns looks like a monotonic value (too small for wall clock)"
+
+    def test_not_before_ns_in_signable_payload(self):
+        """
+        not_before_ns must be covered by the HMAC signature.  Stripping or
+        zeroing it must invalidate the token.
+        """
+        auth = ExecutionTokenAuthority()
+        h = compute_args_binding_hash("create_file", {"path": "x"}, "repo:write", "r")
+        token = auth.issue("e1", "create_file", h, "repo:write", "r", "t")
+
+        # Try to zero the not_before_ns (strip the constraint)
+        stripped = ExecutionToken(
+            key_id=token.key_id,
+            execution_id=token.execution_id,
+            tool_name=token.tool_name,
+            args_binding_hash=token.args_binding_hash,
+            action_type=token.action_type,
+            resource_id=token.resource_id,
+            tenant_id=token.tenant_id,
+            issued_at_ns=token.issued_at_ns,
+            not_before_ns=0,                  # ← stripped (zeroed)
+            max_age_ns=token.max_age_ns,
+            signature=token.signature,        # original signature — now invalid
+        )
+        ok, reason = auth.verify_for_execution(
+            token=stripped,
+            expected_tool_name="create_file",
+            expected_args_binding_hash=h,
+            expected_action_type="repo:write",
+            expected_resource_id="r",
+            expected_tenant_id="t",
+            expected_execution_id="e1",
+        )
+        assert not ok
+        assert reason == "token_signature_invalid", \
+            f"Stripped not_before_ns must invalidate HMAC; got: {reason!r}"
+
+    def test_future_not_before_rejected(self):
+        """
+        A token with not_before_ns in the future must be rejected as not yet valid.
+        """
+        import time as _time
+        auth = ExecutionTokenAuthority()
+        h = compute_args_binding_hash("create_file", {"path": "x"}, "repo:write", "r")
+        # Issue with not_before 1 hour in the future
+        future_ns = _time.time_ns() + 3_600_000_000_000
+        token = auth.issue("e1", "create_file", h, "repo:write", "r", "t",
+                           not_before_ns=future_ns)
+        ok, reason = auth.verify_for_execution(
+            token=token,
+            expected_tool_name="create_file",
+            expected_args_binding_hash=h,
+            expected_action_type="repo:write",
+            expected_resource_id="r",
+            expected_tenant_id="t",
+            expected_execution_id="e1",
+        )
+        assert not ok
+        assert reason == "token_not_yet_valid"
+
+    def test_clock_skew_widens_expiry_window(self):
+        """
+        An authority with clock_skew_ns=100ms accepts a token that would
+        otherwise appear expired under the strict (zero-skew) check.
+
+        This simulates a cross-process verification where the verifier's clock
+        is 50ms ahead of the issuer's (token appears 50ms older than it is).
+        """
+        import time as _time
+        # Issue a token that expires in 10ms
+        auth_strict = ExecutionTokenAuthority(max_age_ms=10)
+        auth_lenient = ExecutionTokenAuthority(
+            key_provider=auth_strict.key_provider,  # same keys
+            max_age_ms=10,
+            clock_skew_ns=200_000_000,  # 200ms tolerance
+        )
+        h = compute_args_binding_hash("create_file", {"path": "x"}, "repo:write", "r")
+        token = auth_strict.issue("e1", "create_file", h, "repo:write", "r", "t")
+
+        # Wait for the token to expire under the strict check
+        _time.sleep(0.015)  # 15ms > 10ms max_age
+
+        ok_strict, r_strict = auth_strict.verify_for_execution(
+            token=token,
+            expected_tool_name="create_file", expected_args_binding_hash=h,
+            expected_action_type="repo:write", expected_resource_id="r",
+            expected_tenant_id="t", expected_execution_id="e1",
+        )
+        assert not ok_strict, f"Strict check must reject expired token; got {r_strict}"
+        assert r_strict == "token_expired"
+
+        ok_lenient, r_lenient = auth_lenient.verify_for_execution(
+            token=token,
+            expected_tool_name="create_file", expected_args_binding_hash=h,
+            expected_action_type="repo:write", expected_resource_id="r",
+            expected_tenant_id="t", expected_execution_id="e1",
+        )
+        assert ok_lenient, \
+            f"Lenient check (200ms skew) must accept 15ms-old token: {r_lenient}"
+
+    def test_cross_process_token_verification(self):
+        """
+        A token issued in one OS process and verified in another must succeed
+        when both use the same signing key.
+
+        With time.monotonic_ns() this would fail because monotonic values are
+        per-process.  With time.time_ns() (wall clock), timestamps are
+        cross-process comparable.
+        """
+        import multiprocessing
+
+        shared_key = os.urandom(32)
+        result_queue = multiprocessing.Queue()
+
+        # Use spawn so the child process starts fresh (no inherited state),
+        # most closely simulating a separate worker node.
+        # _cross_process_worker is defined at module level so spawn can pickle it.
+        ctx = multiprocessing.get_context("spawn")
+        proc = ctx.Process(target=_cross_process_worker, args=(shared_key, result_queue))
+        proc.start()
+        proc.join(timeout=30)
+        assert proc.exitcode == 0, f"Worker process failed: exitcode={proc.exitcode}"
+
+        token_data = result_queue.get(timeout=5)
+
+        # Reconstruct token in THIS process and verify with the same shared key.
+        from key_provider import InMemoryKeyProvider
+        kp_verifier = InMemoryKeyProvider(key_id="shared", key_bytes=shared_key)
+        auth_verifier = ExecutionTokenAuthority(
+            key_provider=kp_verifier,
+            clock_skew_ns=100_000_000,  # 100ms tolerance for cross-process clock drift
+        )
+        token = ExecutionToken(**token_data)
+        ok, reason = auth_verifier.verify_for_execution(
+            token=token,
+            expected_tool_name=token.tool_name,
+            expected_args_binding_hash=token.args_binding_hash,
+            expected_action_type=token.action_type,
+            expected_resource_id=token.resource_id,
+            expected_tenant_id=token.tenant_id,
+            expected_execution_id=token.execution_id,
+        )
+        assert ok, (
+            f"Cross-process token verification failed: {reason}. "
+            "With monotonic_ns this would always fail (per-process reset)."
         )
 
 

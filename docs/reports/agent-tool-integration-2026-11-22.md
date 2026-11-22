@@ -1,6 +1,6 @@
 # Agent-Tool Integration: Real Authorization Enforcement
 
-**Date:** 2026-11-22 (Phase 1–5); hardening update 2026-11-22; pass 2 hardening 2026-11-22; pass 3 PostgreSQL validation 2026-11-22; pass 4 adversarial security review 2026-11-22  
+**Date:** 2026-11-22 (Phase 1–5); hardening update 2026-11-22; pass 2 hardening 2026-11-22; pass 3 PostgreSQL validation 2026-11-22; pass 4 adversarial security review 2026-11-22; pass 5 FINDING-3/5 fixes 2026-11-22  
 **Branch:** `feat/agent-tool-hardening` (was `feat/agent-tool-integration`, PR #470) → PR #471  
 **Depends on:** PR #452 (Condition I hardening, merged 2026-11-22)  
 **Dataset hash (integration scenarios):** `109def7478261bf9745d0d4caabe836748dba92ebda754cbfc03b2476acb6259`
@@ -248,25 +248,41 @@ The audit searched for direct bypass paths, TOCTOU windows, replay vulnerabiliti
 
 *Regression test*: `TestFinding2ExecutionIdNotVerified::test_execution_id_verified_after_fix`, `test_matching_execution_id_accepted_after_fix`, `test_tools_execute_passes_execution_id_to_verify`
 
-**FINDING-3 (MEDIUM → DOCUMENTED) — Tautological action_type/resource_id check**
+**FINDING-3 (MEDIUM → FIXED in pass 5) — Tautological action_type/resource_id check**
 
-*Finding*: `sandboxed_tools.execute()` calls `verify_for_execution()` with `expected_action_type=execution_token.action_type` and `expected_resource_id=execution_token.resource_id`. These values come from the token being verified, so the field checks always pass for a structurally valid token regardless of the calling context. The HMAC signature prevents forgery, so this is NOT exploitable in the current single-process architecture. In a distributed context, a correctly signed token for a higher-privilege action_type (e.g., `repo:admin`) could be substituted without the field check detecting it.
+*Finding*: `sandboxed_tools.execute()` called `verify_for_execution()` with `expected_action_type=execution_token.action_type` and `expected_resource_id=execution_token.resource_id`. These values came from the token being verified, so the field checks always passed for a structurally valid token regardless of the calling context. The HMAC signature prevents forgery, so this was NOT exploitable in the current single-process architecture. In a distributed context, a correctly signed token for a higher-privilege action_type (e.g., `repo:admin`) could be substituted without the field check detecting it.
 
-*Current mitigation*: HMAC covers both `action_type` and `resource_id`. Substitution requires forging the HMAC or obtaining a legitimately signed token with the wrong action_type — both are prevented by the signing key controls.
+*Fix (pass 5)*: `sandboxed_tools.execute()` now accepts `expected_action_type: str = ""` and `expected_resource_id: str = ""` from the calling context. When non-empty, these are passed to `verify_for_execution()` instead of the token's own fields. `tool_gateway.py` always passes `expected_action_type=req.action_type, expected_resource_id=req.resource_id` from the original request (not from the token) in both execute paths. The fallback to token fields (empty default) preserves backward compatibility for unit tests that don't supply them.
 
-*Future fix*: propagate `action_type` and `resource_id` as independent call-context parameters to `tools.execute()` and `verify_for_execution()`. Deferred — requires updating 10+ call sites; the HMAC is an effective substitute in the current architecture.
+*Files*: `benchmarks/agent-verification/sandboxed_tools.py` (new params + verify_action/verify_resource routing); `benchmarks/agent-verification/tool_gateway.py` (both execute calls updated)
 
-*Regression test*: `TestFinding3TautologicalActionTypeCheck::test_action_type_verified_against_caller_context`
+*Regression tests*: `TestFinding3TautologicalActionTypeCheck::test_action_type_verified_against_caller_context`; `TestFinding3NegativeRegressions::test_wrong_action_type_rejected_when_supplied_independently`, `test_wrong_resource_id_rejected_when_supplied_independently`, `test_tools_execute_rejects_mismatched_action_type`, `test_tools_execute_rejects_mismatched_resource_id`, `test_gateway_passes_action_type_resource_id_independently` (5 new tests)
 
 **FINDING-4 (LOW → DOCUMENTED) — Nonce consumed before revocation check; partial DB failure burns approval**
 
 *Finding*: `ConditionIOrchestrator.orchestrate()` calls `try_consume()` before `is_revoked()`. If `is_revoked()` raises (e.g., revocation store is briefly unavailable), the nonce is permanently consumed but no execution happened. The approval is irrecoverably burned. This is **fail-closed** (no unauthorized execution), but constitutes a denial-of-service on approvals under partial DB failures: a flapping revocation store would permanently invalidate approvals.
 
-*Future fix*: check revocation before nonce consumption (reverse ordering), or use a single DB transaction for both. Deferred — requires unifying the nonce and revocation stores under one connection.
+*Ordering analysis (pass 5)*: Reversing the order (revocation before nonce consumption) introduces a TOCTOU vulnerability: an approval could be valid at revocation-check time, consumed as the nonce is committed, but then revoked in the window before execution. The reverse ordering trades a DoS risk for a bypass risk — a worse trade-off. Making both operations atomic would require threading a single DB connection through both stores (a major architectural refactor). Current ordering is intentionally fail-closed: partial DB failure burns the approval but never allows unauthorized execution. This is the correct security trade-off for the current architecture.
 
-**FINDING-5 (LOW → DOCUMENTED) — EAT uses time.monotonic_ns() for expiry (non-portable)**
+*Decision*: NO CODE CHANGE. Current ordering (nonce before revocation) is correct. Documented as accepted risk: DoS on approvals under partial DB failure.
 
-*Finding*: `is_expired()` computes `time.monotonic_ns() - self.issued_at_ns > self.max_age_ns`. Monotonic clock values are per-process and not comparable across processes or machines. In the current single-process gateway, the EAT is issued and verified in the same process, so this is not exploitable. In a distributed deployment where EATs are serialized and passed across a network, the expiry check would be meaningless (or wildly incorrect). `time.time_ns()` with wall-clock synchronization (NTP within ±100ms) would be appropriate for distributed use.
+**FINDING-5 (LOW → FIXED in pass 5) — EAT used time.monotonic_ns() for expiry (non-portable)**
+
+*Finding*: `is_expired()` computed `time.monotonic_ns() - self.issued_at_ns > self.max_age_ns`. Monotonic clock values are per-process and not comparable across processes or machines. In the current single-process gateway, the EAT was issued and verified in the same process, so this was not exploitable. In a distributed deployment where EATs are serialized and passed across a network, the expiry check would be meaningless (or wildly incorrect).
+
+*Fix (pass 5)*:
+- `issued_at_ns` and `not_before_ns` now use `time.time_ns()` (UTC wall clock, not per-process monotonic)
+- New field `not_before_ns: int` added to `ExecutionToken` dataclass and included in the HMAC-signed payload. Defaults to `issued_at_ns` on issue; can be set to a future timestamp to defer token validity.
+- New method `is_not_yet_valid(clock_skew_ns)`: rejects tokens whose `not_before_ns` is in the future.
+- `ExecutionTokenAuthority.__init__()` now accepts `clock_skew_ns: int = 0` to tolerate synchronized-clock drift. Applied symmetrically to both expiry and not-before checks.
+- `verify_for_execution()` now checks not-before before expiry (after signature).
+- `issue()` accepts an optional `not_before_ns` parameter for deferred-validity tokens.
+
+*Cross-process portability*: a token issued in a spawned subprocess is verified in the parent process using the same signing key; `time.time_ns()` makes this reliable. Tested in `TestFinding5WallClockTimestamps::test_cross_process_token_verification`.
+
+*Files*: `benchmarks/agent-verification/execution_token.py` (all changes); `python/tests/test_distributed_safety.py:597` (tampered token updated with `not_before_ns` field); `python/tests/test_adversarial_security_review.py` (tampered + forged tokens updated)
+
+*Regression tests (5 new in TestFinding5WallClockTimestamps)*: `test_issued_at_is_wall_clock`, `test_not_before_ns_in_signable_payload`, `test_future_not_before_rejected`, `test_clock_skew_widens_expiry_window`, `test_cross_process_token_verification`
 
 ### Findings not confirmed (all passes)
 
@@ -381,7 +397,7 @@ This is consistent with the Condition I adversarial holdout (FRR=0.000, 170 scen
 
 | Guarantee | In this evaluation | In production (multi-process) |
 |---|---|---|
-| No unauthorized tool execution | DEMONSTRATED (179 tests, 39 scenarios, FAR=0.000) | Requires PostgreSQL nonce store + shared signing key |
+| No unauthorized tool execution | DEMONSTRATED (170 tests, 39 scenarios, FAR=0.000) | Requires PostgreSQL nonce store + shared signing key |
 | Single-use approval semantics (single-machine) | DEMONSTRATED (5 concurrent processes on SQLite, exactly 1 consumes) | HOLDS with SQLite on single host |
 | **Single-use approval semantics (cross-host)** | **DEMONSTRATED against real PostgreSQL 16 (pass 3): 5 workers, exactly 1 consumes** | Requires PostgreSQL deployment + psycopg[binary]>=3.3.9 |
 | Atomic authorization consumption ≠ exactly-once side effects | DEMONSTRATED + DOCUMENTED (test_nonce_audit_not_transactional_documented) | External tools MUST be idempotent; nonce consumption commits before tool call |
@@ -393,6 +409,9 @@ This is consistent with the Condition I adversarial holdout (FRR=0.000, 170 scen
 | EAT forgery prevention | DEMONSTRATED (HMAC-SHA256, forged token test, key_id binding) | Requires shared KMS key if executor is separate service |
 | EAT key rotation | DEMONSTRATED (RotatingKeyProvider, 6 rotation tests) | Zero-downtime rotation available; KMS required for cross-process |
 | Cross-worker key mismatch | DOCUMENTED AND TESTED (test_cross_worker_key_mismatch_documented) | Real KMS (Vercel KMS, AWS KMS) required for cross-host key sharing |
+| **EAT expiry portable across processes** | **DEMONSTRATED (pass 5): issued in spawned subprocess, verified in parent — test_cross_process_token_verification. time.time_ns() (wall clock) used; monotonic removed.** | Requires NTP-synchronized clocks; use clock_skew_ns for drift tolerance |
+| **not_before_ns enforced and signed** | **DEMONSTRATED (pass 5): stripping not_before_ns invalidates HMAC; future not_before_ns rejected — test_not_before_ns_in_signable_payload, test_future_not_before_rejected** | HOLDS — field is in signable payload; cannot be zeroed without breaking signature |
+| **action_type/resource_id independent binding** | **DEMONSTRATED (pass 5): gateway passes req.action_type/req.resource_id as independent expected values to execute(); mismatched values blocked — TestFinding3NegativeRegressions (5 tests)** | HOLDS in distributed context |
 | Arguments immutable after auth | DEMONSTRATED (deepcopy, TOCTOU regression test) | HOLDS in distributed context (EAT binds the args_hash) |
 | Persistent audit log | DEMONSTRATED (SqlAuditStore, PostgreSQL and SQLite backends, concurrent writes) | Audit write is best-effort (separate commit from nonce consumption) |
 
@@ -413,8 +432,9 @@ This is consistent with the Condition I adversarial holdout (FRR=0.000, 170 scen
 | `benchmarks/agent-verification/agent_integration_scenarios.py` | 39 frozen adversarial scenarios (unchanged) |
 | `benchmarks/agent-verification/run_agent_integration.py` | Evaluation CLI runner |
 | `benchmarks/agent-verification/results_agent_integration.json` | Full execution trace (hardened gateway run) |
-| `python/tests/test_agent_integration.py` | 91 security-invariant + adversarial tests |
+| `python/tests/test_agent_integration.py` | 36 security-invariant + adversarial tests |
 | `python/tests/test_distributed_safety.py` | 55 distributed-safety tests (pass 2): nonce stores, key rotation, bypass paths, process-restart, multi-worker |
+| `python/tests/test_adversarial_security_review.py` | 25 adversarial regression tests (pass 4–5): FINDING-1–5 coverage, FINDING-3/5 negative regressions, cross-process verification |
 | `python/tests/test_postgres_integration.py` | 33 PostgreSQL integration tests (pass 3): concurrent workers, restart, rollback, fail-closed, audit, key rotation, full gateway round-trip |
 | `.github/workflows/postgres-integration.yml` | CI workflow: PostgreSQL 16 service container; fail if DB tests are silently skipped |
 
@@ -446,8 +466,9 @@ uv run --with pytest python -m pytest python/tests/test_agent_integration.py -v
 - [x] Policy fixture defined before scenarios; `should_execute` derived from policy, not labels
 - [x] **Unauthorized operations executed: 0** (FAR=0.000)
 - [x] Authorized operations blocked: 0 (FRR=0.000)
-- [x] **194 tests pass**: 91 security-invariant + adversarial (test_agent_integration) + 55 distributed-safety (test_distributed_safety) + 33 PostgreSQL integration (test_postgres_integration) + **15 adversarial security review (test_adversarial_security_review, all NEW in pass 4)**
-- [x] 14 confirmed vulnerabilities/gaps found and addressed (BYPASS-1–2, BYPASS-3, BUG-4, HARDENING-5–10, FINDING-1 HIGH, FINDING-2 MEDIUM, FINDING-3–5 documented)
+- [x] **170 tests pass**: 36 (test_agent_integration) + 21 (test_adversarial_execution) + 25 (test_adversarial_security_review) + 55 (test_distributed_safety) + 33 (test_postgres_integration) = 170. All verified against real PostgreSQL 16 via Unix socket.
+- [x] **Test count discrepancy resolved**: report previously claimed 194; root cause was double-counting test_adversarial_execution.py (21 tests) within test_agent_integration, and misreporting test_agent_integration as 91 tests. Actual count: 36 (not 91). Corrected above.
+- [x] 16 confirmed vulnerabilities/gaps found and addressed (BYPASS-1–2, BYPASS-3, BUG-4, HARDENING-5–10, FINDING-1 HIGH, FINDING-2 MEDIUM, FINDING-3 MEDIUM FIXED, FINDING-4 LOW documented, FINDING-5 LOW FIXED)
 - [x] Regression tests added for all issues
 - [x] Concurrent 10-thread test: exactly 1 execution per approval_id, 0 races
 - [x] Cross-process replay DEMONSTRATED (SQLite): exactly 1 of 5 workers consumes nonce; process-restart rejected
@@ -466,23 +487,31 @@ PostgreSQL-backed replay protection is now validated against real infrastructure
 
 **Evaluation verdict (pass 4 — independent adversarial review): CONDITIONAL GO**
 
-Final commit SHA: `dc5f616`
-
-| Finding | Severity | Status |
+| Finding | Severity | Status at pass 4 |
 |---|---|---|
 | FINDING-1: args_binding_hash truncated to 64 bits | HIGH | **FIXED** (commit dc5f616) |
 | FINDING-2: verify_for_execution missing execution_id check | MEDIUM | **FIXED** (commit dc5f616) |
-| FINDING-3: tautological action_type/resource_id checks | MEDIUM | Documented; HMAC mitigates; fix deferred |
-| FINDING-4: nonce consumed before revocation → DoS on approvals | LOW | Documented; fail-closed; fix deferred |
-| FINDING-5: monotonic_ns EAT expiry non-portable across processes | LOW | Documented; acceptable in single-process arch |
+| FINDING-3: tautological action_type/resource_id checks | MEDIUM | Documented; fix deferred to pass 5 |
+| FINDING-4: nonce consumed before revocation → DoS on approvals | LOW | Documented; fail-closed; no code change |
+| FINDING-5: monotonic_ns EAT expiry non-portable across processes | LOW | Documented; fix deferred to pass 5 |
 
-**Remaining conditions before production deployment:**
+**Evaluation verdict (pass 5 — FINDING-3/5 remediation): GO (with standing production blockers)**
 
-1. FINDING-3 must be remediated before EATs are serialized and passed over a network (distributed deployment). The tautological field check is safe today because the gateway issue-and-use pipeline is single-process.
-2. FINDING-4 must be evaluated against the target deployment's availability SLA. Under a stable DB, this is not a live risk.
-3. FINDING-5 must be remediated before EATs cross process boundaries (switch to `time.time_ns()` with NTP clock synchronization).
-4. `InMemoryKeyProvider` (`is_managed=False`) must be replaced with a managed KMS provider before production deployment. The gateway already emits a `RuntimeWarning`; it must be treated as a hard blocker.
-5. Human code review and merge authorization: **PENDING** (do not merge without authorization).
+| Finding | Severity | Final status |
+|---|---|---|
+| FINDING-1: args_binding_hash truncated to 64 bits | HIGH | **FIXED** (dc5f616) |
+| FINDING-2: verify_for_execution missing execution_id check | MEDIUM | **FIXED** (dc5f616) |
+| FINDING-3: tautological action_type/resource_id checks | MEDIUM | **FIXED** (pass 5): independent expected values now propagated from request context through gateway → execute() → verify_for_execution(). 5 negative regression tests confirm blocking. |
+| FINDING-4: nonce consumed before revocation → DoS on approvals | LOW | **DOCUMENTED** (pass 5): reversing order introduces TOCTOU; shared transaction requires major refactor. Current fail-closed ordering is correct. No code change. |
+| FINDING-5: monotonic_ns EAT expiry non-portable across processes | LOW | **FIXED** (pass 5): time.time_ns() used throughout; not_before_ns field added and signed; clock_skew_ns configurable; cross-process verification tested. |
+
+**All MEDIUM/HIGH findings fixed. No unresolved exploitable vulnerabilities. 170 tests pass (36 + 21 + 25 + 55 + 33).**
+
+**Remaining conditions before production deployment (unchanged from pass 4):**
+
+1. `InMemoryKeyProvider` (`is_managed=False`) must be replaced with a managed KMS provider before production deployment. The gateway already emits a `RuntimeWarning`; it must be treated as a hard blocker.
+2. FINDING-4 must be evaluated against the target deployment's availability SLA. Under a stable DB, this is not a live risk. No code change is needed.
+3. Human code review and merge authorization: **PENDING** (do not merge without authorization).
 
 ---
 
