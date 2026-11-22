@@ -845,6 +845,98 @@ Do not merge to production without authorization. Do not deploy without authoriz
 
 ---
 
+## Pass 9 — Fail-closed mandatory audit, two-phase evidence, regression tests (2026-11-22)
+
+### Gaps addressed
+
+**GAP-1 (HIGH, FIXED)**: When `audit_store=None`, the mandatory audit condition in `execute()` was guarded by `and self._audit_store is not None`, so the entire check was silently skipped. Write and delete operations proceeded with no audit protection — no fail-closed behavior was enforced when audit infrastructure was absent.
+
+**GAP-2 (DESIGN, FIXED)**: `"pre_execution_authorized"` was used as the decision label for the pre-execution audit row. This name did not clearly distinguish authorization intent from execution outcome. Renamed to `"authorized_pre_execution"` to reflect that this row proves the authorization decision, not that execution completed.
+
+**GAP-3 (DESIGN, FIXED)**: After dispatch, there was no durable record that execution actually completed. The `"authorized_pre_execution"` row is proof of intent; without an `"executed"` row, forensic reconstruction could not distinguish authorized-but-crashed from authorized-and-completed.
+
+### Changes applied
+
+**`adapter/aigov_sdk_adapter.py`**
+
+1. `SandboxedDocumentTools.__init__()`: Added `bypass_mandatory_audit: bool = False` parameter. Must be `False` in production. Allows explicit test isolation without an audit store.
+
+2. `SandboxedDocumentTools.execute()` — mandatory audit condition refactored from:
+   ```python
+   if authorized and tool_name in self.MANDATORY_AUDIT_TOOLS and self._audit_store is not None:
+   ```
+   to:
+   ```python
+   if authorized and tool_name in self.MANDATORY_AUDIT_TOOLS and not self._bypass_mandatory_audit:
+       if self._audit_store is None:
+           authorized = False
+           block_reason = "mandatory_audit_unconfigured:no_audit_store_set"
+           ...
+   ```
+   This enforces fail-closed behavior when audit infrastructure is absent, unless test-isolation bypass is explicitly set.
+
+3. `SandboxedDocumentTools.execute()` — added post-execution best-effort audit row after `_dispatch()`:
+   - `decision="executed"` row written after dispatch completes
+   - Best-effort only (`record()`, not `record_mandatory()`) — a failed post-execution write must NEVER roll back a completed side effect
+   - Two-phase evidence: `"authorized_pre_execution"` = authorization granted, `"executed"` = dispatch completed; both rows needed for verified execution
+
+4. `AIGovGuardedDocumentTools.__init__()`: Added `bypass_mandatory_audit: bool = False` parameter, threaded through to `SandboxedDocumentTools`.
+
+**`tests/test_sdk_durable.py`**
+
+- `_make_guarded()`: defaults to a temp-file `SqlAuditStore` (instead of `None`) so all existing tests exercise the mandatory audit path. Pass `audit_path=""` to get `audit_store=None` (requires `bypass_mandatory_audit=True` for non-mandatory tools, or tests the fail-closed path).
+
+- **D18** (`test_d18_missing_audit_store_blocks_mandatory_tools`): Without `audit_store`, `delete_document` must be blocked (`mandatory_audit_unconfigured` in `block_reason`). Policy ALLOW, but `executed=False`, document untouched.
+
+- **D19** (`test_d19_preaudit_row_persists_across_simulated_crash`): `_dispatch` patched to raise immediately after pre-execution audit commits. Pre-execution row (`"authorized_pre_execution"`) must persist in the SQLite file (opened on a fresh connection), no `"executed"` row (dispatch never ran), document untouched.
+
+- **D20** (`test_d20_post_execution_audit_failure_does_not_roll_back`): Post-execution `_do_record` call patched to fail. Document mutation must succeed, `executed=True`, pre-execution row present. Confirms post-execution audit failure is non-fatal.
+
+**`tests/test_sdk_harness.py`**
+
+- `_make_harness()`: defaults to a temp-file `SqlAuditStore` so all harness tests exercise the mandatory audit path.
+
+### Test results (Pass 9)
+
+| Suite | Passed | Failed | Skipped | Notes |
+|---|---|---|---|---|
+| `test_sdk_durable.py` | 23 | 0 | 0 | +D18, +D19, +D20 |
+| `test_sdk_harness.py` | 16 | 0 | 1 | S5 skipped (no live SDK — pre-existing) |
+
+**Total: 39 passed, 0 failed, 1 skipped**
+
+### Updated threat model
+
+| Threat | Mitigation | Status |
+|---|---|---|
+| Write/delete with no audit configured | Blocked fail-closed (`mandatory_audit_unconfigured`) | **FIXED (Pass 9)** |
+| Audit write failure allows side effect | Blocked fail-closed (`mandatory_audit_failed`) | Fixed (Pass 8) |
+| Pre-execution row confused with execution proof | Renamed `authorized_pre_execution`; `executed` row added post-dispatch | **FIXED (Pass 9)** |
+| `authorized` conflated with `executed` | Separated: `authorized=ALLOW decision`, `executed=dispatch ran` | Fixed (Pass 8) |
+| Replay attack (concurrent workers) | `SqlApprovalRegistry` atomic `UPDATE WHERE consumed_at IS NULL` | Fixed (PR #476) |
+| Approval revocation window | Pre-execution revocation re-check before EAT issuance | Existing |
+| Cross-tenant substitution | Approval key binds `(tool_name, action_type, resource_id, tenant_id)` | Existing |
+| `is_distributed_safe` brittle access | Documented (FINDING-DUR-3); schedule property follow-up | INFO only |
+
+### Verdict: **GO** (staging merge)
+
+Pass 9 closes the remaining gaps from the CONDITIONAL GO verdict in Pass 8:
+
+- GAP-1 (fail-closed on missing audit_store): **FIXED**
+- GAP-2 (authorization intent vs. execution proof semantics): **FIXED**
+- GAP-3 (no post-execution outcome record): **FIXED**
+
+All regression tests pass (39/40, 1 pre-existing skip). The two-phase audit evidence model (`authorized_pre_execution` → `executed`) is verified by D19 (crash: pre row persists, no executed row) and D20 (post-audit failure: execution persists, no rollback).
+
+Remaining staging conditions (unchanged from Pass 8):
+1. Wire `audit_store` in every production deployment using write/delete tools.
+2. Share KMS-backed `KeyProvider` across workers in multi-process deployments.
+3. Use PostgreSQL-backed `SqlApprovalRegistry` and `SqlNonceStore` for distributed deployments.
+
+Do not merge to production without authorization. Do not deploy without authorization.
+
+---
+
 ## Human approval gate
 
 - Human code review and merge authorization: **PENDING**

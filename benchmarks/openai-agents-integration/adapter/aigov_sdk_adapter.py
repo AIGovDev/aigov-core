@@ -128,19 +128,22 @@ class SandboxedDocumentTools:
     }
 
     # Tools requiring mandatory pre-execution audit evidence (fail-closed).
-    # If the audit write fails for these tools, execution is blocked entirely.
+    # If no audit_store is configured, calls to these tools are BLOCKED unless
+    # bypass_mandatory_audit=True (test isolation only — never use in production).
     # document:read is omitted — it is read-only and uses best-effort audit only.
-    # NOTE: mandatory audit only applies when an audit_store is configured.
-    # In production deployments, an audit_store MUST be provided.
     MANDATORY_AUDIT_TOOLS: frozenset[str] = frozenset({"update_document", "delete_document"})
 
-    def __init__(self, document_store: DocumentStore) -> None:
+    def __init__(self, document_store: DocumentStore,
+                 bypass_mandatory_audit: bool = False) -> None:
         self._store = document_store
         self._lock = threading.Lock()
         self._history: list[_ExecRecord] = []
         # Assigned by ToolGateway after construction:
         self._token_authority: ExecutionTokenAuthority | None = None
         self._audit_store = None  # optional; can be set externally
+        # Set True ONLY in test isolation to skip the audit_store requirement.
+        # Never set this to True in production deployments.
+        self._bypass_mandatory_audit = bypass_mandatory_audit
 
     def execute(
         self,
@@ -218,26 +221,31 @@ class SandboxedDocumentTools:
         )
 
         # Mandatory pre-execution audit for high-impact tools (write / delete).
-        # A durable audit row MUST be committed BEFORE dispatch. If the write
-        # fails, block execution (fail-closed) — no side effect runs without evidence.
-        # document:read is not included: read-only and uses best-effort audit only.
-        # Mandatory audit only activates when an audit_store is configured; configure
-        # one in every production deployment.
-        if authorized and tool_name in self.MANDATORY_AUDIT_TOOLS and self._audit_store is not None:
-            _kid = getattr(getattr(self._token_authority, "key_provider", None), "key_id", None)
-            try:
-                self._audit_store.record_mandatory(
-                    execution_id=execution_id, tenant_id=tenant_id, tool_name=tool_name,
-                    action_type=expected_action_type or "", resource_id=expected_resource_id or "",
-                    args_binding_hash=args_binding_hash,
-                    key_id=str(_kid) if _kid is not None else None,
-                    decision="pre_execution_authorized", authorized=True, block_reason=None,
-                )
-            except Exception as exc:
-                # Audit write failed — deny execution to preserve evidence integrity.
+        # Two fail-closed conditions are enforced when _bypass_mandatory_audit is False:
+        #   1. audit_store is None → block (no audit infrastructure configured)
+        #   2. record_mandatory() raises → block (write failed, evidence cannot be committed)
+        # document:read is excluded: read-only, uses best-effort audit only.
+        # _bypass_mandatory_audit is True ONLY in test isolation. Never set it in production.
+        if authorized and tool_name in self.MANDATORY_AUDIT_TOOLS and not self._bypass_mandatory_audit:
+            if self._audit_store is None:
                 authorized = False
-                block_reason = f"mandatory_audit_failed:{exc}"
-                effective_decision = "mandatory_audit_failed"
+                block_reason = "mandatory_audit_unconfigured:no_audit_store_set"
+                effective_decision = "mandatory_audit_unconfigured"
+            else:
+                _kid = getattr(getattr(self._token_authority, "key_provider", None), "key_id", None)
+                try:
+                    self._audit_store.record_mandatory(
+                        execution_id=execution_id, tenant_id=tenant_id, tool_name=tool_name,
+                        action_type=expected_action_type or "", resource_id=expected_resource_id or "",
+                        args_binding_hash=args_binding_hash,
+                        key_id=str(_kid) if _kid is not None else None,
+                        decision="authorized_pre_execution", authorized=True, block_reason=None,
+                    )
+                except Exception as exc:
+                    # Audit write failed — deny execution to preserve evidence integrity.
+                    authorized = False
+                    block_reason = f"mandatory_audit_failed:{exc}"
+                    effective_decision = "mandatory_audit_failed"
 
         record = _ExecRecord(
             execution_id=execution_id,
@@ -288,6 +296,21 @@ class SandboxedDocumentTools:
             }
 
         result = self._dispatch(tool_name, arguments, tenant_id, execution_id)
+
+        # Post-execution best-effort audit: "authorized_pre_execution" proves authorization
+        # intent; this row proves the dispatch actually completed. Neither row alone is
+        # proof of the other — forensics should require both for verified execution.
+        # Best-effort: never roll back or undo a completed execution if this write fails.
+        if self._audit_store is not None and tool_name in self.MANDATORY_AUDIT_TOOLS:
+            _kid = getattr(getattr(self._token_authority, "key_provider", None), "key_id", None)
+            self._audit_store.record(  # best-effort; exceptions swallowed by record()
+                execution_id=execution_id, tenant_id=tenant_id, tool_name=tool_name,
+                action_type=expected_action_type or "", resource_id=expected_resource_id or "",
+                args_binding_hash=args_binding_hash,
+                key_id=str(_kid) if _kid is not None else None,
+                decision="executed", authorized=True, block_reason=None,
+            )
+
         return {"success": True, "execution_id": execution_id, "data": result,
                 "blocked_reason": None}
 
@@ -367,10 +390,12 @@ class AIGovGuardedDocumentTools:
         revocation_list: RevocationList | None = None,
         current_time: float | None = None,
         audit_store: "SqlAuditStore | None" = None,
+        bypass_mandatory_audit: bool = False,
     ) -> None:
         self._store = document_store
         self._approvals = approval_registry
-        self._sandboxed = SandboxedDocumentTools(document_store)
+        self._sandboxed = SandboxedDocumentTools(document_store,
+                                                 bypass_mandatory_audit=bypass_mandatory_audit)
         if audit_store is not None:
             self._sandboxed._audit_store = audit_store
 

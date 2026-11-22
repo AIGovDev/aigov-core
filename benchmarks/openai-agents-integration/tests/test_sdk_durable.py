@@ -91,12 +91,20 @@ def _make_guarded(
     nonce_path: str | None = None,
     audit_path: str | None = None,
     tenant_id: str = "tenant-A",
+    bypass_mandatory_audit: bool = False,
 ) -> AIGovGuardedDocumentTools:
     store = DocumentStore(store_path)
     replay = ReplayRegistry(
         backend=SqlNonceStore("sqlite", path=nonce_path) if nonce_path else None
     )
-    audit = SqlAuditStore("sqlite", path=audit_path) if audit_path else None
+    # Default to in-memory SQLite audit store so mandatory audit is active.
+    # Pass audit_path="" to explicitly disable audit (requires bypass_mandatory_audit=True).
+    if audit_path == "":
+        audit = None
+    elif audit_path:
+        audit = SqlAuditStore("sqlite", path=audit_path)
+    else:
+        audit = SqlAuditStore("sqlite", path=_tmp_db())
     return AIGovGuardedDocumentTools(
         document_store=store,
         approval_registry=registry,
@@ -104,6 +112,7 @@ def _make_guarded(
         replay_registry=replay,
         revocation_list=RevocationList(),
         audit_store=audit,
+        bypass_mandatory_audit=bypass_mandatory_audit,
     )
 
 
@@ -743,3 +752,168 @@ def test_d17_mandatory_audit_failure_blocks_update():
     doc = store.read("write-doc", "tenant-A")
     assert doc is not None
     assert doc.content == "original content", "document must not be updated when audit write fails"
+
+
+# ---------------------------------------------------------------------------
+# D18 — Missing audit_store blocks mandatory-audit tools (fail-closed)
+#
+# In production, an audit_store MUST be configured. Without one, write and
+# delete operations are blocked (fail-closed) to prevent unaudited side effects.
+# ---------------------------------------------------------------------------
+
+
+def test_d18_missing_audit_store_blocks_mandatory_tools():
+    db_store = _tmp_db()
+    db_reg = _tmp_db()
+    db_nonce = _tmp_db()
+
+    store = DocumentStore(db_store)
+    store.seed("guarded-doc", "tenant-A", "must stay intact")
+
+    reg = SqlApprovalRegistry("sqlite", path=db_reg)
+    reg.register("delete_document", "document:delete", "tenant-A/guarded-doc", "tenant-A",
+                 approver_email="alice@example.com")
+
+    replay = ReplayRegistry(backend=SqlNonceStore("sqlite", path=db_nonce))
+
+    # No audit_store configured — simulates a misconfigured production deployment
+    g = AIGovGuardedDocumentTools(
+        document_store=store, approval_registry=reg,
+        policy_fixture=_doc_policy(), replay_registry=replay,
+        audit_store=None,
+        # bypass_mandatory_audit is False (default) — mandatory audit is enforced
+    )
+
+    result = g.execute_tool("delete_document", {"doc_id": "guarded-doc"}, "tenant-A")
+
+    # Policy approved the call but execution is blocked: no audit infrastructure
+    assert result.authorized, "policy approved; authorized must be True"
+    assert not result.executed, "must be blocked without an audit store"
+    assert "mandatory_audit_unconfigured" in result.block_reason
+
+    # Document must remain intact — no side effect without audit infrastructure
+    doc = store.read("guarded-doc", "tenant-A")
+    assert doc is not None and doc.content == "must stay intact"
+
+
+# ---------------------------------------------------------------------------
+# D19 — Process crash simulation: pre-execution audit row is durable
+#
+# After record_mandatory() commits the pre-execution row, the process "crashes"
+# (simulated by patching _dispatch to raise). The pre-execution audit row must
+# survive in the SQLite file (it was committed before dispatch), and the
+# document must be unmodified (dispatch never ran).
+#
+# This confirms the two-phase audit intent: "authorized_pre_execution" proves
+# authorization was granted; "executed" (written after dispatch) proves execution
+# completed. Forensics uses both rows to distinguish authorized-but-crashed from
+# authorized-and-executed.
+# ---------------------------------------------------------------------------
+
+
+def test_d19_preaudit_row_persists_across_simulated_crash():
+    db_store = _tmp_db()
+    db_reg = _tmp_db()
+    db_nonce = _tmp_db()
+    db_audit = _tmp_db()
+
+    store = DocumentStore(db_store)
+    store.seed("crash-doc", "tenant-A", "untouched")
+
+    reg = SqlApprovalRegistry("sqlite", path=db_reg)
+    reg.register("delete_document", "document:delete", "tenant-A/crash-doc", "tenant-A",
+                 approver_email="alice@example.com")
+
+    audit = SqlAuditStore("sqlite", path=db_audit)
+    replay = ReplayRegistry(backend=SqlNonceStore("sqlite", path=db_nonce))
+    g = AIGovGuardedDocumentTools(
+        document_store=store, approval_registry=reg,
+        policy_fixture=_doc_policy(), replay_registry=replay, audit_store=audit,
+    )
+
+    # Simulate process crash: pre-execution audit row commits; dispatch raises
+    # before the actual side effect runs.
+    with patch.object(g.sandboxed_tools, "_dispatch",
+                      side_effect=RuntimeError("simulated crash before dispatch")):
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            g.execute_tool("delete_document", {"doc_id": "crash-doc"}, "tenant-A")
+
+    # Pre-execution row must be durable — readable from a fresh SQLite connection
+    audit2 = SqlAuditStore("sqlite", path=db_audit)
+    entries = audit2.get_by_tenant("tenant-A")
+    pre_exec = [e for e in entries if e.decision == "authorized_pre_execution"]
+    assert len(pre_exec) >= 1, "pre-execution audit row must persist after crash"
+    assert pre_exec[0].authorized
+    assert pre_exec[0].tool_name == "delete_document"
+
+    # No "executed" row — dispatch never completed
+    executed_rows = [e for e in entries if e.decision == "executed"]
+    assert len(executed_rows) == 0, "no executed row: crash before dispatch"
+
+    # Document untouched — crash happened before the delete ran
+    doc = store.read("crash-doc", "tenant-A")
+    assert doc is not None and doc.content == "untouched"
+
+
+# ---------------------------------------------------------------------------
+# D20 — Post-execution audit write failure does NOT roll back execution
+#
+# After dispatch completes successfully, the post-execution "executed" row is
+# written as best-effort. If that write fails, the document mutation must NOT
+# be rolled back — the execution already happened. The pre-execution row
+# remains as the durable evidence of authorization.
+# ---------------------------------------------------------------------------
+
+
+def test_d20_post_execution_audit_failure_does_not_roll_back():
+    db_store = _tmp_db()
+    db_reg = _tmp_db()
+    db_nonce = _tmp_db()
+    db_audit = _tmp_db()
+
+    store = DocumentStore(db_store)
+    store.seed("post-doc", "tenant-A", "original")
+
+    reg = SqlApprovalRegistry("sqlite", path=db_reg)
+    reg.register("update_document", "document:write", "tenant-A/post-doc", "tenant-A",
+                 approver_email="alice@example.com")
+
+    audit = SqlAuditStore("sqlite", path=db_audit)
+    replay = ReplayRegistry(backend=SqlNonceStore("sqlite", path=db_nonce))
+    g = AIGovGuardedDocumentTools(
+        document_store=store, approval_registry=reg,
+        policy_fixture=_doc_policy(), replay_registry=replay, audit_store=audit,
+    )
+
+    # Fail only the second _do_record call (post-execution "executed" row).
+    # The first call (pre-execution "authorized_pre_execution") must succeed.
+    call_count = [0]
+    original = audit._do_record
+
+    def selective_fail(*args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] >= 2:
+            raise RuntimeError("post-execution audit DB down")
+        return original(*args, **kwargs)
+
+    with patch.object(audit, "_do_record", side_effect=selective_fail):
+        result = g.execute_tool(
+            "update_document", {"doc_id": "post-doc", "content": "updated value"}, "tenant-A"
+        )
+
+    # Execution must have completed despite post-execution audit failure
+    assert result.authorized
+    assert result.executed
+
+    # Document must be updated — post-execution audit failure must NOT roll back
+    doc = store.read("post-doc", "tenant-A")
+    assert doc is not None and doc.content == "updated value"
+
+    # Pre-execution row must exist (the mandatory write succeeded for call 1)
+    entries = audit.get_by_tenant("tenant-A")
+    pre_rows = [e for e in entries if e.decision == "authorized_pre_execution"]
+    assert len(pre_rows) >= 1, "pre-execution audit row must persist"
+
+    # No "executed" row — the post-execution write was swallowed
+    executed_rows = [e for e in entries if e.decision == "executed"]
+    assert len(executed_rows) == 0, "post-execution row missing (write failed — expected)"
