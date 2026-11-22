@@ -1,7 +1,7 @@
 # First-party CLA v2. Never execute PR-head code in this privileged workflow.
 # Keep CLA Assistant enabled until this workflow is deployed on the default branch,
 # proven against fork PRs, and branch rulesets require "CLA v2 / agreement".
-name: CLA v2 production
+name: Contributor agreements — enforcement
 
 on:
   pull_request_target:
