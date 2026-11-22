@@ -253,6 +253,8 @@ class ToolGateway:
                 args_binding_hash=args_hash,
                 execution_token=None,
                 decision_label=deny_record.decision.value,
+                expected_action_type=req.action_type,
+                expected_resource_id=req.resource_id,
             )
             return ToolExecutionResult(
                 executed=False,
@@ -337,6 +339,8 @@ class ToolGateway:
             args_binding_hash=args_hash,
             execution_token=execution_token,
             decision_label=decision_record.decision.value,
+            expected_action_type=req.action_type,
+            expected_resource_id=req.resource_id,
         )
 
         return ToolExecutionResult(
