@@ -40,8 +40,8 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
- "sqlx-core 0.9.1",
- "sqlx-postgres 0.9.1",
+ "sqlx-core",
+ "sqlx-postgres",
  "subtle",
  "tempfile",
  "tokio",
@@ -2235,9 +2235,9 @@ version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edb1dddfbdfe5fb99dba0541a87b2edb8adbd59e45815db22d32d4fbbb8813dd"
 dependencies = [
- "sqlx-core 0.9.1",
+ "sqlx-core",
  "sqlx-macros",
- "sqlx-postgres 0.9.1",
+ "sqlx-postgres",
 ]
 
 
@@ -2285,7 +2285,7 @@ checksum = "bf62c58a1e7fd6031ee684eee21d07572f5aebe71c273a01ae4f04eeeba47c47"
 dependencies = [
  "proc-macro2",
  "quote",
- "sqlx-core 0.9.1",
+ "sqlx-core",
  "sqlx-macros-core",
  "syn 2.0.118",
 ]
@@ -2306,8 +2306,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "sqlx-core 0.9.1",
- "sqlx-postgres 0.9.1",
+ "sqlx-core",
+ "sqlx-postgres",
  "syn 2.0.118",
  "tokio",
  "url",
@@ -2342,7 +2342,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "smallvec",
- "sqlx-core 0.9.1",
+ "sqlx-core",
  "stringprep",
  "thiserror",
  "tracing",
