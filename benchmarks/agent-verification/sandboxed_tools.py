@@ -195,6 +195,13 @@ class SandboxedGitHubTools:
         # Caller-supplied decision label for audit trail (e.g. "deny", "indeterminate")
         # Ignored when deciding whether to execute; only the token governs that.
         decision_label: str = "",
+        # Independent calling-context values for action_type and resource_id.
+        # Pass these from the original request (NOT from execution_token) to
+        # prevent tautological self-verification when checking those fields.
+        # Defaults to "" which falls back to the token's own fields (backward
+        # compatible for unit tests that don't supply them).
+        expected_action_type: str = "",
+        expected_resource_id: str = "",
     ) -> dict[str, Any]:
         """
         Execute a tool operation.
@@ -203,6 +210,11 @@ class SandboxedGitHubTools:
         this instance's token_authority. The caller-supplied boolean
         is NOT trusted. Only a token issued by the same authority as this
         tools object was constructed with authorizes actual execution.
+
+        expected_action_type / expected_resource_id: supplied independently
+        from the calling request context so verify_for_execution can confirm
+        the token was issued for THIS operation, not just that it is
+        internally self-consistent.  The gateway always supplies these.
 
         ONLY actually performs the operation when the token is present and
         verifies. Always records the attempt to history regardless of outcome.
@@ -217,12 +229,18 @@ class SandboxedGitHubTools:
         block_reason = "no_execution_token"
 
         if execution_token is not None and self._token_authority is not None:
+            # Use caller-supplied action_type/resource_id when present so the
+            # check is independent of the token's own fields.  Fall back to
+            # the token's values only when the caller omits them (backward
+            # compatibility for unit tests).
+            verify_action = expected_action_type or execution_token.action_type
+            verify_resource = expected_resource_id or execution_token.resource_id
             ok, reason = self._token_authority.verify_for_execution(
                 token=execution_token,
                 expected_tool_name=tool_name,
                 expected_args_binding_hash=args_binding_hash,
-                expected_action_type=execution_token.action_type,
-                expected_resource_id=execution_token.resource_id,
+                expected_action_type=verify_action,
+                expected_resource_id=verify_resource,
                 expected_tenant_id=tenant_id,
                 expected_execution_id=execution_id,
             )

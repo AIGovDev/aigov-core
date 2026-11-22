@@ -603,6 +603,7 @@ class TestKeyRotation:
             resource_id=token.resource_id,
             tenant_id=token.tenant_id,
             issued_at_ns=token.issued_at_ns,
+            not_before_ns=token.not_before_ns,
             max_age_ns=token.max_age_ns,
             signature=token.signature,  # original signature, now invalid
         )
