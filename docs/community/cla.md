@@ -32,15 +32,15 @@ Location: `legal/published/corporate-contributor-license-agreement.md`
 2. Create a feature branch from `staging`.
 3. Accept the applicable CLA.
 4. Open a pull request targeting `staging`.
-5. Wait for automated CLA verification (`CLAAssistant`).
+5. Wait for automated CLA verification (`CLA v2 / agreement`).
 6. Address review comments.
 7. After approval, maintainers may merge.
 
 ---
 
-## GitHub CLA Assistant (this repository)
+## GitHub CLA v2 (this repository)
 
-Pull requests (including those targeting `staging` or `main`) are checked by the **CLA Assistant** workflow (`.github/workflows/cla.yml`). The pull request checklist checkbox is a contributor reminder only; it is **not** legal acceptance.
+Pull requests (including those targeting `staging` or `main`) are checked by the **CLA v2 — Enforcement** workflow (`.github/workflows/cla-v2-production.yml`), which publishes the required `CLA v2 / agreement` status. The pull request checklist checkbox is a contributor reminder only; it is **not** legal acceptance.
 
 **Individuals** sign by posting this exact pull request comment:
 

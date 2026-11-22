@@ -1,7 +1,7 @@
 # Trusted checker: always load executable code from protected staging, never PR head.
 # Activate only after this workflow is reviewed and merged to staging.
 # Never check out or execute PR-head code in this privileged event.
-name: Contributor agreements — independent audit
+name: CLA v2 — Audit
 
 on:
   pull_request_target:
