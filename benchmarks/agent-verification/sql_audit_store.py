@@ -323,6 +323,28 @@ class SqlAuditStore:
             logged_at=float(row[10]),
         )
 
+    def get_all(self, limit: int = 1000) -> list[AuditEntry]:
+        """Return all audit entries ordered by logged_at DESC, up to limit rows."""
+        if self._backend == "sqlite":
+            conn = self._sqlite_conn()
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM aigov_audit_log ORDER BY logged_at DESC LIMIT ?",
+                    (limit,)
+                ).fetchall()
+            finally:
+                conn.close()
+        else:
+            with self._pg_conn() as conn:
+                rows = conn.execute(
+                    "SELECT execution_id, tenant_id, tool_name, action_type, resource_id, "
+                    "args_hash, key_id, decision, authorized, block_reason, "
+                    "EXTRACT(EPOCH FROM logged_at) FROM aigov_audit_log "
+                    "ORDER BY logged_at DESC LIMIT %s",
+                    (limit,)
+                ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
     def entry_count(self) -> int:
         if self._backend == "sqlite":
             conn = self._sqlite_conn()
