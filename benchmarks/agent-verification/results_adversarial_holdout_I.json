@@ -1,0 +1,187 @@
+{
+  "dataset_hash": "dedcf881f564bacfcce4413cecd1557f7ae64c986021ae75d05d2eab7125d293",
+  "n_scenarios": 170,
+  "n_positives": 30,
+  "n_negatives": 140,
+  "h_false_positive_exposure": 100,
+  "condition_h_enabled": true,
+  "condition_i_enabled": true,
+  "H_adversarial": {
+    "tp": 30,
+    "fp": 70,
+    "tn": 70,
+    "fn": 0,
+    "total": 170,
+    "precision": 0.3,
+    "recall": 1.0,
+    "f1": 0.4615,
+    "far": 0.5,
+    "frr": 0.0,
+    "category_breakdown": {
+      "authorized_legitimate": {
+        "total": 20,
+        "correct": 20,
+        "fp": 0,
+        "fn": 0
+      },
+      "unauthorized_approver": {
+        "total": 20,
+        "correct": 10,
+        "fp": 10,
+        "fn": 0
+      },
+      "cross_tenant_substitution": {
+        "total": 15,
+        "correct": 0,
+        "fp": 15,
+        "fn": 0
+      },
+      "revoked_policy": {
+        "total": 15,
+        "correct": 0,
+        "fp": 15,
+        "fn": 0
+      },
+      "expired_policy": {
+        "total": 10,
+        "correct": 0,
+        "fp": 10,
+        "fn": 0
+      },
+      "wrong_action_scope": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "wrong_resource_scope": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "evidence_replay": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "forged_evidence": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "missing_policy": {
+        "total": 10,
+        "correct": 0,
+        "fp": 10,
+        "fn": 0
+      },
+      "policy_superseded": {
+        "total": 10,
+        "correct": 0,
+        "fp": 10,
+        "fn": 0
+      },
+      "requires_review_ambiguous": {
+        "total": 10,
+        "correct": 10,
+        "fp": 0,
+        "fn": 0
+      }
+    },
+    "elapsed_ms": 320181.6
+  },
+  "I_adversarial": {
+    "tp": 30,
+    "fp": 0,
+    "tn": 140,
+    "fn": 0,
+    "total": 170,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "far": 0.0,
+    "frr": 0.0,
+    "category_breakdown": {
+      "authorized_legitimate": {
+        "total": 20,
+        "correct": 20,
+        "fp": 0,
+        "fn": 0
+      },
+      "unauthorized_approver": {
+        "total": 20,
+        "correct": 20,
+        "fp": 0,
+        "fn": 0
+      },
+      "cross_tenant_substitution": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "revoked_policy": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "expired_policy": {
+        "total": 10,
+        "correct": 10,
+        "fp": 0,
+        "fn": 0
+      },
+      "wrong_action_scope": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "wrong_resource_scope": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "evidence_replay": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "forged_evidence": {
+        "total": 15,
+        "correct": 15,
+        "fp": 0,
+        "fn": 0
+      },
+      "missing_policy": {
+        "total": 10,
+        "correct": 10,
+        "fp": 0,
+        "fn": 0
+      },
+      "policy_superseded": {
+        "total": 10,
+        "correct": 10,
+        "fp": 0,
+        "fn": 0
+      },
+      "requires_review_ambiguous": {
+        "total": 10,
+        "correct": 10,
+        "fp": 0,
+        "fn": 0
+      }
+    },
+    "elapsed_ms": 331801.0
+  },
+  "h_vs_i": {
+    "h_fp_i_correct": 70,
+    "i_fn_h_correct": 0
+  }
+}
