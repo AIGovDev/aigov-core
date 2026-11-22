@@ -53,7 +53,7 @@ pub async fn verify_sqlx_migrations_complete(pool: &DbPool) -> Result<(), String
 /// Apply SQL migrations from `rust/migrations` using runtime discovery (PostgreSQL-only).
 pub async fn run_sqlx_migrations(pool: &DbPool) -> Result<(), String> {
     let migrations_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
-    let migrator = sqlx_core::migrate::Migrator::new(migrations_dir)
+    let migrator = sqlx::migrate::Migrator::new(migrations_dir)
         .await
         .map_err(|e| format!("migration source error: {e}"))?;
     migrator
