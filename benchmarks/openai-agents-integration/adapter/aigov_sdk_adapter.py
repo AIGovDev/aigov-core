@@ -515,6 +515,36 @@ class AIGovGuardedDocumentTools:
         )
         return bool(reg_safe and replay_safe)
 
+    def validate_production_config(self, mode: "Any | None" = None) -> None:
+        """
+        Validate that this instance is configured for production use.
+
+        Raises ProductionConfigError listing all misconfigured components.
+        Call at application startup before accepting any requests.
+
+        The check is fail-closed: on any violation the exception prevents
+        the application from starting rather than running misconfigured.
+
+        mode: DeploymentMode.DISTRIBUTED (default) or DeploymentMode.SINGLE_PROCESS.
+        SINGLE_PROCESS allows SQLite backends; use it only on single-machine deployments.
+        All multi-worker deployments must pass DISTRIBUTED (the default).
+        """
+        from production_config import validate_or_raise, DeploymentMode as _DM
+        _mode = mode if mode is not None else _DM.DISTRIBUTED
+        _key_provider = getattr(
+            getattr(self._gateway, "_token_authority", None),
+            "key_provider", None,
+        )
+        _replay_registry = getattr(self._gateway, "_replay_registry", None)
+        validate_or_raise(
+            audit_store=self._sandboxed._audit_store,
+            approval_registry=self._approvals,
+            replay_registry=_replay_registry,
+            key_provider=_key_provider,
+            bypass_mandatory_audit=self._sandboxed._bypass_mandatory_audit,
+            mode=_mode,
+        )
+
 
 def _resource_id_from_args(
     tool_name: str, arguments: dict[str, Any], tenant_id: str
