@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   trusted-shadow:
-    name: CLA-v2-trusted-shadow
+    name: CLA v2 independent audit (not a required status)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
