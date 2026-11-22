@@ -572,7 +572,9 @@ class TestArgBindingHash:
         h2 = compute_args_binding_hash("read_repo_metadata", {}, "repo:read", "beta/r")
         assert h1 != h2
 
-    def test_hash_is_16_char_hex(self) -> None:
+    def test_hash_is_64_char_hex(self) -> None:
+        # Full SHA-256 hex digest (256 bits); truncation to 16 chars was fixed
+        # (FINDING-1: 64-bit hash had birthday collision risk at ~2^32 trials).
         h = compute_args_binding_hash("t", {}, "a", "r")
-        assert len(h) == 16
+        assert len(h) == 64
         assert all(c in "0123456789abcdef" for c in h)

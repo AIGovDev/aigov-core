@@ -201,6 +201,7 @@ class ExecutionTokenAuthority:
         expected_action_type: str,
         expected_resource_id: str,
         expected_tenant_id: str,
+        expected_execution_id: str | None = None,
     ) -> tuple[bool, str]:
         """
         Full verification: key_id lookup + signature + field binding + not expired.
@@ -208,6 +209,10 @@ class ExecutionTokenAuthority:
         Returns (ok, reason). reason is empty on success, a short slug on failure.
         Checks run in order that leaks least timing information about which field
         was wrong (key_id and signature checked first; field-binding after).
+
+        expected_execution_id: when provided, the token's execution_id must match
+        exactly.  Pass the calling context's execution_id (not token.execution_id)
+        to prevent cross-request token reuse in distributed deployments.
         """
         sig_ok, sig_reason = self._verify_signature(token)
         expired = token.is_expired()
@@ -216,6 +221,10 @@ class ExecutionTokenAuthority:
         action_match = token.action_type       == expected_action_type
         res_match    = token.resource_id       == expected_resource_id
         tenant_match = token.tenant_id         == expected_tenant_id
+        eid_match    = (
+            expected_execution_id is None
+            or token.execution_id == expected_execution_id
+        )
 
         if not sig_ok:
             return False, sig_reason
@@ -231,4 +240,6 @@ class ExecutionTokenAuthority:
             return False, "token_resource_id_mismatch"
         if not tenant_match:
             return False, "token_tenant_id_mismatch"
+        if not eid_match:
+            return False, "token_execution_id_mismatch"
         return True, ""

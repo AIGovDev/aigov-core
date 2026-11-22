@@ -224,6 +224,7 @@ class SandboxedGitHubTools:
                 expected_action_type=execution_token.action_type,
                 expected_resource_id=execution_token.resource_id,
                 expected_tenant_id=tenant_id,
+                expected_execution_id=execution_id,
             )
             if ok:
                 authorized = True
@@ -422,4 +423,4 @@ def compute_args_binding_hash(tool_name: str, arguments: dict[str, Any],
         "action_type": action_type,
         "resource_id": resource_id,
     }, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+    return hashlib.sha256(payload.encode()).hexdigest()
