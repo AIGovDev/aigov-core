@@ -24,8 +24,9 @@ context, the co-author policy, or signature records.
 
 ## Evaluation gate
 
-Status: **BLOCKED** on `CLA v2 / agreement` (see the co-author section). All other
-gates were evaluated as listed below.
+Status: **PENDING CI on the policy commit.** The Haiku 5.5 exact-match policy
+(see the policy update section) was added on top of the blocked state. CI results
+for the final head are recorded in the "Verification" section after the run.
 
 - `report_gate` and `report_content`: pass after this report was added.
 - `oss-developer-experience-checks`: failed on the earlier head because this
@@ -44,47 +45,62 @@ gates were evaluated as listed below.
 | `scripts/check_cla_workflow_security.py` | PASS |
 | `tests/test_cla_v2_{evidence,production,shadow}.py` | 33 tests OK |
 
-## Co-author attribution gate (blocking)
+## Co-author attribution gate (resolved for Haiku 5.5 by policy update)
 
-PR #473 fails `CLA v2 / agreement` with
+PR #473 initially failed `CLA v2 / agreement` with
 `Co-authored commit requires manual identity verification`.
 
 - **Rejected identity:** commit `5220c22` has the human author
   `MonikaDvorackova <monika.dvorack@gmail.com>` and the trailer
-  `Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>`.
-- **Policy:** `scripts/cla_v2_shadow.py` accepts exactly two strings:
-  `Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>` and
-  `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`. Everything else
-  fails closed.
-- **Origin of the policy:** `docs/reports/cla-v2-ai-attribution-2026-11-18.md`
-  added that single exact string after a historical Sonnet 4.6 trailer blocked a
-  staging-to-main PR. It states that trailers are untrusted text and that "a
-  future change to the exact attribution format requires separate review."
-- **Evidence for Haiku 5.5:** none in the repository policy or its tests. No
-  maintainer approval for that identity exists. The trailer is truthful as a
-  statement of tool use, but the policy has not admitted it.
-- **Decision:** the gate is left blocked. This report does not add Haiku 5.5 to
-  the allowlist, and it does not strip the trailer.
+  `Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>`. Commit `6bd3d99`
+  carries the same trailer on the report commit.
+- **Prior policy:** only the exact Sonnet 4.6 pair in `scripts/cla_v2_shadow.py`
+  was accepted. The 2026-11-18 review states that a new attribution format
+  requires separate review.
+- **Historical trailers not covered:** 22 commits in history carry
+  `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`. They are NOT added by
+  this change and remain blocked if they appear in a PR's commit range.
 
-Also found: 22 historical commits carry `Co-Authored-By: Claude Sonnet 5`, which is
-also absent from the allowlist. Any PR that includes those commits will hit the
-same gate. The owner should decide on this together with the Haiku request.
+## Policy update: exact Haiku 5.5 attribution
+
+**Change:** `scripts/cla_v2_shadow.py` replaces the two-string Sonnet check with an
+exact-match `AI_ATTRIBUTION_TRAILERS` set. It contains the existing two Sonnet 4.6
+strings, plus only these two Haiku 5.5 strings:
+
+- `Co-authored-by: Claude Haiku 5.5 <noreply@anthropic.com>`
+- `Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>`
+
+**Identity verification basis:** the exact string is taken from the commit trailer
+in PR #473 and matches the model identity the session reports (Claude Haiku 5.5,
+model ID `claude-haiku-5-5`). Trailers are untrusted text, so this is a policy
+decision about metadata, not cryptographic proof of authorship.
+
+**Security rationale:**
+- An AI trailer never creates or signs for a CLA signer. The human author still
+  needs a signature. Covered by `test_haiku_attribution_does_not_sign_for_author`.
+- Matching is exact after `strip()`. There is no wildcard, no model family, and no
+  lookalike domain acceptance.
+- Mixed human plus AI trailers still block. Malformed, unlisted-casing, trailing-text,
+  and unknown-version variants fail closed.
+- The parser, identity binding, and signature checks are unchanged.
+
+**Regression tests** (`tests/test_cla_v2_shadow.py::AiAttributionPolicyTests`):
+- Positive: exact Haiku 5.5 in both casings is accepted.
+- Positive: the trailer does not sign for the human author.
+- Negative: spoofed address, lookalike domain, unknown versions (5.6, 5), variant
+  suffix, other family (Opus), family without version, missing space, uppercase
+  key, trailing text, missing address, mixed human coauthor, and spoofed human author.
 
 ## Human approval gate
 
-Choose one:
+**Approved (policy update, Haiku 5.5 only):** the repository owner authorized
+proposing the exact-match Haiku 5.5 policy in this session on 2026-11-22. That
+authorization covers adding the two strings above with the tests listed.
 
-1. **Keep the trailer and approve a narrow policy change.** A maintainer
-   approves exact-string entries for `Claude Haiku 5.5` (and, if needed,
-   `Claude Sonnet 5`) with regression tests in `tests/test_cla_v2_shadow.py`.
-   No wildcard. Keep the mixed-human, lookalike-address, and spoof tests.
-2. **Drop the trailer** from the commits on #473. This requires a history
-   rewrite of the PR branch, and the owner must approve that.
-3. **Reject the trailer and close the PR**, then reopen the change without
-   AI co-author metadata.
-
-No option is approved here. This report does not authorize merge, deploy, or
-changes to rulesets.
+**Not approved here:**
+- The Sonnet 5 trailer (historical commits) is not covered.
+- Merge and deploy. A maintainer must still review and merge PR #473.
+- Any change to rulesets or the signature store.
 
 ## Not verified
 

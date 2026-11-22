@@ -20,6 +20,17 @@ CONSENT = "I have read the CLA Document and I hereby sign the CLA"
 class AuditError(Exception):
     pass
 
+# Exact AI attribution trailers accepted as non-human metadata. Matching is
+# exact after strip(): no wildcards, no model families, no lookalike addresses.
+# Sonnet 4.6: docs/reports/cla-v2-ai-attribution-2026-11-18.md
+# Haiku 5.5: docs/reports/cla-legacy-workflow-retirement-2026-11-22.md (explicit human approval)
+AI_ATTRIBUTION_TRAILERS = frozenset({
+    "Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>",
+    "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>",
+    "Co-authored-by: Claude Haiku 5.5 <noreply@anthropic.com>",
+    "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>",
+})
+
 def get(path):
     req = urllib.request.Request(API + path, headers={
         "Authorization": "Bearer " + os.environ["GH_TOKEN"],
@@ -65,10 +76,10 @@ def contributors(repo, number, expected_count=None):
             if not stripped.lower().startswith("co-authored-by:"):
                 continue
             # AI tooling is not a legal contributor and cannot sign a CLA.
-            # Only the exact, known attribution trailer is non-human metadata.
-            # Any other coauthor (including malformed or spoofed variants)
-            # remains subject to manual identity verification.
-            if stripped != "Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>" and stripped != "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>":
+            # Only exact, known attribution trailers are non-human metadata.
+            # Any other coauthor (including malformed, spoofed, or unknown
+            # model-version variants) remains subject to manual identity verification.
+            if stripped not in AI_ATTRIBUTION_TRAILERS:
                 raise AuditError("Co-authored commit requires manual identity verification")
         author = commit.get("author")
         login = author.get("login") if isinstance(author, dict) else None
