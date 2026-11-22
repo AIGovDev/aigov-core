@@ -39,7 +39,7 @@ govai = "aigov_py.cli:main"  # backward-compatible alias; prefer `aigov`
 [project.optional-dependencies]
 server = [
   "fastapi>=0.162.5",
-  "uvicorn>=0.27.0"
+  "uvicorn>=0.54.0"
 ]
 dev = [
   "pytest>=8.0.0",
