@@ -20,9 +20,9 @@ CLA_WORKFLOWS = {
 REQUIRED_CONTEXT = "CLA v2 / agreement"
 # Visible job names. Anything else on a CLA workflow is a new check and must be reviewed.
 EXPECTED_JOB_NAMES = {
-    "CLA v2 engine (posts CLA v2 / agreement)",
-    "CLA v2 independent audit (not a required status)",
-    "CLA v2 unit tests (not a required status)",
+    "CLA enforcement engine (posts agreement status)",
+    "CLA independent audit (not a required status)",
+    "CLA unit tests (not a required status)",
     "CLA workflow security guard (not a required status)",
 }
 
