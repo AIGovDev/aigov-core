@@ -711,3 +711,382 @@ class TestConditionISecurityInvariants:
                 check_results=[],
             )
             assert pdr.enforcement_outcome == (decision == PolicyDecision.ALLOW)
+
+
+# ===========================================================================
+# TestReplayProtection
+# ===========================================================================
+
+class TestReplayProtection:
+    """Replay registry blocks duplicate approval usage."""
+
+    def _make_nonce(self, approval_id: str = "appr-001", tenant: str = TENANT_ALPHA,
+                    action: str = "data_access", resource: str = "db-prod-001",
+                    proposal: str = "prop-001") -> "Any":
+        from replay_protection import ApprovalNonce
+        return ApprovalNonce(
+            approval_id=approval_id,
+            tenant_id=tenant,
+            action_type=action,
+            resource_id=resource,
+            proposal_id=proposal,
+        )
+
+    def test_first_consume_returns_true(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        nonce = self._make_nonce()
+        assert reg.try_consume(nonce) is True
+
+    def test_second_consume_returns_false(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        nonce = self._make_nonce()
+        assert reg.try_consume(nonce) is True
+        assert reg.try_consume(nonce) is False
+
+    def test_different_tenant_not_blocked(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        n1 = self._make_nonce(tenant=TENANT_ALPHA)
+        n2 = self._make_nonce(tenant=TENANT_BETA)
+        assert reg.try_consume(n1) is True
+        assert reg.try_consume(n2) is True  # different tenant = different nonce
+
+    def test_different_action_not_blocked(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        n1 = self._make_nonce(action="data_access")
+        n2 = self._make_nonce(action="config_change")
+        assert reg.try_consume(n1) is True
+        assert reg.try_consume(n2) is True
+
+    def test_different_resource_not_blocked(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        n1 = self._make_nonce(resource="db-prod-001")
+        n2 = self._make_nonce(resource="db-prod-002")
+        assert reg.try_consume(n1) is True
+        assert reg.try_consume(n2) is True
+
+    def test_different_proposal_not_blocked(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        n1 = self._make_nonce(proposal="prop-001")
+        n2 = self._make_nonce(proposal="prop-002")
+        assert reg.try_consume(n1) is True
+        assert reg.try_consume(n2) is True
+
+    def test_reset_clears_registry(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        nonce = self._make_nonce()
+        reg.try_consume(nonce)
+        assert reg.consumed_count == 1
+        reg.reset()
+        assert reg.consumed_count == 0
+        assert reg.try_consume(nonce) is True  # allowed after reset
+
+    def test_is_consumed_does_not_consume(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        nonce = self._make_nonce()
+        assert reg.is_consumed(nonce) is False
+        assert reg.try_consume(nonce) is True  # still consumable after is_consumed check
+
+    def test_concurrent_consume_exactly_one_succeeds(self) -> None:
+        """Thread-safety: concurrent try_consume with same nonce → exactly one True."""
+        import threading
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        nonce = self._make_nonce()
+        results = []
+        lock = threading.Lock()
+
+        def consume():
+            result = reg.try_consume(nonce)
+            with lock:
+                results.append(result)
+
+        threads = [threading.Thread(target=consume) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert results.count(True) == 1
+        assert results.count(False) == 9
+
+
+# ===========================================================================
+# TestRevocationList
+# ===========================================================================
+
+class TestRevocationList:
+    """Runtime revocation checks on approval-level revocation."""
+
+    def test_unknown_approval_not_revoked(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        assert rl.is_revoked("appr-001", TENANT_ALPHA) is False
+
+    def test_revoke_makes_is_revoked_true(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        rl.revoke("appr-001", TENANT_ALPHA, "approver_compromised")
+        assert rl.is_revoked("appr-001", TENANT_ALPHA) is True
+
+    def test_revocation_is_tenant_scoped(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        rl.revoke("appr-001", TENANT_ALPHA, "approver_compromised")
+        # Same approval_id in different tenant is not revoked
+        assert rl.is_revoked("appr-001", TENANT_BETA) is False
+
+    def test_get_revocation_entry_returns_correct_data(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        rl.revoke("appr-001", TENANT_ALPHA, "terminated_employee", revoked_at=1234567890.0)
+        entry = rl.get_revocation_entry("appr-001", TENANT_ALPHA)
+        assert entry is not None
+        assert entry.approval_id == "appr-001"
+        assert entry.tenant_id == TENANT_ALPHA
+        assert entry.reason == "terminated_employee"
+        assert entry.revoked_at == 1234567890.0
+
+    def test_get_revocation_entry_returns_none_for_unknown(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        assert rl.get_revocation_entry("appr-999", TENANT_ALPHA) is None
+
+    def test_state_hash_changes_after_revocation(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        h1 = rl.state_hash()
+        rl.revoke("appr-001", TENANT_ALPHA, "reason")
+        h2 = rl.state_hash()
+        assert h1 != h2
+
+    def test_revoke_is_idempotent(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        rl.revoke("appr-001", TENANT_ALPHA, "first_reason")
+        rl.revoke("appr-001", TENANT_ALPHA, "second_reason")  # should not overwrite
+        entry = rl.get_revocation_entry("appr-001", TENANT_ALPHA)
+        assert entry is not None
+        assert entry.reason == "first_reason"  # first wins
+        assert rl.entry_count() == 1
+
+    def test_entry_count(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        assert rl.entry_count() == 0
+        rl.revoke("appr-001", TENANT_ALPHA, "reason")
+        assert rl.entry_count() == 1
+        rl.revoke("appr-002", TENANT_ALPHA, "reason")
+        assert rl.entry_count() == 2
+
+
+# ===========================================================================
+# TestPolicyKeyProvider
+# ===========================================================================
+
+class TestPolicyKeyProvider:
+    """Key rotation and multi-key verification."""
+
+    def test_default_key_works(self) -> None:
+        from trusted_policy_provider import PolicyKeyProvider, make_policy_record
+        kp = PolicyKeyProvider()
+        record = make_policy_record(
+            policy_id="test-key-001",
+            version=1,
+            tenant_id=TENANT_ALPHA,
+            authorized_principals=[APPROVER_A1],
+            allowed_action_types=["data_access"],
+            allowed_resource_patterns=["db-test-*"],
+            valid_from=_YEAR_AGO,
+            valid_until=_YEAR_AHEAD,
+            key_provider=kp,
+        )
+        from trusted_policy_provider import TrustedPolicyProvider
+        assert TrustedPolicyProvider.verify_integrity(record, kp) is True
+
+    def test_rotate_changes_active_key(self) -> None:
+        from trusted_policy_provider import PolicyKeyProvider
+        kp = PolicyKeyProvider()
+        old_kid = kp.active_key_id
+        kp.rotate("v2-test", b"new-secret-key-for-testing")
+        assert kp.active_key_id == "v2-test"
+        assert kp.active_key_id != old_kid
+
+    def test_old_records_still_verify_after_rotation(self) -> None:
+        from trusted_policy_provider import PolicyKeyProvider, make_policy_record, TrustedPolicyProvider
+        kp = PolicyKeyProvider()
+        old_record = make_policy_record(
+            policy_id="test-old-001",
+            version=1,
+            tenant_id=TENANT_ALPHA,
+            authorized_principals=[APPROVER_A1],
+            allowed_action_types=["data_access"],
+            allowed_resource_patterns=["db-test-*"],
+            valid_from=_YEAR_AGO,
+            valid_until=_YEAR_AHEAD,
+            key_provider=kp,
+        )
+        assert old_record.key_id == PolicyKeyProvider.DEFAULT_KEY_ID
+        # Rotate to a new key
+        kp.rotate("v2-test", b"new-secret-key-for-testing")
+        # Old record still verifies (old key still in provider)
+        assert TrustedPolicyProvider.verify_integrity(old_record, kp) is True
+
+    def test_unknown_key_id_fails_verification(self) -> None:
+        from trusted_policy_provider import PolicyKeyProvider, make_policy_record, TrustedPolicyProvider
+        kp1 = PolicyKeyProvider()
+        record = make_policy_record(
+            policy_id="test-002",
+            version=1,
+            tenant_id=TENANT_ALPHA,
+            authorized_principals=[APPROVER_A1],
+            allowed_action_types=["data_access"],
+            allowed_resource_patterns=["db-test-*"],
+            valid_from=_YEAR_AGO,
+            valid_until=_YEAR_AHEAD,
+            key_provider=kp1,
+        )
+        # Different provider that doesn't have the key used to sign record
+        kp2 = PolicyKeyProvider({"other-key": b"some-other-secret"}, active_key_id="other-key")
+        assert TrustedPolicyProvider.verify_integrity(record, kp2) is False
+
+    def test_compute_integrity_with_explicit_key_id(self) -> None:
+        from trusted_policy_provider import PolicyKeyProvider
+        kp = PolicyKeyProvider()
+        kp.add_key("extra-key", b"extra-secret")
+        digest1, kid1 = kp.compute_integrity({"foo": "bar"}, key_id=PolicyKeyProvider.DEFAULT_KEY_ID)
+        digest2, kid2 = kp.compute_integrity({"foo": "bar"}, key_id="extra-key")
+        assert kid1 == PolicyKeyProvider.DEFAULT_KEY_ID
+        assert kid2 == "extra-key"
+        assert digest1 != digest2  # different keys produce different digests
+
+    def test_rotated_key_produces_different_digest(self) -> None:
+        from trusted_policy_provider import PolicyKeyProvider
+        kp = PolicyKeyProvider()
+        d1, k1 = kp.compute_integrity({"x": 1})
+        kp.rotate("v2", b"completely-different-key")
+        d2, k2 = kp.compute_integrity({"x": 1})
+        assert k1 != k2
+        assert d1 != d2
+
+    def test_cross_provider_verification_fails(self) -> None:
+        from trusted_policy_provider import PolicyKeyProvider
+        kp1 = PolicyKeyProvider({"k1": b"secret-one"}, active_key_id="k1")
+        kp2 = PolicyKeyProvider({"k2": b"secret-two"}, active_key_id="k2")
+        digest, kid = kp1.compute_integrity({"data": "test"})
+        # kp2 doesn't have k1 → verification fails
+        assert kp2.verify_integrity({"data": "test"}, digest, kid) is False
+
+    def test_key_id_in_policy_record(self) -> None:
+        from trusted_policy_provider import make_policy_record
+        record = make_policy_record(
+            policy_id="test-003",
+            version=1,
+            tenant_id=TENANT_ALPHA,
+            authorized_principals=[APPROVER_A1],
+            allowed_action_types=["data_access"],
+            allowed_resource_patterns=["db-*"],
+            valid_from=_YEAR_AGO,
+            valid_until=_YEAR_AHEAD,
+        )
+        from trusted_policy_provider import PolicyKeyProvider
+        assert record.key_id == PolicyKeyProvider.DEFAULT_KEY_ID
+
+
+# ===========================================================================
+# TestHardeningIntegration
+# ===========================================================================
+
+class TestHardeningIntegration:
+    """Integration tests for all hardening features together."""
+
+    def _make_i_orchestrator(
+        self,
+        approver: str = APPROVER_A1,
+        replay_registry: "Any | None" = None,
+        revocation_list: "Any | None" = None,
+    ) -> "Any":
+        from adversarial_dataset import _NOW, TENANT_ALPHA
+        provider = _fresh_provider()
+        state = _make_valid_state(approver=approver)
+        executor = SandboxToolExecutor(state, check_identity=False)
+        return ConditionIOrchestrator(
+            executor=executor,
+            policy_provider=provider,
+            action_type="data_access",
+            resource_id="db-prod-001",
+            tenant_id=TENANT_ALPHA,
+            current_time=_NOW,
+            replay_registry=replay_registry,
+            revocation_list=revocation_list,
+        )
+
+    def test_replay_attack_on_orchestrator_blocked(self) -> None:
+        """Second orchestrate() call with same nonce returns failure."""
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        orch = self._make_i_orchestrator(replay_registry=reg)
+        ev1 = orch.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        assert ev1.dvo_authorized is True
+
+        # Build a second orchestrator with the same registry and state
+        # (simulates a replay: same approval_id reused)
+        orch2 = self._make_i_orchestrator(replay_registry=reg)
+        ev2 = orch2.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        assert ev2.dvo_authorized is False
+        assert any("replay_detected" in r for r in ev2.failure_reasons)
+
+    def test_runtime_revocation_blocks_approval(self) -> None:
+        """RevocationList revocation causes orchestrator to deny."""
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        rl.revoke("appr-test-001", TENANT_ALPHA, "approver_compromised")
+        orch = self._make_i_orchestrator(revocation_list=rl)
+        ev = orch.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        assert ev.dvo_authorized is False
+        assert any("approval_revoked_at_runtime" in r for r in ev.failure_reasons)
+
+    def test_hardening_does_not_affect_legitimate_no_registry(self) -> None:
+        """Without replay/revocation checks, legitimate scenario still passes."""
+        orch = self._make_i_orchestrator()  # no replay_registry, no revocation_list
+        ev = orch.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        assert ev.dvo_authorized is True
+
+    def test_replay_checked_flag_set(self) -> None:
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        orch = self._make_i_orchestrator(replay_registry=reg)
+        ev = orch.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        assert ev.replay_checked is True
+
+    def test_revocation_checked_flag_set(self) -> None:
+        from revocation_list import RevocationList
+        rl = RevocationList()
+        orch = self._make_i_orchestrator(revocation_list=rl)
+        ev = orch.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        assert ev.revocation_checked is True
+
+    def test_replay_blocked_before_policy_lookup(self) -> None:
+        """When replay is detected, policy_lookup_result should be None."""
+        from replay_protection import ReplayRegistry
+        reg = ReplayRegistry()
+        orch1 = self._make_i_orchestrator(replay_registry=reg)
+        orch1.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        # Second call: same registry, same nonce
+        orch2 = self._make_i_orchestrator(replay_registry=reg)
+        ev = orch2.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        assert ev.dvo_authorized is False
+        # Policy lookup was not reached because replay was detected first
+        assert ev.policy_lookup_result is None
+
+    def test_revocation_checked_flag_not_set_without_list(self) -> None:
+        orch = self._make_i_orchestrator(revocation_list=None)
+        ev = orch.orchestrate("prop-test-001", "appr-test-001", "rec-test-001")
+        assert ev.revocation_checked is False

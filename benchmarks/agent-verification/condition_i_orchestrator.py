@@ -48,10 +48,27 @@ from policy_decision import (  # noqa: E402
     PolicyDecisionRecord,
     PolicyStats,
 )
-from trusted_policy_provider import PolicyLookupResult, TrustedPolicyProvider  # noqa: E402
+from trusted_policy_provider import (  # noqa: E402
+    PolicyKeyProvider,
+    PolicyLookupResult,
+    TrustedPolicyProvider,
+)
 
 if TYPE_CHECKING:
     from mlx_qwen_adapter import SandboxToolExecutor
+
+# Lazy imports to avoid circular dependency at module load
+def _get_replay_registry_cls():  # type: ignore
+    from replay_protection import ReplayRegistry
+    return ReplayRegistry
+
+def _get_revocation_list_cls():  # type: ignore
+    from revocation_list import RevocationList
+    return RevocationList
+
+def _get_approval_nonce_cls():  # type: ignore
+    from replay_protection import ApprovalNonce
+    return ApprovalNonce
 
 
 @dataclass
@@ -62,11 +79,15 @@ class ConditionIEvidence(VerificationEvidence):
     policy_lookup_result is set after the approval check:
       - None if approval was invalid (policy lookup skipped)
       - PolicyLookupResult otherwise
+    replay_checked: True if a ReplayRegistry was consulted
+    revocation_checked: True if a RevocationList was consulted
     """
     policy_lookup_result: PolicyLookupResult | None = None
     action_type: str = ""
     resource_id: str = ""
     tenant_id: str = ""
+    replay_checked: bool = False
+    revocation_checked: bool = False
 
 
 class ConditionIOrchestrator:
@@ -95,6 +116,9 @@ class ConditionIOrchestrator:
         resource_id: str,
         tenant_id: str,
         current_time: float | None = None,
+        replay_registry: "Any | None" = None,
+        revocation_list: "Any | None" = None,
+        key_provider: PolicyKeyProvider | None = None,
     ) -> None:
         self._executor = executor
         self._policy_provider = policy_provider
@@ -102,6 +126,9 @@ class ConditionIOrchestrator:
         self._resource_id = resource_id
         self._tenant_id = tenant_id
         self._current_time = current_time
+        self._replay_registry = replay_registry
+        self._revocation_list = revocation_list
+        self._key_provider = key_provider
 
     def orchestrate(
         self,
@@ -173,6 +200,70 @@ class ConditionIOrchestrator:
             reason = approval_result.get("reason", "approval_invalid")
             failure_reasons.append(f"approval_invalid:{reason}")
 
+        # --- Replay check (between approval validity and policy lookup) ---
+        replay_checked = False
+        if approval_valid and not approval_error and self._replay_registry is not None:
+            replay_checked = True
+            ApprovalNonce = _get_approval_nonce_cls()
+            nonce = ApprovalNonce(
+                approval_id=approval_id,
+                tenant_id=self._tenant_id,
+                action_type=self._action_type,
+                resource_id=self._resource_id,
+                proposal_id=proposal_id,
+            )
+            if not self._replay_registry.try_consume(nonce):
+                failure_reasons.append("replay_detected")
+                orchestration_ms = (time.perf_counter() - t0) * 1000
+                return ConditionIEvidence(
+                    proposal_id=proposal_id,
+                    approval_id=approval_id,
+                    record_id=record_id,
+                    field=field,
+                    audit_result=audit_result,
+                    approval_result=approval_result,
+                    external_result={},
+                    dvo_authorized=False,
+                    failure_reasons=failure_reasons,
+                    tool_calls=tool_calls,
+                    orchestration_ms=orchestration_ms,
+                    policy_lookup_result=None,
+                    action_type=self._action_type,
+                    resource_id=self._resource_id,
+                    tenant_id=self._tenant_id,
+                    replay_checked=True,
+                    revocation_checked=False,
+                )
+
+        # --- Runtime revocation check ---
+        revocation_checked = False
+        if approval_valid and not approval_error and self._revocation_list is not None:
+            revocation_checked = True
+            if self._revocation_list.is_revoked(approval_id, self._tenant_id):
+                entry = self._revocation_list.get_revocation_entry(approval_id, self._tenant_id)
+                reason = entry.reason if entry is not None else "unknown"
+                failure_reasons.append(f"approval_revoked_at_runtime:{reason}")
+                orchestration_ms = (time.perf_counter() - t0) * 1000
+                return ConditionIEvidence(
+                    proposal_id=proposal_id,
+                    approval_id=approval_id,
+                    record_id=record_id,
+                    field=field,
+                    audit_result=audit_result,
+                    approval_result=approval_result,
+                    external_result={},
+                    dvo_authorized=False,
+                    failure_reasons=failure_reasons,
+                    tool_calls=tool_calls,
+                    orchestration_ms=orchestration_ms,
+                    policy_lookup_result=None,
+                    action_type=self._action_type,
+                    resource_id=self._resource_id,
+                    tenant_id=self._tenant_id,
+                    replay_checked=replay_checked,
+                    revocation_checked=True,
+                )
+
         # --- Policy lookup (Step 3) ---
         # Only run if approval was structurally valid (has an approver identity)
         if approval_valid and not approval_error:
@@ -237,6 +328,8 @@ class ConditionIOrchestrator:
             action_type=self._action_type,
             resource_id=self._resource_id,
             tenant_id=self._tenant_id,
+            replay_checked=replay_checked,
+            revocation_checked=revocation_checked,
         )
 
 

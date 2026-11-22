@@ -393,6 +393,7 @@ class QwenAgent:
         orchestrator: "Any | None" = None,
         canonical_params: "dict[str, Any] | None" = None,
         policy_orchestrator: "Any | None" = None,
+        condition_i_orchestrator: "Any | None" = None,
     ) -> AgentTrace:
         """
         Execute the agent loop for one scenario.
@@ -411,6 +412,9 @@ class QwenAgent:
             policy_orchestrator: Optional EnhancedPolicyOrchestrator for Condition H.
                                  When provided, overrides orchestrator for the DVO run
                                  and applies 4-state policy decision after model inference.
+            condition_i_orchestrator: Optional ConditionIOrchestrator for Condition I.
+                                 When provided, runs before the model loop and injects
+                                 evidence. Applies compute_policy_i_decision after inference.
 
         Returns:
             AgentTrace with verdict, tool calls, and execution metadata.
@@ -455,6 +459,19 @@ class QwenAgent:
             )
             trace.dvo_authorized = h_evidence.dvo_authorized
             trace.dvo_evidence = h_evidence
+
+        # --- Condition I: TrustedPolicyProvider orchestrator runs first ---
+        i_evidence = None
+        if condition_i_orchestrator is not None and canonical_params is not None:
+            i_evidence = condition_i_orchestrator.orchestrate(
+                proposal_id=canonical_params["proposal_id"],
+                approval_id=canonical_params["approval_id"],
+                record_id=canonical_params.get("record_id", "rec-001"),
+                field=canonical_params.get("field", "value"),
+            )
+            trace.dvo_authorized = i_evidence.dvo_authorized
+            trace.dvo_evidence = i_evidence
+
         tools_list = list(TOOL_REGISTRY.values())
         for t, schema in zip(tools_list, TOOL_REGISTRY.keys()):
             t["name"] = schema  # inject name into schema for prompt
@@ -469,7 +486,7 @@ class QwenAgent:
         # it to reason from pre-verified evidence and call report_verdict directly.
         # Security: injected results come from DVO's canonical-ID tool calls, not
         # from the model's argument generation.
-        active_evidence = h_evidence if h_evidence is not None else dvo_evidence
+        active_evidence = i_evidence if i_evidence is not None else (h_evidence if h_evidence is not None else dvo_evidence)
         if active_evidence is not None:
             injected = active_evidence.as_injected_messages()
             messages.extend(injected)
@@ -639,6 +656,21 @@ class QwenAgent:
                 trace.policy_decision = pdr
                 trace.verdict = pdr.enforcement_outcome
                 trace.verdict_source = f"policy_{pdr.decision.value}"
+
+            # --- Condition I: apply 4-state policy decision (TrustedPolicyProvider) ---
+            # Same 4-state decision as H but using compute_policy_i_decision which
+            # understands the full ConditionIEvidence including policy_lookup_result.
+            if i_evidence is not None:
+                from condition_i_orchestrator import compute_policy_i_decision
+                model_verdict_i = trace.verdict
+                pdr_i = compute_policy_i_decision(
+                    evidence=i_evidence,
+                    model_verdict=model_verdict_i,
+                    model_reasoning=trace.reasoning,
+                )
+                trace.policy_decision = pdr_i
+                trace.verdict = pdr_i.enforcement_outcome
+                trace.verdict_source = f"policy_i_{pdr_i.decision.value}"
 
         except Exception as exc:
             trace.parse_error = f"Inference error: {traceback.format_exc(limit=2)}"
