@@ -18,10 +18,10 @@ This change upgrades the Rust audit runtime's `jsonwebtoken` dependency from 11.
 - **Security:** Retain security-scan and supply-chain checks; review parsing of JWT header extensions and claim types.
 - **Integration:** Ensure independent downstream consumers still compile with the updated dependency tree.
 
-## Evidence gate
+## Evaluation gate
 
 Status: **PENDING final CI completion.** The changed lockfiles were generated through GitHub Actions using Cargo and committed to the PR branch. Do not infer test success from resolver completion alone. Require the `aigov-ci`, `compliance`, `security-scan`, `supply-chain-audit`, and branch-policy jobs to pass on the final commit.
 
-## Human approval
+## Human approval gate
 
 **PENDING.** Merge and deployment require maintainer approval. No production readiness or deployment authorization is asserted.
