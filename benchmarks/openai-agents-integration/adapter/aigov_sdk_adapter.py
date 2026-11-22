@@ -155,6 +155,33 @@ class SandboxedDocumentTools:
         authorized = False
         block_reason = "no_execution_token"
 
+        # Defense-in-depth: enforce that the supplied action_type matches what
+        # this tool requires. Catches action_type downgrade attacks where a
+        # caller passes action_type="document:read" to delete_document to get
+        # the more permissive policy to authorize a destructive operation.
+        # This check runs before EAT verification so it fires even when the
+        # gateway's TOOL_CAPABILITY_MAP check is bypassed (e.g., stale map).
+        expected_for_tool = self.TOOL_ACTION_TYPES.get(tool_name, "")
+        if expected_for_tool and expected_action_type and expected_action_type != expected_for_tool:
+            block_reason = (
+                f"action_type_mismatch:tool={tool_name!r}"
+                f"_requires={expected_for_tool!r}"
+                f"_got={expected_action_type!r}"
+            )
+            record = _ExecRecord(
+                execution_id=execution_id, tool_name=tool_name,
+                arguments=arguments, authorized=False,
+                decision=decision_label or "blocked_action_type_mismatch",
+                block_reason=block_reason, tenant_id=tenant_id,
+                args_binding_hash=args_binding_hash, executed_at=time.time(),
+            )
+            with self._lock:
+                self._history.append(record)
+            return {
+                "success": False, "execution_id": execution_id,
+                "data": None, "blocked_reason": block_reason,
+            }
+
         if execution_token is not None and self._token_authority is not None:
             verify_action   = expected_action_type   or execution_token.action_type
             verify_resource = expected_resource_id   or execution_token.resource_id
@@ -433,8 +460,25 @@ def make_sdk_tools(
     import asyncio
     import json as _json
 
+    def _parse_args(args_json: str, tool_name: str) -> dict | str:
+        """Parse tool arguments; return error JSON string on malformed input."""
+        try:
+            parsed = _json.loads(args_json)
+            if not isinstance(parsed, dict):
+                raise TypeError("args must be a JSON object")
+            return parsed
+        except (ValueError, TypeError) as exc:
+            return _json.dumps({
+                "authorized": False,
+                "decision": "deny",
+                "data": None,
+                "block_reason": f"malformed_args:{tool_name}:{exc}",
+            })
+
     async def _invoke_read(ctx, args_json: str) -> str:
-        args = _json.loads(args_json)
+        args = _parse_args(args_json, "read_document")
+        if isinstance(args, str):
+            return args
         result = guarded.execute_tool("read_document", args, tenant_id)
         return _json.dumps({
             "authorized": result.authorized,
@@ -444,7 +488,9 @@ def make_sdk_tools(
         })
 
     async def _invoke_update(ctx, args_json: str) -> str:
-        args = _json.loads(args_json)
+        args = _parse_args(args_json, "update_document")
+        if isinstance(args, str):
+            return args
         result = guarded.execute_tool("update_document", args, tenant_id)
         return _json.dumps({
             "authorized": result.authorized,
@@ -454,7 +500,9 @@ def make_sdk_tools(
         })
 
     async def _invoke_delete(ctx, args_json: str) -> str:
-        args = _json.loads(args_json)
+        args = _parse_args(args_json, "delete_document")
+        if isinstance(args, str):
+            return args
         result = guarded.execute_tool("delete_document", args, tenant_id)
         return _json.dumps({
             "authorized": result.authorized,
