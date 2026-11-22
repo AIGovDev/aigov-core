@@ -34,7 +34,7 @@ If this PR changes `rust/`, evidence ingest, compliance summary, export, verify,
 ## Checklist
 
 - [ ] I used a dedicated feature branch, not `main`.
-- [ ] I have signed the applicable Contributor License Agreement (Individual or Corporate). (Checklist only — legal acceptance is via CLA Assistant comment or executed Corporate CLA; see links below.)
+- [ ] I have signed the applicable Contributor License Agreement (Individual or Corporate). (Checklist only — legal acceptance is via the CLA v2 signing comment or executed Corporate CLA; see links below.)
 - [ ] Documentation was updated if behavior or integrator contracts changed.
 - [ ] Relevant checks were run:
   - `make gate`

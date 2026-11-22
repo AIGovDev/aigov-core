@@ -1,18 +1,14 @@
-name: CLA workflow security guard
+name: CLA v2 — Security
 
 on:
   pull_request:
     paths:
-      - .github/workflows/cla.yml
-      - .github/workflows/cla-v2-production.yml
-      - .github/workflows/cla-security-guard.yml
+      - .github/workflows/cla*.yml
       - scripts/check_cla_workflow_security.py
   push:
     branches: [staging, main]
     paths:
-      - .github/workflows/cla.yml
-      - .github/workflows/cla-v2-production.yml
-      - .github/workflows/cla-security-guard.yml
+      - .github/workflows/cla*.yml
       - scripts/check_cla_workflow_security.py
 
 permissions:
@@ -20,6 +16,7 @@ permissions:
 
 jobs:
   cla-security-guard:
+    name: CLA workflow security guard (not a required status)
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

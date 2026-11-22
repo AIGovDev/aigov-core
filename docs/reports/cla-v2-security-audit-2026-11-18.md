@@ -212,8 +212,12 @@ The critical enforcement properties (fail-closed API errors, numeric identity
 binding, historical consent re-verification, co-author trailer handling, bot
 identity verification, branch protection, required status check continuity) are
 all present and verified.  The one code-quality defect found (bot identity
-cross-pairing) has been fixed in `fix/cla-v2-bot-identity-pairing` with
+cross-pairing) has been fixed in `fix/cla-v2-bot-identity-pairing` (PR #431,
+merged to staging 2026-11-18; PR #432 promoted to main 2026-11-19) with
 regression tests; it was not exploitable in production.
+
+**Final deployed SHA (main):** `099e764` — includes bot identity pairing fix.
+**Final deployed SHA (staging):** `caebbaa` — identical tree.
 
 ---
 
@@ -248,15 +252,34 @@ A maintainer must:
 
 ---
 
+## Audit closure (2026-11-19)
+
+| Event | SHA / Reference | Timestamp |
+|-------|----------------|-----------|
+| PR #431 merged to staging | `caebbaa` | 2026-11-18 |
+| PR #432 (staging→main) merged | `099e76487be99b74b4dcf724e83a518f07ffbcc8` | 2026-11-19 |
+| Main/staging tree diff | identical | confirmed post-merge |
+| Final CI on PR #431 | 11/11 checks pass | 2026-11-19T08:07 UTC |
+
+**AUDIT CLOSED — GO.** CLA v2 is fully deployed to main and staging with all
+identified defects resolved. No further action required by this audit.
+
+---
+
 ## Evidence references
 
 | Item | Reference |
 |------|-----------|
-| main merge commit | `0d5e7400668ac11fe27aa8352fd5f5210b1d3ffb` |
-| staging tip | `bb29188 52c15b8d371bad2856a71f81e09a61062` |
+| main initial merge commit (PR #428) | `0d5e7400668ac11fe27aa8352fd5f5210b1d3ffb` |
+| main final HEAD (PR #432) | `099e76487be99b74b4dcf724e83a518f07ffbcc8` |
+| staging tip (PR #431) | `caebbaa` |
 | PR #428 merge timestamp | 2026-11-18T18:47:01Z |
+| PR #431 merge timestamp | 2026-11-18 (bot identity fix) |
+| PR #432 merge timestamp | 2026-11-19 (promote fix to main) |
 | Unsigned contributor E2E | PR #108, `CLA v2 / agreement = failure`, 2026-11-18T15:18:31Z |
 | Signed contributor E2E | PR #424 SHA d9e3147, run 44090159750 |
 | Fix branch | `fix/cla-v2-bot-identity-pairing` |
 | Test run | 33 tests, 0 failures |
 | Security guard | PASS |
+| Ruleset main (18716261) | `aigov-core-portable` + `CLA v2 / agreement`, updated 2026-11-17 |
+| Ruleset staging (18716264) | `aigov-core-portable` + `cargo-audit` + `CLA v2 / agreement`, updated 2026-11-17 |

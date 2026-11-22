@@ -1,6 +1,8 @@
 # CLA enforcement security review (2026-11-16)
 
 ## Current trust boundary
+_Status update (retirement):_ `.github/workflows/cla.yml` was deleted after CLA v2 became the required check; the current enforcement workflow is `cla-v2-production.yml`. The text below is the 2026-11-16 review of the legacy workflow and is kept as audit history.
+
 `.github/workflows/cla.yml` runs on `pull_request_target` and PR comments.
 Its third-party CLA Assistant Lite action receives a short-lived token with
 `actions:write`, `contents:write`, `pull-requests:write`, and `statuses:write`.
