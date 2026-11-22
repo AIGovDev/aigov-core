@@ -79,6 +79,13 @@ TOOL_CAPABILITY_MAP: dict[str, str] = {
     "open_pull_request":   "repo:write",
     "modify_repo_settings": "repo:admin",
     "request_deployment":  "deploy:production",
+    # Document tools (OpenAI Agents SDK integration)
+    # These must be registered here so the gateway's step-2 capability check
+    # enforces that delete_document cannot be called with action_type="document:read"
+    # (action_type downgrade / policy confusion attack).
+    "read_document":   "document:read",
+    "update_document": "document:write",
+    "delete_document": "document:delete",
 }
 
 

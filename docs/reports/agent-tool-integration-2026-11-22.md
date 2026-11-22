@@ -515,6 +515,140 @@ PostgreSQL-backed replay protection is now validated against real infrastructure
 
 ---
 
+## Pass 6 — OpenAI Agents SDK adversarial review (PR #474, 2026-11-22)
+
+**Branch:** `feat/openai-agents-integration` → PR #474  
+**Reviewer approach:** Independent adversarial review of the PR #474 implementation; not only the description.
+
+### Review scope
+
+- OpenAI Agents SDK FunctionTool execution boundary
+- Authorization bypasses and direct side-effect paths
+- Approval registry concurrency and replay races
+- Cross-process and cross-tenant token reuse
+- Argument binding and TOCTOU
+- Fail-closed behavior during outages
+- Audit persistence and integrity after restart
+- Distinction between simulated and actual SDK execution
+
+### Baseline
+
+| Branch | Pass | Skip | Fail (pre-existing) |
+|--------|------|------|---------------------|
+| staging | 780 | 86 | 5 |
+| PR #474 (pre-review) | 792 | 86 | 5 |
+| PR #474 (post-fixes) | 797 | 86 | 5 |
+
+The 5 pre-existing failures are identical across all three and unrelated to the SDK integration: `test_dependabot_yml_targets_staging_for_all_ecosystems`, `test_epistemic_readiness_cli_json`, `test_repo_root_module_entrypoint_policy_compile`, `test_generate_script_roundtrip`, `test_sigstore_dependency_importable`.
+
+---
+
+### FINDING-SDK-1 (HIGH → FIXED) — Action-type downgrade: `delete_document` authorized under `document:read` policy
+
+**Root cause:** `TOOL_CAPABILITY_MAP` in `tool_gateway.py` only contained GitHub tools. Document tools (`read_document`, `update_document`, `delete_document`) were absent. The gateway's step-2 capability check (`TOOL_CAPABILITY_MAP.get(req.tool_name)`) returned `None` for document tools, causing the check to be unconditionally skipped:
+
+```python
+required_action = TOOL_CAPABILITY_MAP.get(req.tool_name)
+if required_action is not None and req.action_type != required_action:
+    # deny
+```
+
+An attacker calling `ToolGateway.request()` directly could pass `tool_name="delete_document"` with `action_type="document:read"`. The policy lookup would find the subject's `document:read` record and issue an EAT with `action_type="document:read"`. `SandboxedDocumentTools.execute()` verified the EAT with `expected_action_type="document:read"` (from the same request context), which matched. `_dispatch("delete_document", ...)` then executed the deletion.
+
+**Confirmed:** The exploit was reproduced in-session:
+```
+delete under read action_type — decision: allow
+executed: True
+document after attack: None   ← document deleted
+```
+
+**Fix (pass 6):**
+1. Registered document tools in `TOOL_CAPABILITY_MAP` in `tool_gateway.py` — gateway now rejects mismatched action_type at step 2.
+2. Wired up `TOOL_ACTION_TYPES` in `SandboxedDocumentTools.execute()` — defense-in-depth check runs before EAT verification. `TOOL_ACTION_TYPES` was defined in the original PR but never called (dead code).
+
+Regression test: `test_s1_action_type_downgrade_blocked_by_gateway` — calls gateway directly with `delete_document`/`document:read`; asserts `capability_mismatch=True`, `executed=False`, document unmodified.
+
+---
+
+### FINDING-SDK-2 (MEDIUM → FIXED) — `TOOL_ACTION_TYPES` defined but never enforced (dead code)
+
+`SandboxedDocumentTools.TOOL_ACTION_TYPES` mapped each document tool to its required action_type, but the check was never called in `execute()`. This meant that even a correctly built EAT with the wrong action_type (e.g., issued with `document:read` for a `delete_document` call by a stale or buggy gateway) would not be caught at the execution layer.
+
+**Fix (pass 6):** `execute()` now checks `expected_action_type` against `TOOL_ACTION_TYPES.get(tool_name)` before EAT verification. If they don't match, the call is blocked and recorded with `blocked_reason="action_type_mismatch:..."` before any crypto is performed. Conditional: check only fires when both `expected_action_type` and `expected_for_tool` are non-empty (preserves backward compatibility with direct calls that omit expected_action_type).
+
+Regression test: `test_s2_action_type_mismatch_blocked_in_execute` — issues a valid EAT for `delete_document` with `action_type="document:read"` and calls `execute()` directly; asserts blocked with `action_type_mismatch` reason.
+
+---
+
+### FINDING-SDK-3 (MEDIUM → FIXED) — `make_sdk_tools()` raises `JSONDecodeError` on malformed LLM arguments
+
+`_invoke_read/update/delete` called `_json.loads(args_json)` without try/except. If the OpenAI Agents SDK passed malformed JSON (truncated model output, injection attempt via `{not valid json}`), an unhandled `ValueError` propagated through the SDK's exception handler. The LLM would receive an opaque error traceback rather than a structured `authorized: false` response, and no audit record would be created.
+
+**Fix (pass 6):** Added `_parse_args()` helper that wraps `_json.loads()` in a try/except; returns a structured JSON error string on failure. All three invoke functions call it and return early on parse error.
+
+Regression test: `test_s5_malformed_sdk_args_handled` — passes `{not valid json}` to `read_document.on_invoke_tool()`; asserts structured JSON response with `authorized: false`, `decision: "deny"`, `block_reason` contains `malformed_args`.
+
+---
+
+### FINDING-SDK-4 (LOW → DOCUMENTED) — In-process `execution_history` not durable across restarts
+
+`SandboxedDocumentTools._history` is an in-memory list. After process restart, the execution attempt audit log is gone. The `DocumentStore` (SQLite) is durable — soft-deletes and version increments survive restart. But the execution attempt history (including blocked attempts) is lost.
+
+**Not fixed** — this is an inherent property of the in-memory design, already documented in `benchmarks/openai-agents-integration/README.md` as a limitation. Production deployment requires a durable audit store (the existing `SqlAuditStore` in the AIGov stack).
+
+**New test** (`test_s4_audit_persistence_across_restart`): verifies that document mutations survive restart via SQLite (the durable layer) while explicitly documenting that execution_history does not. Opens a fresh `DocumentStore` instance against the same file; confirms soft-delete row is present; confirms no phantom history from the original process.
+
+---
+
+### FINDING-SDK-5 (LOW → NO CODE CHANGE) — Direct `SandboxedDocumentTools.execute()` without token: fail-closed verified
+
+Calling `execute()` without a token (bypassing the entire gateway + approval stack) correctly returns `success: False, blocked_reason: "no_execution_token"` and performs no side effect. The document is unmodified. This was the intended behavior and was already correct — no fix needed. Added `test_s3_direct_execute_no_token_blocked` to make this an explicit, named regression guarantee.
+
+---
+
+### FINDING-SDK-6 (INFO) — Approval registry not durable across restarts (documented)
+
+`ApprovalRegistry` is in-memory per-process. In a multi-process or distributed deployment, two workers could each consume the same approval. This is documented in the README and in FINDING-4 (nonce store section). No fix in this pass — production deployment requires a PostgreSQL-backed nonce store (already demonstrated in pass 3).
+
+---
+
+### FINDING-SDK-7 (INFO) — Cross-process EAT reuse blocked by design
+
+Each `ExecutionTokenAuthority` instance uses a fresh in-memory HMAC key. EATs from one process are invalid in another process (key mismatch). This was tested in pass 5 (`test_cross_process_token_verification`) for the GitHub tools; the same property holds for document tools since `SandboxedDocumentTools` uses the same `ExecutionTokenAuthority` interface.
+
+---
+
+### SDK integration security summary
+
+| Finding | Severity | Status |
+|---------|----------|--------|
+| FINDING-SDK-1: action_type downgrade — delete under read policy | HIGH | **FIXED** (pass 6) |
+| FINDING-SDK-2: TOOL_ACTION_TYPES dead code — no execute()-layer enforcement | MEDIUM | **FIXED** (pass 6) |
+| FINDING-SDK-3: JSONDecodeError on malformed LLM args in make_sdk_tools | MEDIUM | **FIXED** (pass 6) |
+| FINDING-SDK-4: execution_history not durable across restarts | LOW | **DOCUMENTED** |
+| FINDING-SDK-5: direct execute() bypass fail-closed | LOW | **VERIFIED** (new test) |
+| FINDING-SDK-6: approval registry not durable (multi-process) | INFO | **DOCUMENTED** |
+| FINDING-SDK-7: cross-process EAT reuse blocked by design | Info | **VERIFIED** |
+
+**Confirmed bypasses: 0** (after fixes).  
+**Unauthorized side effects: 0** (after fixes).
+
+New tests added: `test_s1`–`test_s5` (+5 tests → 17 total in harness).  
+Full suite post-fixes: **797 passed, 86 skipped, 5 pre-existing failures** (same 5 as staging).
+
+---
+
+### Pass 6 verdict: CONDITIONAL GO
+
+Conditions for production deployment (unchanged from pass 5, plus one new):
+
+1. `InMemoryKeyProvider` (`is_managed=False`) must be replaced with a managed KMS provider.
+2. `ApprovalRegistry` must be backed by a durable, distributed nonce store (already implemented in pass 3 — `SqlNonceStore` with PostgreSQL).
+3. `SandboxedDocumentTools._history` must be replaced with or supplemented by a durable `SqlAuditStore` instance for production execution audit.
+4. Human code review and merge authorization: **PENDING** (do not merge without authorization).
+
+---
+
 ## Human approval gate
 
 - Human code review and merge authorization: **PENDING**

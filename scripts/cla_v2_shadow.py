@@ -23,7 +23,7 @@ class AuditError(Exception):
 # Exact AI attribution trailers accepted as non-human metadata. Matching is
 # exact after strip(): no wildcards, no model families, no lookalike addresses.
 # Sonnet 4.6: docs/reports/cla-v2-ai-attribution-2026-11-18.md
-# Haiku 5.5: docs/reports/cla-legacy-workflow-retirement-2026-11-22.md (explicit human approval)
+# Haiku 5.5: docs/reports/cla-haiku-attribution-policy-2026-11-22.md (explicit human approval)
 AI_ATTRIBUTION_TRAILERS = frozenset({
     "Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>",
     "Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>",
