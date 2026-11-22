@@ -40,8 +40,8 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
- "sqlx-core 0.8.6",
- "sqlx-postgres 0.8.6",
+ "sqlx-core 0.9.1",
+ "sqlx-postgres 0.9.1",
  "subtle",
  "tempfile",
  "tokio",
@@ -2240,41 +2240,6 @@ dependencies = [
  "sqlx-postgres 0.9.1",
 ]
 
-[[package]]
-name = "sqlx-core"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee6798b1838b6a0f69c007c133b8df5866302197e404e8b6ee8ed3e3a5e68dc6"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "chrono",
- "crc",
- "crossbeam-queue",
- "either",
- "event-listener",
- "futures-core",
- "futures-intrusive",
- "futures-io",
- "futures-util",
- "hashbrown 0.15.5",
- "hashlink 0.10.0",
- "indexmap",
- "log",
- "memchr",
- "once_cell",
- "percent-encoding",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "smallvec",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tracing",
- "url",
- "uuid",
-]
 
 [[package]]
 name = "sqlx-core"
@@ -2348,44 +2313,6 @@ dependencies = [
  "url",
 ]
 
-[[package]]
-name = "sqlx-postgres"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46"
-dependencies = [
- "atoi",
- "base64 0.22.1",
- "bitflags",
- "byteorder",
- "chrono",
- "crc",
- "dotenvy",
- "etcetera 0.8.0",
- "futures-channel",
- "futures-core",
- "futures-util",
- "hex",
- "hkdf 0.12.4",
- "hmac 0.12.1",
- "home",
- "itoa",
- "log",
- "md-5 0.10.6",
- "memchr",
- "once_cell",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "smallvec",
- "sqlx-core 0.8.6",
- "stringprep",
- "thiserror",
- "tracing",
- "uuid",
- "whoami 1.6.1",
-]
 
 [[package]]
 name = "sqlx-postgres"
