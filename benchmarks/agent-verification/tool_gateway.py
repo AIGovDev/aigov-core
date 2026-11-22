@@ -6,18 +6,27 @@ Security invariants:
      (tool_name, arguments, action_type, resource_id) tuple in this call.
   2. Authorization and execution are atomic within a single request() call.
      There is no window between authorization and execution where arguments
-     can be changed (TOCTOU protection).
+     can be changed (TOCTOU protection via deepcopy at step 1).
   3. Each approval is consumed atomically via ReplayRegistry. Concurrent calls
      with the same approval_id are serialized; the second call finds the nonce
      already consumed → DENY.
+     LIMITATION: ReplayRegistry is in-memory per-process. Across multiple worker
+     processes, replay atomicity is not guaranteed. Use a persistent distributed
+     nonce store (e.g. Redis SETNX, PostgreSQL FOR UPDATE) in production.
   4. The gateway enforces the tool→action_type capability map. An agent cannot
      invoke modify_repo_settings with action_type="repo:read" to downgrade the
      required authorization.
   5. Policy-service outage (INDETERMINATE) fails closed → no execution.
+  6. After ALLOW, a pre-execution revocation check re-examines the RevocationList
+     immediately before token issuance. This closes the authorization→execution
+     window for single-process deployments.
+  7. An ExecutionAuthorizationToken (EAT) is issued after ALLOW and the pre-exec
+     revocation check. SandboxedGitHubTools.execute() verifies the EAT
+     independently. Code that bypasses ToolGateway cannot forge a valid EAT.
 
 Trust boundary:
   TRUSTED:  PolicyDecisionRecord with decision=ALLOW (after Condition I checks)
-            SandboxedGitHubTools.execute() (sandboxed, no real side effects)
+            ExecutionToken verified against token_authority (cryptographic)
   ADVISORY: model_verdict passed through Condition I (cannot grant ALLOW alone)
   UNTRUSTED: tool_name, arguments, action_type, resource_id from request
              (all validated and checked before any execution)
@@ -42,6 +51,7 @@ from condition_i_orchestrator import (  # noqa: E402
     ConditionIOrchestrator,
     compute_policy_i_decision,
 )
+from execution_token import ExecutionToken, ExecutionTokenAuthority  # noqa: E402
 from policy_decision import PolicyDecision, PolicyDecisionRecord  # noqa: E402
 from replay_protection import ApprovalNonce, ReplayRegistry  # noqa: E402
 from revocation_list import RevocationList  # noqa: E402
@@ -132,6 +142,9 @@ class ToolGateway:
     Authorization enforcement point.
 
     Usage:
+        # Gateway creates its own ExecutionTokenAuthority and installs it on the
+        # tools object during __init__. Callers do not need to manage the authority
+        # unless they need to share it with custom tool objects.
         gateway = ToolGateway(
             policy_provider=TrustedPolicyProvider(POLICY_FIXTURE),
             tools=SandboxedGitHubTools(),
@@ -151,6 +164,7 @@ class ToolGateway:
         revocation_list: RevocationList,
         current_time: float | None = None,
         key_provider: PolicyKeyProvider | None = None,
+        token_authority: ExecutionTokenAuthority | None = None,
     ) -> None:
         self._policy_provider = policy_provider
         self._tools = tools
@@ -159,24 +173,35 @@ class ToolGateway:
         self._current_time = current_time
         self._key_provider = key_provider
 
+        # Install the token authority into the tools object so it can verify
+        # EATs independently. If none is provided, create a fresh one.
+        if token_authority is None:
+            token_authority = ExecutionTokenAuthority()
+        self._token_authority = token_authority
+        self._tools._token_authority = token_authority
+
     def request(self, req: ToolRequest) -> ToolExecutionResult:
         """
         Authorize and conditionally execute a tool request.
 
         Steps:
-          1. Compute and bind args_binding_hash over (tool_name, arguments,
+          1. Compute and bind args_binding_hash over (tool_name, frozen_args,
              action_type, resource_id) — fixed before any check runs.
           2. Validate that tool_name maps to req.action_type (capability check).
           3. Build a DVO executor from req.dvo_state.
           4. Run ConditionIOrchestrator (Condition I: audit + approval + replay
              + revocation + policy lookup).
           5. Compute PolicyDecisionRecord from evidence + req.model_verdict.
-          6. Execute the tool IFF decision == ALLOW.
-          7. Record outcome in SandboxedGitHubTools history.
+          6. If ALLOW: pre-execution revocation check (second check immediately
+             before token issuance, closing the auth→exec window).
+          7. If ALLOW + revocation check passes: issue ExecutionToken binding
+             authorization to this exact execution context.
+          8. Call tools.execute() with the token (or None for blocked attempts).
+             The tools object verifies the token independently.
 
         Authorization and execution are atomic within this call. req.arguments
         cannot change after the args_binding_hash is computed because the same
-        req object is used throughout.
+        frozen copy is used throughout (TOCTOU protection).
         """
         t0 = time.perf_counter()
         execution_id = str(uuid.uuid4())
@@ -204,14 +229,15 @@ class ToolGateway:
                 ],
                 orchestration_ms=(time.perf_counter() - t0) * 1000,
             )
+            # Record blocked attempt using frozen_args (not req.arguments)
             self._tools.execute(
                 tool_name=req.tool_name,
-                arguments=req.arguments,
+                arguments=frozen_args,
                 execution_id=execution_id,
-                authorized=False,
-                decision=deny_record.decision.value,
                 tenant_id=req.tenant_id,
                 args_binding_hash=args_hash,
+                execution_token=None,
+                decision_label=deny_record.decision.value,
             )
             return ToolExecutionResult(
                 executed=False,
@@ -226,7 +252,7 @@ class ToolGateway:
         # Step 3 — Build DVO executor from scenario state
         dvo_executor = SandboxedDVOExecutor(req.dvo_state)
 
-        # Step 4 — Run ConditionI orchestration (fail-closed on exception)
+        # Steps 4–5 — Run ConditionI orchestration (fail-closed on exception)
         try:
             orchestrator = ConditionIOrchestrator(
                 executor=dvo_executor,
@@ -253,30 +279,53 @@ class ToolGateway:
         except Exception as exc:
             # Fail-closed: any unexpected exception from the policy or orchestration
             # layer is treated as INDETERMINATE → no execution.
-            tb = traceback.format_exc()
             decision_record = PolicyDecisionRecord.indeterminate(
                 reasons=[f"policy_service_exception:{type(exc).__name__}:{exc}"],
                 orchestration_ms=(time.perf_counter() - t0) * 1000,
             )
 
+        # Step 6 — Pre-execution revocation check (closes auth→exec window).
+        # If the approval was revoked after orchestration completed but before
+        # the token would be issued, we catch it here.
+        execution_token: ExecutionToken | None = None
+        if decision_record.decision == PolicyDecision.ALLOW:
+            if self._revocation_list.is_revoked(
+                approval_id=req.approval_id, tenant_id=req.tenant_id
+            ):
+                decision_record = PolicyDecisionRecord.deny(
+                    reasons=["approval_revoked_before_execution"],
+                    orchestration_ms=(time.perf_counter() - t0) * 1000,
+                )
+            else:
+                # Step 7 — Issue ExecutionToken binding auth to this exact context.
+                execution_token = self._token_authority.issue(
+                    execution_id=execution_id,
+                    tool_name=req.tool_name,
+                    args_binding_hash=args_hash,
+                    action_type=req.action_type,
+                    resource_id=req.resource_id,
+                    tenant_id=req.tenant_id,
+                )
+
         authorized = decision_record.decision == PolicyDecision.ALLOW
 
-        # Step 6 & 7 — Execute IFF ALLOW, always record.
-        # frozen_args (not req.arguments) is used: even if the caller mutated
-        # req.arguments after hash computation, the executed arguments match
-        # the hash (TOCTOU protection).
+        # Step 8 — Call tools.execute() with token (None for blocked attempts).
+        # The tools object verifies the token independently. Even if someone
+        # bypassed the gateway and called tools.execute() directly, they cannot
+        # produce a token that verifies against this gateway's authority.
+        # frozen_args (not req.arguments) are used for TOCTOU protection.
         tool_result = self._tools.execute(
             tool_name=req.tool_name,
             arguments=frozen_args,
             execution_id=execution_id,
-            authorized=authorized,
-            decision=decision_record.decision.value,
             tenant_id=req.tenant_id,
             args_binding_hash=args_hash,
+            execution_token=execution_token,
+            decision_label=decision_record.decision.value,
         )
 
         return ToolExecutionResult(
-            executed=authorized,
+            executed=authorized and tool_result.get("success", False),
             execution_id=execution_id,
             decision_record=decision_record,
             tool_result=tool_result,

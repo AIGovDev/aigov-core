@@ -96,7 +96,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "6e43efa0-e925-422c-aeaa-f909af022f7c",
+      "execution_id": "dcb416b2-2793-40a4-b483-093fe04d2a37",
       "args_binding_hash": "19728f91b6dd25b8",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -110,7 +110,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "bf022d5f-abe0-45ef-b47d-80d15d490a01",
+      "execution_id": "79e46d53-36d5-491f-873e-a32226b181d9",
       "args_binding_hash": "c97563b29209612c",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -124,7 +124,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "b69c8d28-0c13-41bd-bc72-84392309c557",
+      "execution_id": "ebec7f65-6bcb-4864-ba72-3bc58ad4a032",
       "args_binding_hash": "b3de2d8cd415629d",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -138,7 +138,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "a44600c3-a3a3-4761-9577-485d646a0ada",
+      "execution_id": "3ebd1ed0-26e0-4245-81d4-38b2bc800b80",
       "args_binding_hash": "368b3cb3eebc6b3a",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -152,7 +152,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "ca197505-fa57-4df7-b078-81eecadae394",
+      "execution_id": "fe553ed3-cc06-4420-bb29-d7ab36e330f6",
       "args_binding_hash": "a82ea9e8108408ca",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -168,7 +168,7 @@
       "failure_reasons": [
         "audit_record_not_found"
       ],
-      "execution_id": "7f46e7bd-a532-467a-b3fe-8c150aa81b26",
+      "execution_id": "73ef332d-6716-4a9b-b41d-30afbbd204dd",
       "args_binding_hash": "f798b48db96ac4b4",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -184,7 +184,7 @@
       "failure_reasons": [
         "approval_invalid:approval_expired_or_inactive"
       ],
-      "execution_id": "a6b0bf6e-b3d4-456f-89c9-9ee37186d035",
+      "execution_id": "b739c5ea-37a4-4a1c-9a68-607aea5e8410",
       "args_binding_hash": "f0724860fd543205",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -200,9 +200,9 @@
       "failure_reasons": [
         "audit_hash_verification_failed"
       ],
-      "execution_id": "fd43a04b-c053-4981-a804-23958e7c70a1",
+      "execution_id": "2c31fb13-1cb4-41c1-83c3-48dec23e1b10",
       "args_binding_hash": "dd6da84774d164c3",
-      "enforcement_latency_ms": 0.1,
+      "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
     },
     {
@@ -216,7 +216,7 @@
       "failure_reasons": [
         "policy_denied:action_not_in_scope"
       ],
-      "execution_id": "9897ad38-2855-40a5-bb90-acec1b1cef4e",
+      "execution_id": "902b5057-4c8e-4a0e-b42f-63525b73a430",
       "args_binding_hash": "184d67c961405fda",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -232,7 +232,7 @@
       "failure_reasons": [
         "audit_hash_verification_failed"
       ],
-      "execution_id": "8ed9656a-0cc2-4738-ad84-144a9a53967f",
+      "execution_id": "4a36e837-fa08-4bf0-85e6-112c3b772016",
       "args_binding_hash": "264fcbb3bf26a976",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -248,7 +248,7 @@
       "failure_reasons": [
         "approval_invalid:approval_does_not_match_proposal"
       ],
-      "execution_id": "3051592e-dad7-4d86-a964-b4afc562bf36",
+      "execution_id": "a302f0fc-bfbb-48ec-912a-a419254b9931",
       "args_binding_hash": "feb390e7a9f6490a",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -264,7 +264,7 @@
       "failure_reasons": [
         "external_state_mismatch:audit='2026-11-20',external='2026-11-21'"
       ],
-      "execution_id": "29a7e10d-650d-4699-863f-002ec26b7ed8",
+      "execution_id": "e66759d1-182f-413d-8c78-670509eeda6e",
       "args_binding_hash": "7e3a565b1e334d13",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -280,7 +280,7 @@
       "failure_reasons": [
         "policy_denied:action_not_in_scope"
       ],
-      "execution_id": "66f2b55f-7a45-4d50-a5ef-d89f300933de",
+      "execution_id": "d34bcbcf-3e8d-43ed-b0ba-dcc3f51adac3",
       "args_binding_hash": "eb602c4fe3c7fb75",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -296,7 +296,7 @@
       "failure_reasons": [
         "policy_denied:action_not_in_scope"
       ],
-      "execution_id": "f5fe4776-55c7-45c1-8570-f5a62b12db49",
+      "execution_id": "9d7bdd18-91a0-4aca-802a-ec7a33eb8798",
       "args_binding_hash": "90ddf060727c2d9a",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -312,7 +312,7 @@
       "failure_reasons": [
         "policy_denied:action_not_in_scope"
       ],
-      "execution_id": "1a292bae-82f5-4472-9cd0-7d2a8b7851e8",
+      "execution_id": "0ee16607-d29b-400c-9241-8d4600926647",
       "args_binding_hash": "a82ea9e8108408ca",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -328,7 +328,7 @@
       "failure_reasons": [
         "capability_mismatch:tool='create_file'_requires='repo:write'_requested='repo:read'"
       ],
-      "execution_id": "740581b4-cdf0-4d0f-babd-15d270e4a176",
+      "execution_id": "7365fcb0-01be-4cbd-a676-aa7e4ea105d9",
       "args_binding_hash": "221e864a607d27be",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": true
@@ -344,7 +344,7 @@
       "failure_reasons": [
         "capability_mismatch:tool='request_deployment'_requires='deploy:production'_requested='repo:write'"
       ],
-      "execution_id": "49bc81c3-7fef-41eb-bc96-06a6891e55d0",
+      "execution_id": "78897326-5853-4bdc-bcbc-01662cde11ac",
       "args_binding_hash": "bbd0c89d6bf2e3aa",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": true
@@ -360,7 +360,7 @@
       "failure_reasons": [
         "policy_denied:unauthorized_principal"
       ],
-      "execution_id": "a25675e1-af9d-41e8-965d-c5cb69071e2e",
+      "execution_id": "39b1db50-f746-40fc-9694-3d3226b25e87",
       "args_binding_hash": "ab0ca926391bfc81",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -376,7 +376,7 @@
       "failure_reasons": [
         "policy_denied:unauthorized_principal"
       ],
-      "execution_id": "9c1255f7-7bb4-4157-a916-55be5b8358a2",
+      "execution_id": "64a56e62-b6b1-4b0c-9ec0-9730c2fc7f6e",
       "args_binding_hash": "d352e36b37f0d439",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -390,7 +390,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "5fe0b162-2e4c-4470-a15c-bba8ac3b0d08",
+      "execution_id": "426a1585-8569-46fd-bb62-43b992573b63",
       "args_binding_hash": "8a187401901bf3e0",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -406,7 +406,7 @@
       "failure_reasons": [
         "policy_denied:unauthorized_principal"
       ],
-      "execution_id": "4cfebf68-9291-4ee8-96f6-f423bbf5901a",
+      "execution_id": "7160b94a-3d98-46e1-b2dc-c4bdb56e5ca0",
       "args_binding_hash": "19728f91b6dd25b8",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -420,7 +420,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "bf636d7b-7c16-4960-9034-9d4a97f7d007",
+      "execution_id": "8e9312b8-d0d8-4c87-a540-e9662d39526a",
       "args_binding_hash": "19728f91b6dd25b8",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -436,7 +436,7 @@
       "failure_reasons": [
         "replay_detected"
       ],
-      "execution_id": "8c265524-a1d8-41b7-8f00-33ebea41fc87",
+      "execution_id": "bea62599-c229-457d-bbdd-5e0ebadc10d7",
       "args_binding_hash": "19728f91b6dd25b8",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -450,7 +450,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "e5b55bba-57ce-4ef8-aeba-9a8ebd923745",
+      "execution_id": "79941413-eb08-4514-9624-3c699e37d6be",
       "args_binding_hash": "0506839e08d7c909",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -464,7 +464,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "962ba4bb-efca-4806-9077-4a7c8e32fb0b",
+      "execution_id": "524a618d-dd5d-48bf-a444-19c36d83abd3",
       "args_binding_hash": "19728f91b6dd25b8",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -480,7 +480,7 @@
       "failure_reasons": [
         "policy_denied:action_not_in_scope"
       ],
-      "execution_id": "40888cda-525d-4334-9ce8-4160937dc65c",
+      "execution_id": "af423e82-b146-4add-9646-3496ade437ca",
       "args_binding_hash": "a82ea9e8108408ca",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -496,7 +496,7 @@
       "failure_reasons": [
         "approval_revoked_at_runtime:revoked_for_integration_test"
       ],
-      "execution_id": "bc3ecbf3-3fb7-4890-8b9d-a186951747ec",
+      "execution_id": "b9ea934c-b78a-4583-ab23-86bbc00cd018",
       "args_binding_hash": "ad2f79d18e503c59",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -512,7 +512,7 @@
       "failure_reasons": [
         "policy_denied:policy_expired"
       ],
-      "execution_id": "0e9d2fcd-e7a3-4818-bf30-ebfac7726869",
+      "execution_id": "836a9135-5af8-4287-91c1-963ca66b29a0",
       "args_binding_hash": "81b410e598509378",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -526,7 +526,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "7992c017-9a42-4e9d-bf50-f9007a604eda",
+      "execution_id": "dfcbdd33-558e-40c4-9109-30021839e8dc",
       "args_binding_hash": "bd974fc2381e27ae",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -542,9 +542,9 @@
       "failure_reasons": [
         "policy_denied:resource_not_in_scope"
       ],
-      "execution_id": "33750033-bbb9-4e35-b369-2aa46529b615",
+      "execution_id": "cf1263a9-ecb4-4403-9271-9fc7581aba70",
       "args_binding_hash": "c4788c9ee9840e44",
-      "enforcement_latency_ms": 0.1,
+      "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
     },
     {
@@ -558,9 +558,9 @@
       "failure_reasons": [
         "policy_denied:resource_not_in_scope"
       ],
-      "execution_id": "1b469f45-d850-4e64-b6d1-255e04364eec",
+      "execution_id": "4d851b5a-b0c8-43ba-88ee-161eaebce1e1",
       "args_binding_hash": "a59bae1b55b76a2f",
-      "enforcement_latency_ms": 0.1,
+      "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
     },
     {
@@ -572,7 +572,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "07145e47-93fa-4ddb-be72-d366ec0805ca",
+      "execution_id": "281c3516-0c2d-403e-ab39-f8b1cb5f7ff4",
       "args_binding_hash": "49f1c414ab450bc2",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -588,9 +588,9 @@
       "failure_reasons": [
         "policy_denied:action_not_in_scope"
       ],
-      "execution_id": "334f2af6-e6d0-4552-938b-11dd677b23b5",
+      "execution_id": "4f8a5d61-f312-4490-b19d-95ef5669d2cc",
       "args_binding_hash": "a82ea9e8108408ca",
-      "enforcement_latency_ms": 0.1,
+      "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
     },
     {
@@ -604,7 +604,7 @@
       "failure_reasons": [
         "policy_denied:unauthorized_principal"
       ],
-      "execution_id": "06be8bd7-7eaf-4b22-83e4-5462c77ffb31",
+      "execution_id": "f8cb0a9b-8749-4118-8e74-483f4c561719",
       "args_binding_hash": "8904f5e095cd5d0a",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -620,9 +620,9 @@
       "failure_reasons": [
         "policy_denied:action_not_in_scope"
       ],
-      "execution_id": "9478e024-0d90-4d4b-9d49-239b90abf3be",
+      "execution_id": "dd0bf4b9-d552-4ad8-819b-30167707f4e8",
       "args_binding_hash": "6dcf60181a510e88",
-      "enforcement_latency_ms": 0.1,
+      "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
     },
     {
@@ -634,7 +634,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "8eb6945f-e0da-4b31-9076-c78b75de92f4",
+      "execution_id": "4b1c400d-3ee5-4827-afbf-1fce5d5274eb",
       "args_binding_hash": "5c8a484f5412a3fe",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -648,7 +648,7 @@
       "correct": true,
       "decision": "allow",
       "failure_reasons": [],
-      "execution_id": "ecf36bea-f2f7-4b07-9491-06afa2dda468",
+      "execution_id": "a57a98bd-d35a-46d6-a883-70c9c384b24a",
       "args_binding_hash": "5f7f0117bc8d65b6",
       "enforcement_latency_ms": 0.1,
       "capability_mismatch": false
@@ -664,7 +664,7 @@
       "failure_reasons": [
         "replay_detected"
       ],
-      "execution_id": "e3e3c35e-29c2-4ed1-a0a8-c41e4655bec0",
+      "execution_id": "6f20c7e1-6098-458a-9a68-b7c0dcfee9e3",
       "args_binding_hash": "5f7f0117bc8d65b6",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -682,7 +682,7 @@
         "approval_invalid:approval_does_not_match_proposal",
         "external_state_value_missing"
       ],
-      "execution_id": "e7568452-ce4b-46ea-a7c6-75414679e025",
+      "execution_id": "a48f2b5f-fbbd-41be-ada0-0bb244188fbe",
       "args_binding_hash": "def9cbd195900dc3",
       "enforcement_latency_ms": 0.0,
       "capability_mismatch": false
@@ -690,316 +690,394 @@
   ],
   "execution_history": [
     {
-      "execution_id": "6e43efa0-e925-422c-aeaa-f909af022f7c",
+      "execution_id": "dcb416b2-2793-40a4-b483-093fe04d2a37",
       "tool_name": "read_repo_metadata",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "19728f91b6dd25b8"
+      "args_binding_hash": "19728f91b6dd25b8",
+      "block_reason": ""
     },
     {
-      "execution_id": "bf022d5f-abe0-45ef-b47d-80d15d490a01",
+      "execution_id": "79e46d53-36d5-491f-873e-a32226b181d9",
       "tool_name": "create_file",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "c97563b29209612c"
+      "args_binding_hash": "c97563b29209612c",
+      "block_reason": ""
     },
     {
-      "execution_id": "b69c8d28-0c13-41bd-bc72-84392309c557",
+      "execution_id": "ebec7f65-6bcb-4864-ba72-3bc58ad4a032",
       "tool_name": "open_pull_request",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "b3de2d8cd415629d"
+      "args_binding_hash": "b3de2d8cd415629d",
+      "block_reason": ""
     },
     {
-      "execution_id": "a44600c3-a3a3-4761-9577-485d646a0ada",
+      "execution_id": "3ebd1ed0-26e0-4245-81d4-38b2bc800b80",
       "tool_name": "modify_repo_settings",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "368b3cb3eebc6b3a"
+      "args_binding_hash": "368b3cb3eebc6b3a",
+      "block_reason": ""
     },
     {
-      "execution_id": "ca197505-fa57-4df7-b078-81eecadae394",
+      "execution_id": "fe553ed3-cc06-4420-bb29-d7ab36e330f6",
       "tool_name": "request_deployment",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "a82ea9e8108408ca"
+      "args_binding_hash": "a82ea9e8108408ca",
+      "block_reason": ""
     },
     {
-      "execution_id": "7f46e7bd-a532-467a-b3fe-8c150aa81b26",
+      "execution_id": "73ef332d-6716-4a9b-b41d-30afbbd204dd",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "f798b48db96ac4b4"
+      "args_binding_hash": "f798b48db96ac4b4",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "a6b0bf6e-b3d4-456f-89c9-9ee37186d035",
+      "execution_id": "b739c5ea-37a4-4a1c-9a68-607aea5e8410",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "f0724860fd543205"
+      "args_binding_hash": "f0724860fd543205",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "fd43a04b-c053-4981-a804-23958e7c70a1",
+      "execution_id": "2c31fb13-1cb4-41c1-83c3-48dec23e1b10",
       "tool_name": "open_pull_request",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "dd6da84774d164c3"
+      "args_binding_hash": "dd6da84774d164c3",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "9897ad38-2855-40a5-bb90-acec1b1cef4e",
+      "execution_id": "902b5057-4c8e-4a0e-b42f-63525b73a430",
       "tool_name": "request_deployment",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "184d67c961405fda"
+      "args_binding_hash": "184d67c961405fda",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "8ed9656a-0cc2-4738-ad84-144a9a53967f",
+      "execution_id": "4a36e837-fa08-4bf0-85e6-112c3b772016",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "264fcbb3bf26a976"
+      "args_binding_hash": "264fcbb3bf26a976",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "3051592e-dad7-4d86-a964-b4afc562bf36",
+      "execution_id": "a302f0fc-bfbb-48ec-912a-a419254b9931",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "feb390e7a9f6490a"
+      "args_binding_hash": "feb390e7a9f6490a",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "29a7e10d-650d-4699-863f-002ec26b7ed8",
+      "execution_id": "e66759d1-182f-413d-8c78-670509eeda6e",
       "tool_name": "open_pull_request",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "7e3a565b1e334d13"
+      "args_binding_hash": "7e3a565b1e334d13",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "66f2b55f-7a45-4d50-a5ef-d89f300933de",
+      "execution_id": "d34bcbcf-3e8d-43ed-b0ba-dcc3f51adac3",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "eb602c4fe3c7fb75"
+      "args_binding_hash": "eb602c4fe3c7fb75",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "f5fe4776-55c7-45c1-8570-f5a62b12db49",
+      "execution_id": "9d7bdd18-91a0-4aca-802a-ec7a33eb8798",
       "tool_name": "modify_repo_settings",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "90ddf060727c2d9a"
+      "args_binding_hash": "90ddf060727c2d9a",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "1a292bae-82f5-4472-9cd0-7d2a8b7851e8",
+      "execution_id": "0ee16607-d29b-400c-9241-8d4600926647",
       "tool_name": "request_deployment",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "a82ea9e8108408ca"
+      "args_binding_hash": "a82ea9e8108408ca",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "740581b4-cdf0-4d0f-babd-15d270e4a176",
+      "execution_id": "7365fcb0-01be-4cbd-a676-aa7e4ea105d9",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "221e864a607d27be"
+      "args_binding_hash": "221e864a607d27be",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "49bc81c3-7fef-41eb-bc96-06a6891e55d0",
+      "execution_id": "78897326-5853-4bdc-bcbc-01662cde11ac",
       "tool_name": "request_deployment",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "bbd0c89d6bf2e3aa"
+      "args_binding_hash": "bbd0c89d6bf2e3aa",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "a25675e1-af9d-41e8-965d-c5cb69071e2e",
+      "execution_id": "39b1db50-f746-40fc-9694-3d3226b25e87",
       "tool_name": "read_repo_metadata",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "beta-inc",
-      "args_binding_hash": "ab0ca926391bfc81"
+      "args_binding_hash": "ab0ca926391bfc81",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "9c1255f7-7bb4-4157-a916-55be5b8358a2",
+      "execution_id": "64a56e62-b6b1-4b0c-9ec0-9730c2fc7f6e",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "d352e36b37f0d439"
+      "args_binding_hash": "d352e36b37f0d439",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "5fe0b162-2e4c-4470-a15c-bba8ac3b0d08",
+      "execution_id": "426a1585-8569-46fd-bb62-43b992573b63",
       "tool_name": "create_file",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "beta-inc",
-      "args_binding_hash": "8a187401901bf3e0"
+      "args_binding_hash": "8a187401901bf3e0",
+      "block_reason": ""
     },
     {
-      "execution_id": "4cfebf68-9291-4ee8-96f6-f423bbf5901a",
+      "execution_id": "7160b94a-3d98-46e1-b2dc-c4bdb56e5ca0",
       "tool_name": "read_repo_metadata",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "19728f91b6dd25b8"
+      "args_binding_hash": "19728f91b6dd25b8",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "bf636d7b-7c16-4960-9034-9d4a97f7d007",
+      "execution_id": "8e9312b8-d0d8-4c87-a540-e9662d39526a",
       "tool_name": "read_repo_metadata",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "19728f91b6dd25b8"
+      "args_binding_hash": "19728f91b6dd25b8",
+      "block_reason": ""
     },
     {
-      "execution_id": "8c265524-a1d8-41b7-8f00-33ebea41fc87",
+      "execution_id": "bea62599-c229-457d-bbdd-5e0ebadc10d7",
       "tool_name": "read_repo_metadata",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "19728f91b6dd25b8"
+      "args_binding_hash": "19728f91b6dd25b8",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "e5b55bba-57ce-4ef8-aeba-9a8ebd923745",
+      "execution_id": "79941413-eb08-4514-9624-3c699e37d6be",
       "tool_name": "create_file",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "0506839e08d7c909"
+      "args_binding_hash": "0506839e08d7c909",
+      "block_reason": ""
     },
     {
-      "execution_id": "962ba4bb-efca-4806-9077-4a7c8e32fb0b",
+      "execution_id": "524a618d-dd5d-48bf-a444-19c36d83abd3",
       "tool_name": "read_repo_metadata",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "19728f91b6dd25b8"
+      "args_binding_hash": "19728f91b6dd25b8",
+      "block_reason": ""
     },
     {
-      "execution_id": "40888cda-525d-4334-9ce8-4160937dc65c",
+      "execution_id": "af423e82-b146-4add-9646-3496ade437ca",
       "tool_name": "request_deployment",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "a82ea9e8108408ca"
+      "args_binding_hash": "a82ea9e8108408ca",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "bc3ecbf3-3fb7-4890-8b9d-a186951747ec",
+      "execution_id": "b9ea934c-b78a-4583-ab23-86bbc00cd018",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "ad2f79d18e503c59"
+      "args_binding_hash": "ad2f79d18e503c59",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "0e9d2fcd-e7a3-4818-bf30-ebfac7726869",
+      "execution_id": "836a9135-5af8-4287-91c1-963ca66b29a0",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "81b410e598509378"
+      "args_binding_hash": "81b410e598509378",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "7992c017-9a42-4e9d-bf50-f9007a604eda",
+      "execution_id": "dfcbdd33-558e-40c4-9109-30021839e8dc",
       "tool_name": "read_repo_metadata",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "bd974fc2381e27ae"
+      "args_binding_hash": "bd974fc2381e27ae",
+      "block_reason": ""
     },
     {
-      "execution_id": "33750033-bbb9-4e35-b369-2aa46529b615",
+      "execution_id": "cf1263a9-ecb4-4403-9271-9fc7581aba70",
       "tool_name": "read_repo_metadata",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "c4788c9ee9840e44"
+      "args_binding_hash": "c4788c9ee9840e44",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "1b469f45-d850-4e64-b6d1-255e04364eec",
+      "execution_id": "4d851b5a-b0c8-43ba-88ee-161eaebce1e1",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "a59bae1b55b76a2f"
+      "args_binding_hash": "a59bae1b55b76a2f",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "07145e47-93fa-4ddb-be72-d366ec0805ca",
+      "execution_id": "281c3516-0c2d-403e-ab39-f8b1cb5f7ff4",
       "tool_name": "create_file",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "49f1c414ab450bc2"
+      "args_binding_hash": "49f1c414ab450bc2",
+      "block_reason": ""
     },
     {
-      "execution_id": "334f2af6-e6d0-4552-938b-11dd677b23b5",
+      "execution_id": "4f8a5d61-f312-4490-b19d-95ef5669d2cc",
       "tool_name": "request_deployment",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "a82ea9e8108408ca"
+      "args_binding_hash": "a82ea9e8108408ca",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "06be8bd7-7eaf-4b22-83e4-5462c77ffb31",
+      "execution_id": "f8cb0a9b-8749-4118-8e74-483f4c561719",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "beta-inc",
-      "args_binding_hash": "8904f5e095cd5d0a"
+      "args_binding_hash": "8904f5e095cd5d0a",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "9478e024-0d90-4d4b-9d49-239b90abf3be",
+      "execution_id": "dd0bf4b9-d552-4ad8-819b-30167707f4e8",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "6dcf60181a510e88"
+      "args_binding_hash": "6dcf60181a510e88",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "8eb6945f-e0da-4b31-9076-c78b75de92f4",
+      "execution_id": "4b1c400d-3ee5-4827-afbf-1fce5d5274eb",
       "tool_name": "create_file",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "5c8a484f5412a3fe"
+      "args_binding_hash": "5c8a484f5412a3fe",
+      "block_reason": ""
     },
     {
-      "execution_id": "ecf36bea-f2f7-4b07-9491-06afa2dda468",
+      "execution_id": "a57a98bd-d35a-46d6-a883-70c9c384b24a",
       "tool_name": "open_pull_request",
       "authorized": true,
+      "token_verified": true,
       "decision": "allow",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "5f7f0117bc8d65b6"
+      "args_binding_hash": "5f7f0117bc8d65b6",
+      "block_reason": ""
     },
     {
-      "execution_id": "e3e3c35e-29c2-4ed1-a0a8-c41e4655bec0",
+      "execution_id": "6f20c7e1-6098-458a-9a68-b7c0dcfee9e3",
       "tool_name": "open_pull_request",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "5f7f0117bc8d65b6"
+      "args_binding_hash": "5f7f0117bc8d65b6",
+      "block_reason": "no_execution_token"
     },
     {
-      "execution_id": "e7568452-ce4b-46ea-a7c6-75414679e025",
+      "execution_id": "a48f2b5f-fbbd-41be-ada0-0bb244188fbe",
       "tool_name": "create_file",
       "authorized": false,
+      "token_verified": false,
       "decision": "deny",
       "tenant_id": "alpha-corp",
-      "args_binding_hash": "def9cbd195900dc3"
+      "args_binding_hash": "def9cbd195900dc3",
+      "block_reason": "no_execution_token"
     }
   ]
 }

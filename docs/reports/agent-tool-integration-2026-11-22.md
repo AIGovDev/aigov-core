@@ -1,7 +1,7 @@
 # Agent-Tool Integration: Real Authorization Enforcement
 
-**Date:** 2026-11-22  
-**Branch:** `feat/agent-tool-integration`  
+**Date:** 2026-11-22 (Phase 1–5); hardening update 2026-11-22  
+**Branch:** `feat/agent-tool-hardening` (was `feat/agent-tool-integration`, PR #470)  
 **Depends on:** PR #452 (Condition I hardening, merged 2026-11-22)  
 **Dataset hash (integration scenarios):** `109def7478261bf9745d0d4caabe836748dba92ebda754cbfc03b2476acb6259`
 
@@ -13,35 +13,44 @@
      AI AGENT
          │  ToolRequest(tool_name, arguments, approval_id, action_type, ...)
          ▼
-┌────────────────────────────────────────────────────────────────┐
-│  ToolGateway                                                   │
-│                                                                │
-│  Step 1: deepcopy(arguments) → frozen_args  ← TOCTOU fix      │
-│  Step 2: capability map check (tool → required action_type)   │
-│  Step 3: build SandboxedDVOExecutor from dvo_state            │
-│  Step 4: ConditionIOrchestrator                               │
-│            └─ audit integrity                                  │
-│            └─ approval validity                                │
-│            └─ ReplayRegistry.try_consume()                     │
-│            └─ RevocationList.is_revoked()                      │
-│            └─ TrustedPolicyProvider.lookup_authorization()     │
-│            └─ external state consistency                       │
-│  Step 5: compute_policy_i_decision(evidence, model_verdict)   │
-│  Step 6: execute IFF decision == ALLOW (uses frozen_args)      │
-│  Step 7: SandboxedGitHubTools.execute() records all attempts  │
-└────────────────────────────────────────────────────────────────┘
-         │  ALLOW → executes tool, returns ToolExecutionResult
-         │  DENY / INDETERMINATE / REQUIRES_REVIEW → blocked
+┌──────────────────────────────────────────────────────────────────────┐
+│  ToolGateway                                                         │
+│                                                                      │
+│  Step 1: deepcopy(arguments) → frozen_args  ← TOCTOU protection     │
+│  Step 2: capability map check (tool → required action_type)         │
+│  Step 3: build SandboxedDVOExecutor from dvo_state                  │
+│  Step 4: ConditionIOrchestrator                                     │
+│            └─ audit integrity                                        │
+│            └─ approval validity                                      │
+│            └─ ReplayRegistry.try_consume()   ← single-process safe  │
+│            └─ RevocationList.is_revoked()                           │
+│            └─ TrustedPolicyProvider.lookup_authorization()          │
+│            └─ external state consistency                             │
+│  Step 5: compute_policy_i_decision(evidence, model_verdict)         │
+│  Step 6: IF ALLOW → pre-execution revocation check (second check)   │
+│  Step 7: IF ALLOW + not revoked → issue ExecutionToken (EAT)        │
+│           EAT binds: (execution_id, tool_name, args_hash,           │
+│                        action_type, resource_id, tenant_id)         │
+│           HMAC-SHA256 keyed with per-instance random 32-byte key    │
+│  Step 8: tools.execute(frozen_args, execution_token)                │
+└──────────────────────────────────────────────────────────────────────┘
+         │  ALLOW + EAT → tools verify token independently, execute
+         │  DENY / INDETERMINATE / REQUIRES_REVIEW → no token → blocked
          ▼
-┌──────────────────────────────────┐
-│  SandboxedGitHubTools            │
-│  (in-memory, no real API calls)  │
-│  - read_repo_metadata            │
-│  - create_file                   │
-│  - open_pull_request             │
-│  - modify_repo_settings          │
-│  - request_deployment            │
-└──────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  SandboxedGitHubTools                                            │
+│  (in-memory, no real API calls)                                  │
+│                                                                  │
+│  Verifies ExecutionToken independently before every execution:   │
+│    - HMAC signature against token_authority                      │
+│    - Token not expired (500ms max_age by default)                │
+│    - tool_name, args_binding_hash, action_type, resource_id,     │
+│      tenant_id all match the call                                │
+│  No token or bad token → blocked, never executes                 │
+│                                                                  │
+│  Operations: read_repo_metadata, create_file, open_pull_request, │
+│              modify_repo_settings, request_deployment            │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 **Trust boundary:**
@@ -51,8 +60,9 @@
 | frozen_args | YES | Deepcopied before authorization; execution uses the same copy |
 | ConditionIOrchestrator | YES | Deterministic DVO + policy checks |
 | TrustedPolicyProvider | YES | HMAC-verified records |
-| ReplayRegistry | YES | Atomic lock-based try_consume |
-| RevocationList | YES | Thread-safe with Lock |
+| ReplayRegistry | YES (single-process) | Atomic lock-based try_consume; NOT cross-process safe |
+| RevocationList | YES (single-process) | Thread-safe with Lock; NOT cross-process safe |
+| ExecutionToken | YES | HMAC-SHA256 keyed with per-instance random secret |
 | SandboxedDVOExecutor | YES (scenario-driven) | Provides test evidence to orchestrator |
 | model_verdict | ADVISORY | Can flag REQUIRES_REVIEW; cannot grant ALLOW |
 | tool_name, arguments | UNTRUSTED | Validated before any execution |
@@ -91,41 +101,71 @@
 
 ---
 
-## 4. Red-team methodology
+## 4. Red-team methodology (all phases)
 
-Phase 4 performed an adversarial review of the implementation immediately after Phase 1–2. The review searched for:
+### Phase 1 audit (independent, before hardening PR)
 
-- Authorization bypasses
-- Race conditions
-- Policy-source contamination
-- Replay vulnerabilities
-- Incorrect trust assumptions
+The audit searched for direct bypass paths, TOCTOU windows, replay vulnerabilities, and incorrect trust assumptions. Four confirmed issues were found.
 
-### Confirmed findings and fixes
+**BYPASS-1 — Direct tool invocation** (Severity: HIGH) ← **NEW finding**
+
+*Description*: `SandboxedGitHubTools.execute()` accepted `authorized: bool` from any caller. Code with access to the `tools` object could call `execute(authorized=True, ...)` to execute any operation without going through `ToolGateway` at all. No cryptographic binding between the authorization decision and the tool execution.
+
+*Fix*: `execute()` now requires an `ExecutionToken` issued by the gateway's `ExecutionTokenAuthority`. The token is HMAC-SHA256 keyed with a per-instance 32-byte random secret. The tools object holds the authority at construction time and verifies the token independently. Code without the authority cannot forge a valid token.
+
+*Tests*: `TestDirectInvocationBypass::test_tools_execute_without_token_blocked`, `test_tools_execute_with_forged_token_blocked`, `TestEATFieldBinding::test_token_wrong_*`
+
+**BYPASS-2 — Cross-process replay** (Severity: HIGH) ← **documented limitation, not fixed**
+
+*Description*: `ReplayRegistry` uses a `threading.Lock` and an in-memory `set`. It provides single-process atomicity only. In a multi-process deployment (e.g., multiple API workers), each process has its own registry. The same `approval_id` can be consumed by two processes simultaneously; neither detects a replay. `is_distributed_safe` returns `False`.
+
+*Status*: This is a production infrastructure gap, not a code defect in the single-process context. The behavior is documented and tested. A persistent distributed nonce store (Redis SETNX, PostgreSQL advisory lock) is required in production.
+
+*Test*: `TestCrossProcessReplay::test_process_restart_allows_replay` — verifies the replay SUCCEEDS with a new registry (simulating restart) and that `is_distributed_safe == False`.
+
+**BYPASS-3 — Post-authorization revocation window** (Severity: Medium) ← **NEW finding**
+
+*Description*: Revocation was checked inside `ConditionIOrchestrator.orchestrate()`. If an approval was added to `RevocationList` after orchestration completed but before `tools.execute()` was called (window ~0.1ms in-process), execution could proceed with a stale ALLOW decision.
+
+*Fix*: Added pre-execution revocation check (Step 6) in `gateway.request()`: immediately after the policy decision returns ALLOW and before the EAT is issued, `revocation_list.is_revoked()` is called again. If revoked at this point, decision flips to DENY and no token is issued.
+
+*Test*: `TestPreExecutionRevocation::test_revocation_after_orchestration_caught_by_pre_exec_check`
+
+**BUG-4 — Capability mismatch path used `req.arguments`** (Severity: Low) ← **NEW finding**
+
+*Description*: In the capability mismatch branch, the gateway recorded the blocked attempt using `req.arguments` (the original dict) instead of `frozen_args`. This meant the blocked record could diverge from the `args_binding_hash` if the caller had already mutated `req.arguments`.
+
+*Fix*: Changed the capability mismatch branch to pass `frozen_args` to `tools.execute()`.
+
+*Test*: `TestArgumentMutation::test_capability_mismatch_path_uses_frozen_args`
+
+---
+
+### Prior findings (from first red-team pass, Phase 1 initial)
 
 **Finding 1 — TOCTOU: mutable arguments dict** (Severity: Medium)
 
-*Description*: `ToolRequest.arguments` is a plain `dict`. If the caller (or a concurrent thread) mutated it after `gateway.request()` was called but before execution, the executed arguments could differ from the args_binding_hash. The hash would no longer match what actually ran.
+*Description*: `ToolRequest.arguments` is a plain `dict`. Caller mutation after `gateway.request()` was called could change what executes without changing the args_binding_hash.
 
-*Fix*: At the start of `gateway.request()`, before any check, the gateway calls `copy.deepcopy(req.arguments)` to produce `frozen_args`. All subsequent operations (hashing, execution) use `frozen_args`. Caller mutations to `req.arguments` after this point are silently ignored.
+*Fix*: `copy.deepcopy(req.arguments)` → `frozen_args` before any check.
 
 *Regression test*: `TestSecurityRegressions::test_regression_toctou_mutation_uses_frozen_args`
 
 **Finding 2 — Uncaught policy-service exception** (Severity: Medium)
 
-*Description*: If `ConditionIOrchestrator` or `TrustedPolicyProvider` raised an exception (e.g., due to a faulty or simulated-outage policy backend), the exception propagated through `gateway.request()` uncaught. This could crash the agent loop — a denial-of-service risk — and might leave execution state undefined.
+*Description*: Uncaught exception from `ConditionIOrchestrator` could crash the agent loop.
 
-*Fix*: `gateway.request()` wraps the entire orchestration + decision block in `try/except Exception`. Any exception returns `PolicyDecisionRecord.indeterminate(...)` with a `"policy_service_exception:..."` reason. The tool is never executed (fail-closed). The gateway always returns a `ToolExecutionResult` without raising.
+*Fix*: `try/except Exception` → `PolicyDecisionRecord.indeterminate(...)` → fail-closed.
 
 *Regression test*: `TestSecurityRegressions::test_regression_policy_outage_fails_closed`
 
-### Findings not confirmed
+### Findings not confirmed (all passes)
 
-**Check: model reasoning injection** — model_reasoning string is stored in the `PolicyDecisionRecord` for audit purposes only. It is never parsed by `compute_policy_i_decision()`. Injecting authorization commands into the reasoning string has no effect on the decision outcome. ✓
+**Model reasoning injection** — model_reasoning stored for audit only; never parsed by decision logic. ✓
 
-**Check: DVOScenarioState re-entrancy** — DVOScenarioState is read-only after construction. Multiple SandboxedDVOExecutors sharing the same state read it concurrently without race conditions. ✓
+**DVOScenarioState re-entrancy** — read-only after construction; concurrent reads safe. ✓
 
-**Check: ReplayRegistry thread safety** — 10 concurrent goroutines calling `try_consume()` on the same nonce result in exactly 1 True and 9 False, with no errors. The Lock in ReplayRegistry is effective. ✓
+**ReplayRegistry thread safety** — 10 concurrent threads, exactly 1 True per nonce, 0 errors. ✓
 
 ---
 
@@ -209,8 +249,9 @@ This is consistent with the Condition I adversarial holdout (FRR=0.000, 170 scen
 | Item | Severity | Description |
 |---|---|---|
 | In-process DVO executor | HIGH | Real deployment requires network calls to audit service, approval service, and state store |
-| In-memory ReplayRegistry | HIGH | Nonce store is per-process; restarting the gateway loses all consumed nonces (replay window re-opens) |
-| In-memory RevocationList | HIGH | Revocations lost on restart; must be persisted |
+| In-memory ReplayRegistry | HIGH | Nonce store is per-process (not distributed-safe). Cross-process replay not prevented. Use Redis SETNX / Postgres advisory lock |
+| In-memory RevocationList | HIGH | Revocations lost on restart; must be persisted and pushed to all workers |
+| EAT key per-process | HIGH | `ExecutionTokenAuthority` generates a fresh key on startup. After restart all previously-issued tokens are invalid (correct) but a cross-process gateway cannot share token verification. If the tool executor is a separate service, the authority key must be shared via KMS/secret store |
 | Static POLICY_FIXTURE | MEDIUM | Real policy store needs append-only signed log with version history |
 | No persistent execution log | MEDIUM | `SandboxedGitHubTools` history is in-memory; real audit requires durable immutable log |
 | Model advisory wired but not tested end-to-end | LOW | Scenarios use scripted `model_verdict`; real Qwen inference path tested in prior PR #452 |
@@ -218,7 +259,17 @@ This is consistent with the Condition I adversarial holdout (FRR=0.000, 170 scen
 | HSM key management | LOW | PolicyKeyProvider uses symmetric benchmark key; production needs KMS-backed signing |
 | No rate limiting | LOW | Gateway has no per-approval-id rate limit; DoS via many invalid requests possible |
 
-**Production readiness: NOT READY.** The enforcement mechanism is structurally sound and all security invariants hold in this evaluation. The blockers above are infrastructure gaps, not design flaws.
+**Production readiness: NOT READY.** The single-process enforcement mechanism is structurally sound; all security invariants hold within a single process. The HIGH blockers above are infrastructure gaps that must be addressed before multi-process deployment.
+
+### Locally-demonstrated vs distributed guarantees
+
+| Guarantee | In this evaluation | In production (multi-process) |
+|---|---|---|
+| No unauthorized tool execution | DEMONSTRATED (57 tests, 39 scenarios, FAR=0) | Requires distributed nonce store for replay safety |
+| Single-use approval semantics | DEMONSTRATED (single-process, threading.Lock) | NOT guaranteed without persistent nonce store |
+| Revocation freshness | DEMONSTRATED (pre-exec check closes window) | Requires push-based revocation propagation |
+| EAT forgery prevention | DEMONSTRATED (HMAC-SHA256, forged token test) | Requires shared KMS key if executor is separate service |
+| Arguments immutable after auth | DEMONSTRATED (deepcopy, TOCTOU regression test) | HOLDS in distributed context (EAT binds the hash) |
 
 ---
 
@@ -226,12 +277,15 @@ This is consistent with the Condition I adversarial holdout (FRR=0.000, 170 scen
 
 | File | Description |
 |---|---|
-| `benchmarks/agent-verification/sandboxed_tools.py` | DVOScenarioState, SandboxedDVOExecutor, SandboxedGitHubTools |
-| `benchmarks/agent-verification/tool_gateway.py` | ToolGateway, ToolRequest, ToolExecutionResult, TOOL_CAPABILITY_MAP |
-| `benchmarks/agent-verification/agent_integration_scenarios.py` | 39 frozen adversarial scenarios |
+| `benchmarks/agent-verification/execution_token.py` | ExecutionToken, ExecutionTokenAuthority (EAT mechanism) |
+| `benchmarks/agent-verification/sandboxed_tools.py` | DVOScenarioState, SandboxedDVOExecutor, SandboxedGitHubTools (EAT-verified) |
+| `benchmarks/agent-verification/tool_gateway.py` | ToolGateway (8-step), ToolRequest, ToolExecutionResult, TOOL_CAPABILITY_MAP |
+| `benchmarks/agent-verification/replay_protection.py` | ReplayRegistry with `is_distributed_safe` property |
+| `benchmarks/agent-verification/agent_integration_scenarios.py` | 39 frozen adversarial scenarios (unchanged) |
 | `benchmarks/agent-verification/run_agent_integration.py` | Evaluation CLI runner |
-| `benchmarks/agent-verification/results_agent_integration.json` | Full execution trace |
-| `python/tests/test_agent_integration.py` | 36 security-invariant unit tests |
+| `benchmarks/agent-verification/results_agent_integration.json` | Full execution trace (hardened gateway run) |
+| `python/tests/test_agent_integration.py` | 36 security-invariant unit tests (updated for EAT) |
+| `python/tests/test_adversarial_execution.py` | 21 adversarial execution tests (Phase 3) |
 
 ---
 
@@ -257,19 +311,21 @@ uv run --with pytest python -m pytest python/tests/test_agent_integration.py -v
 
 ## Evaluation gate
 
-- [x] 39 scenarios across 10 attack categories; dataset hash `109def7478261bf9...` (frozen)
+- [x] 39 scenarios across 10 attack categories; dataset hash `109def7478261bf9...` (frozen, not modified after results)
 - [x] Policy fixture defined before scenarios; `should_execute` derived from policy, not labels
 - [x] **Unauthorized operations executed: 0** (FAR=0.000)
 - [x] Authorized operations blocked: 0 (FRR=0.000)
-- [x] 36 unit tests pass: capability map, legitimate ops, deny enforcement, replay, concurrency, security regressions
-- [x] Two red-team vulnerabilities found (TOCTOU mutation, policy outage escape) and fixed
-- [x] Regression tests added for both fixes
+- [x] 57 unit tests pass: 36 security-invariant + 21 adversarial execution
+- [x] 4 confirmed vulnerabilities found and addressed (BYPASS-1 fixed, BYPASS-2 documented+tested, BYPASS-3 fixed, BUG-4 fixed)
+- [x] Regression tests added for all 4 issues
 - [x] Concurrent 10-thread test: exactly 1 execution per approval_id, 0 races
+- [x] Cross-process replay DEMONSTRATED (not silently claimed safe) — `is_distributed_safe == False`
+- [x] Direct bypass attack DEMONSTRATED + BLOCKED (forged token test)
 - [x] No real GitHub API calls or production deployments made
 - [x] No production data modified
 
-**Evaluation verdict: PASS.**  
-AIGov prevents unauthorized real tool execution without blocking legitimate operations in this evaluation. Zero unauthorized executions across all 10 attack categories including prompt injection, privilege escalation, cross-tenant, replay, revocation, confused-deputy, and concurrency.
+**Evaluation verdict: PASS (single-process).**  
+AIGov prevents unauthorized real tool execution within a single process. Zero unauthorized executions across all 10 attack categories plus all Phase 3 adversarial scenarios. Cross-process replay safety requires a persistent nonce store (documented production blocker).
 
 ---
 

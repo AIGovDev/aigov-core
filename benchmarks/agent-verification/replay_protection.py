@@ -108,3 +108,21 @@ class ReplayRegistry:
         """Number of consumed nonces in this registry."""
         with self._lock:
             return len(self._consumed)
+
+    @property
+    def is_distributed_safe(self) -> bool:
+        """
+        False. This registry uses threading.Lock and an in-memory set.
+
+        Single-process atomicity is guaranteed: two threads calling try_consume()
+        with the same nonce produce exactly one True and one False.
+
+        Cross-process atomicity is NOT guaranteed: two separate processes each
+        have their own registry. The same approval_id can be consumed by both
+        processes simultaneously, and neither detects the replay.
+
+        Production deployments MUST replace this with a persistent, distributed-
+        atomic nonce store (e.g. Redis SETNX, PostgreSQL advisory lock, or a
+        dedicated approval-service with transactional nonce consumption).
+        """
+        return False

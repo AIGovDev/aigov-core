@@ -25,6 +25,7 @@ _BENCH = Path(__file__).parent.parent.parent / "benchmarks" / "agent-verificatio
 sys.path.insert(0, str(_BENCH))
 
 from agent_integration_scenarios import POLICY_FIXTURE, _NOW  # noqa: E402
+from execution_token import ExecutionTokenAuthority  # noqa: E402
 from policy_decision import PolicyDecision  # noqa: E402
 from replay_protection import ApprovalNonce, ReplayRegistry  # noqa: E402
 from revocation_list import RevocationList  # noqa: E402
@@ -481,48 +482,61 @@ class TestSecurityRegressions:
 
 
 class TestSandboxedTools:
-    def test_unauthorized_execution_not_stored(self) -> None:
-        """Blocked operations are recorded in history but do not modify repo state."""
-        tools = SandboxedGitHubTools()
+    def test_no_token_blocked(self) -> None:
+        """Call without token → blocked; recorded in history but no repo mutation."""
+        authority = ExecutionTokenAuthority()
+        tools = SandboxedGitHubTools(token_authority=authority)
+        args_hash = compute_args_binding_hash("create_file", {"repo_id": "t1/r1", "path": "evil.txt"}, "repo:write", "t1/r1")
         tools.execute(
             tool_name="create_file",
             arguments={"repo_id": "t1/r1", "path": "evil.txt", "content": "pwned"},
             execution_id="x",
-            authorized=False,
-            decision="deny",
             tenant_id="t1",
-            args_binding_hash="abc",
+            args_binding_hash=args_hash,
+            execution_token=None,
         )
-        # History captures the attempt
         assert len(tools.execution_history()) == 1
-        # But no repo was modified
+        assert not tools.execution_history()[0].authorized
         assert ("t1", "t1/r1") not in tools._repos
 
-    def test_authorized_execution_modifies_state(self) -> None:
-        tools = SandboxedGitHubTools()
+    def test_valid_token_executes(self) -> None:
+        """Valid EAT from same authority → execution proceeds."""
+        authority = ExecutionTokenAuthority()
+        tools = SandboxedGitHubTools(token_authority=authority)
+        args_hash = compute_args_binding_hash("create_file", {"repo_id": "t1/r1", "path": "good.txt"}, "repo:write", "t1/r1")
+        token = authority.issue(
+            execution_id="y", tool_name="create_file",
+            args_binding_hash=args_hash, action_type="repo:write",
+            resource_id="t1/r1", tenant_id="t1",
+        )
         tools.execute(
             tool_name="create_file",
             arguments={"repo_id": "t1/r1", "path": "good.txt", "content": "ok"},
             execution_id="y",
-            authorized=True,
-            decision="allow",
             tenant_id="t1",
-            args_binding_hash="def",
+            args_binding_hash=args_hash,
+            execution_token=token,
         )
         assert len(tools.authorized_executions()) == 1
         assert ("t1", "t1/r1") in tools._repos
         assert "good.txt" in tools._repos[("t1", "t1/r1")]["files"]
 
     def test_reset_clears_all_state(self) -> None:
-        tools = SandboxedGitHubTools()
+        authority = ExecutionTokenAuthority()
+        tools = SandboxedGitHubTools(token_authority=authority)
+        args_hash = compute_args_binding_hash("create_file", {"repo_id": "r", "path": "f"}, "repo:write", "r")
+        token = authority.issue("z", "create_file", args_hash, "repo:write", "r", "t")
         tools.execute("create_file", {"repo_id": "r", "path": "f"},
-                      "z", True, "allow", "t", "hash")
+                      "z", "t", args_hash, token)
         tools.reset()
         assert len(tools.execution_history()) == 0
         assert len(tools._repos) == 0
 
     def test_all_operations_recorded(self) -> None:
-        tools = SandboxedGitHubTools()
+        """All 5 tool types are recorded; blocked attempts count too."""
+        authority = ExecutionTokenAuthority()
+        tools = SandboxedGitHubTools(token_authority=authority)
+        # Submit 5 blocked attempts (no tokens)
         ops = [
             ("read_repo_metadata", {"repo_id": "r"}),
             ("create_file", {"repo_id": "r", "path": "f"}),
@@ -531,7 +545,9 @@ class TestSandboxedTools:
             ("request_deployment", {"repo_id": "r", "environment": "staging"}),
         ]
         for i, (name, args) in enumerate(ops):
-            tools.execute(name, args, str(i), True, "allow", "tenant", "h")
+            tools.execute(name, args, str(i), "tenant",
+                          compute_args_binding_hash(name, args, "repo:read", "r"),
+                          execution_token=None)
         assert len(tools.execution_history()) == 5
 
 

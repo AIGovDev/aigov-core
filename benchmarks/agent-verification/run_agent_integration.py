@@ -249,9 +249,11 @@ def main() -> None:
                 "execution_id": r.execution_id,
                 "tool_name": r.tool_name,
                 "authorized": r.authorized,
+                "token_verified": r.token_verified,
                 "decision": r.decision,
                 "tenant_id": r.tenant_id,
                 "args_binding_hash": r.args_binding_hash,
+                "block_reason": r.block_reason,
             }
             for r in tools.execution_history()
         ],
