@@ -29,3 +29,5 @@ jobs:
           echo CARGO_LOCK_BEGIN
           base64 -w512 Cargo.lock | sed 's/^/LOCKDATA:/'
           echo CARGO_LOCK_END
+
+# Retry after restoring previously truncated S3 Cargo.lock
