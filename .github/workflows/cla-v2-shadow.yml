@@ -14,7 +14,7 @@ permissions: {}
 
 jobs:
   cla-v2-tests:
-    name: CLA v2 unit tests (not a required status)
+    name: CLA unit tests (not a required status)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
