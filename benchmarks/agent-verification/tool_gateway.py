@@ -7,22 +7,25 @@ Security invariants:
   2. Authorization and execution are atomic within a single request() call.
      There is no window between authorization and execution where arguments
      can be changed (TOCTOU protection via deepcopy at step 1).
-  3. Each approval is consumed atomically via ReplayRegistry. Concurrent calls
-     with the same approval_id are serialized; the second call finds the nonce
-     already consumed → DENY.
-     LIMITATION: ReplayRegistry is in-memory per-process. Across multiple worker
-     processes, replay atomicity is not guaranteed. Use a persistent distributed
-     nonce store (e.g. Redis SETNX, PostgreSQL FOR UPDATE) in production.
+  3. Each approval is consumed atomically via ReplayRegistry. Single-process
+     safety is guaranteed by threading.Lock. Cross-process / distributed
+     safety requires a SqlNonceStore("postgresql", ...) backend injected into
+     the registry (registry.is_distributed_safe must be True in production).
   4. The gateway enforces the tool→action_type capability map. An agent cannot
      invoke modify_repo_settings with action_type="repo:read" to downgrade the
      required authorization.
   5. Policy-service outage (INDETERMINATE) fails closed → no execution.
   6. After ALLOW, a pre-execution revocation check re-examines the RevocationList
      immediately before token issuance. This closes the authorization→execution
-     window for single-process deployments.
+     window for single-process deployments. Distributed freshness requires a
+     SqlRevocationStore backed by the same database.
   7. An ExecutionAuthorizationToken (EAT) is issued after ALLOW and the pre-exec
      revocation check. SandboxedGitHubTools.execute() verifies the EAT
      independently. Code that bypasses ToolGateway cannot forge a valid EAT.
+  8. EAT signing uses a KeyProvider. InMemoryKeyProvider is generated per-process
+     (acceptable for single-process deployments). Multi-process deployments MUST
+     share a KMS-backed provider so all workers can verify each other's tokens.
+     ToolGateway logs a RuntimeWarning if the provider is not managed.
 
 Trust boundary:
   TRUSTED:  PolicyDecisionRecord with decision=ALLOW (after Condition I checks)
@@ -179,6 +182,13 @@ class ToolGateway:
             token_authority = ExecutionTokenAuthority()
         self._token_authority = token_authority
         self._tools._token_authority = token_authority
+
+        # Warn if the signing key is not managed (InMemoryKeyProvider in production).
+        try:
+            from key_provider import warn_if_unmanaged
+            warn_if_unmanaged(token_authority.key_provider)
+        except (ImportError, AttributeError):
+            pass
 
     def request(self, req: ToolRequest) -> ToolExecutionResult:
         """
