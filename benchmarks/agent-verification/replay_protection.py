@@ -2,20 +2,37 @@
 Replay protection for Condition I authorization.
 
 ApprovalNonce binds an approval to its full execution context.
-ReplayRegistry provides atomic, thread-safe check-and-consume semantics.
+ReplayRegistry provides atomic, thread-safe check-and-consume semantics,
+delegating to a pluggable NonceStore backend.
+
+Default backend: InMemoryNonceStore — single-process only, for tests.
+Production backend: SqlNonceStore("postgresql", dsn=...) — distributed-safe.
+
+Usage:
+    # Test (default)
+    registry = ReplayRegistry()
+
+    # Production (PostgreSQL)
+    from nonce_store import SqlNonceStore
+    store = SqlNonceStore("postgresql", dsn=os.environ["DATABASE_URL"])
+    registry = ReplayRegistry(backend=store)
+    gateway = ToolGateway(..., replay_registry=registry)
 
 Security invariant:
   A nonce is considered consumed on first successful try_consume().
   Any subsequent try_consume() with the same composite key returns False.
-  The registry is per-instance; benchmarks should create one per run.
+  Distributed safety depends on the backend: check is_distributed_safe.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import threading
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from nonce_store import InMemoryNonceStore, SqlNonceStore
 
 
 @dataclass(frozen=True)
@@ -58,24 +75,24 @@ class ApprovalNonce:
 
 class ReplayRegistry:
     """
-    In-memory per-instance replay registry.
+    Approval-nonce registry backed by a pluggable NonceStore.
 
-    Provides atomic check-and-consume semantics: try_consume() checks and
-    marks a nonce as consumed in one operation under a mutex.
+    The ConditionIOrchestrator calls try_consume(nonce: ApprovalNonce).
+    The registry converts the nonce to its canonical string and delegates
+    to the backend NonceStore.
 
-    Thread-safety: a threading.Lock guards all state mutations. Two concurrent
-    try_consume() calls with the same nonce will result in exactly one True
-    return and one False return.
+    Default backend is InMemoryNonceStore (not distributed-safe; for tests).
+    For production, inject a SqlNonceStore("postgresql", dsn=...) backend.
 
-    Lifecycle:
-      - Create one registry per benchmark run (not per scenario) to catch
-        cross-scenario replays.
-      - Call reset() between runs when test isolation is needed.
+    Thread-safety: guaranteed by the backend.
+    Distributed safety: reported by backend.is_distributed_safe.
     """
 
-    def __init__(self) -> None:
-        self._consumed: set[str] = set()
-        self._lock = threading.Lock()
+    def __init__(self, backend=None) -> None:  # backend: NonceStore | None
+        if backend is None:
+            from nonce_store import InMemoryNonceStore
+            backend = InMemoryNonceStore()
+        self._backend = backend
 
     def try_consume(self, nonce: ApprovalNonce) -> bool:
         """
@@ -83,28 +100,35 @@ class ReplayRegistry:
 
         Returns True if the nonce was not previously consumed (first use).
         Returns False if the nonce was already consumed (replay detected).
-        Thread-safe.
+        Thread-safe (and cross-process safe if backend.is_distributed_safe).
         """
-        key = nonce.as_string()
-        with self._lock:
-            if key in self._consumed:
-                return False
-            self._consumed.add(key)
-            return True
+        return self._backend.try_consume(nonce.as_string())
 
     def is_consumed(self, nonce: ApprovalNonce) -> bool:
         """Check whether the nonce has been consumed, without consuming it."""
-        key = nonce.as_string()
-        with self._lock:
-            return key in self._consumed
+        return self._backend.is_consumed(nonce.as_string())
 
     def reset(self) -> None:
         """Clear all consumed nonces. Use for test isolation between runs."""
-        with self._lock:
-            self._consumed.clear()
+        self._backend.reset()
 
     @property
     def consumed_count(self) -> int:
-        """Number of consumed nonces in this registry."""
-        with self._lock:
-            return len(self._consumed)
+        """Number of consumed nonces (may not be supported by all backends)."""
+        count = getattr(self._backend, "consumed_count", None)
+        if count is None:
+            raise AttributeError(
+                f"Backend {type(self._backend).__name__} does not expose consumed_count"
+            )
+        return count
+
+    @property
+    def is_distributed_safe(self) -> bool:
+        """
+        True iff the backend provides cross-process / cross-host atomicity.
+
+        False means the same nonce can be consumed multiple times if two
+        separate processes each have their own backend instance. Production
+        deployments MUST use a SqlNonceStore("postgresql", ...) backend.
+        """
+        return self._backend.is_distributed_safe

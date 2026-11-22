@@ -12,6 +12,12 @@ Security design note:
   SandboxedDVOExecutor is NOT the same as SandboxedGitHubTools. The DVO layer
   verifies the authorization context (audit records, approvals) independently of
   the tool that the agent wants to execute. ToolGateway wires both together.
+
+Authorization design note:
+  SandboxedGitHubTools.execute() requires a valid ExecutionToken issued by the
+  gateway's ExecutionTokenAuthority. This prevents direct invocation bypass:
+  code that calls execute() without going through ToolGateway cannot produce a
+  token that verifies against the authority held by the tools object.
 """
 
 from __future__ import annotations
@@ -22,7 +28,10 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from execution_token import ExecutionToken, ExecutionTokenAuthority
 
 # ---------------------------------------------------------------------------
 # DVO sandbox — drives ConditionIOrchestrator's evidence checks
@@ -127,11 +136,13 @@ class ToolExecutionRecord:
     execution_id: str
     tool_name: str
     arguments: dict[str, Any]
-    authorized: bool
-    decision: str  # ALLOW / DENY / INDETERMINATE / REQUIRES_REVIEW
+    authorized: bool        # True iff ExecutionToken verified; False for all blocked attempts
+    token_verified: bool    # mirrors authorized; explicit field for audit clarity
+    decision: str           # ALLOW / DENY / INDETERMINATE / REQUIRES_REVIEW / blocked_no_token
     tenant_id: str
     args_binding_hash: str
     executed_at: float
+    block_reason: str = ""  # populated when authorized=False; empty on success
 
 
 class SandboxedGitHubTools:
@@ -144,6 +155,12 @@ class SandboxedGitHubTools:
     evaluation can verify that unauthorized operations never actually ran.
 
     Thread-safe: a lock serializes all state mutations.
+
+    Authorization model:
+      execute() requires a valid ExecutionToken from this tools object's
+      token_authority. Code that calls execute() without a valid token
+      (including code that bypasses ToolGateway entirely) cannot produce
+      a token that verifies, and the call is treated as blocked.
     """
 
     SUPPORTED_TOOLS = frozenset({
@@ -154,8 +171,14 @@ class SandboxedGitHubTools:
         "request_deployment",
     })
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        token_authority: "ExecutionTokenAuthority | None" = None,
+        audit_store: "Any | None" = None,
+    ) -> None:
         self._lock = threading.Lock()
+        self._token_authority: ExecutionTokenAuthority | None = token_authority
+        self._audit_store = audit_store  # SqlAuditStore | None; optional persistent audit
         # Repo state keyed by (tenant_id, repo_id)
         self._repos: dict[tuple[str, str], dict[str, Any]] = {}
         # Execution history — includes both authorized executions and blocked attempts
@@ -166,39 +189,92 @@ class SandboxedGitHubTools:
         tool_name: str,
         arguments: dict[str, Any],
         execution_id: str,
-        authorized: bool,
-        decision: str,
         tenant_id: str,
         args_binding_hash: str,
+        execution_token: "ExecutionToken | None" = None,
+        # Caller-supplied decision label for audit trail (e.g. "deny", "indeterminate")
+        # Ignored when deciding whether to execute; only the token governs that.
+        decision_label: str = "",
     ) -> dict[str, Any]:
         """
         Execute a tool operation.
 
-        ONLY actually performs the operation when authorized=True.
-        Always records the attempt to history.
+        Authorization is determined by verifying execution_token against
+        this instance's token_authority. The caller-supplied boolean
+        is NOT trusted. Only a token issued by the same authority as this
+        tools object was constructed with authorizes actual execution.
+
+        ONLY actually performs the operation when the token is present and
+        verifies. Always records the attempt to history regardless of outcome.
 
         Returns:
           {"success": bool, "execution_id": str, "data": ..., "blocked_reason": str|None}
         """
+        from execution_token import ExecutionToken, ExecutionTokenAuthority  # avoid circular
+
+        # Determine authorization via token verification, NOT from a caller-supplied bool
+        authorized = False
+        block_reason = "no_execution_token"
+
+        if execution_token is not None and self._token_authority is not None:
+            ok, reason = self._token_authority.verify_for_execution(
+                token=execution_token,
+                expected_tool_name=tool_name,
+                expected_args_binding_hash=args_binding_hash,
+                expected_action_type=execution_token.action_type,
+                expected_resource_id=execution_token.resource_id,
+                expected_tenant_id=tenant_id,
+                expected_execution_id=execution_id,
+            )
+            if ok:
+                authorized = True
+                block_reason = ""
+            else:
+                block_reason = reason
+        elif execution_token is not None and self._token_authority is None:
+            block_reason = "no_token_authority_configured"
+        # else: execution_token is None → "no_execution_token"
+
+        effective_decision = decision_label if decision_label else ("allow" if authorized else "blocked_no_valid_token")
+
         record = ToolExecutionRecord(
             execution_id=execution_id,
             tool_name=tool_name,
             arguments=arguments,
             authorized=authorized,
-            decision=decision,
+            token_verified=authorized,
+            decision=effective_decision,
             tenant_id=tenant_id,
             args_binding_hash=args_binding_hash,
             executed_at=time.time(),
+            block_reason=block_reason,
         )
         with self._lock:
             self._history.append(record)
+            # Write to persistent audit store if configured.
+            # This commit is SEPARATE from the nonce-consumption commit.
+            # See sql_audit_store.py module docstring for the atomicity gap.
+            if self._audit_store is not None:
+                key_id = execution_token.key_id if execution_token is not None else None
+                self._audit_store.record(
+                    execution_id=execution_id,
+                    tenant_id=tenant_id,
+                    tool_name=tool_name,
+                    action_type=execution_token.action_type if execution_token else "",
+                    resource_id=execution_token.resource_id if execution_token else "",
+                    args_binding_hash=args_binding_hash,
+                    key_id=key_id,
+                    decision=effective_decision,
+                    authorized=authorized,
+                    block_reason=block_reason or None,
+                )
 
             if not authorized:
                 return {
                     "success": False,
                     "execution_id": execution_id,
                     "data": None,
-                    "blocked_reason": decision,
+                    "blocked_reason": block_reason or effective_decision,
                 }
 
             if tool_name not in self.SUPPORTED_TOOLS:
@@ -347,4 +423,4 @@ def compute_args_binding_hash(tool_name: str, arguments: dict[str, Any],
         "action_type": action_type,
         "resource_id": resource_id,
     }, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+    return hashlib.sha256(payload.encode()).hexdigest()
