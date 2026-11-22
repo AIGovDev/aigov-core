@@ -46,8 +46,6 @@ from replay_protection import ReplayRegistry
 from revocation_list import RevocationList
 from trusted_policy_provider import make_policy_record, TrustedPolicyProvider
 
-import time as _time
-
 _NOW  = 1_700_000_000.0
 _VALID_FROM  = _NOW - 86_400
 _VALID_UNTIL = _NOW + 86_400
@@ -511,6 +509,245 @@ def test_t10_expired_eat_denied():
         assert rec.content == "auth but expired"
     else:
         pytest.skip("ExecutionTokenAuthority does not expose max_age_ns for patching")
+
+
+# ---------------------------------------------------------------------------
+# S1: Action-type downgrade attack via direct gateway call (HIGH)
+# ---------------------------------------------------------------------------
+
+def test_s1_action_type_downgrade_blocked_by_gateway():
+    """
+    FINDING-S1 (HIGH): TOOL_CAPABILITY_MAP previously excluded document tools,
+    allowing delete_document to be called with action_type='document:read'.
+    The gateway's step-2 capability check would skip the enforcement (None lookup),
+    and the read policy would authorize the deletion.
+
+    After fix: document tools are in TOOL_CAPABILITY_MAP. The gateway now rejects
+    the downgraded action_type at step 2, returning capability_mismatch.
+
+    Regression test: calling ToolGateway.request() directly with the wrong
+    action_type must be blocked and must NOT delete the document.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent / "agent-verification"))
+    from tool_gateway import ToolGateway, ToolRequest
+    from replay_protection import ReplayRegistry
+    from revocation_list import RevocationList
+    from sandboxed_tools import DVOScenarioState
+    from aigov_sdk_adapter import SandboxedDocumentTools
+
+    tmp = tempfile.NamedTemporaryFile(suffix="s1.sqlite", delete=False)
+    tmp.close()
+    store_s1 = DocumentStore(tmp.name)
+    store_s1.seed("secret", "tenant-A", "sensitive content")
+
+    sandboxed_s1 = SandboxedDocumentTools(store_s1)
+
+    policy_for_s1 = [
+        make_policy_record(
+            policy_id="S1-READ", version=1, tenant_id="tenant-A",
+            authorized_principals=["alice@example.com"],
+            allowed_action_types=["document:read"],
+            allowed_resource_patterns=["tenant-A/*"],
+            valid_from=_VALID_FROM, valid_until=_VALID_UNTIL,
+        ),
+        make_policy_record(
+            policy_id="S1-DELETE", version=1, tenant_id="tenant-A",
+            authorized_principals=["alice@example.com"],
+            allowed_action_types=["document:delete"],
+            allowed_resource_patterns=["tenant-A/*"],
+            valid_from=_VALID_FROM, valid_until=_VALID_UNTIL,
+        ),
+    ]
+    gw_s1 = ToolGateway(
+        policy_provider=TrustedPolicyProvider(policy_for_s1),
+        tools=sandboxed_s1,
+        replay_registry=ReplayRegistry(),
+        revocation_list=RevocationList(),
+        current_time=_NOW,
+    )
+
+    # Attack: delete_document with downgraded action_type="document:read"
+    req = ToolRequest(
+        tool_name="delete_document",
+        arguments={"doc_id": "secret"},
+        proposal_id="prop-attack",
+        approval_id="appr-attack",
+        record_id="rec-attack",
+        action_type="document:read",        # DOWNGRADED — should be document:delete
+        resource_id="tenant-A/secret",
+        tenant_id="tenant-A",
+        dvo_state=DVOScenarioState(
+            proposal_id="prop-attack",
+            approval_id="appr-attack",
+            record_id="rec-attack",
+            approver_email="alice@example.com",
+            audit_found=True,
+            audit_hash_verified=True,
+            audit_executed_value=None,
+            approval_active=True,
+            approval_matches_proposal=True,
+            external_state_value="approved",
+        ),
+        model_verdict=True,
+    )
+    result = gw_s1.request(req)
+
+    # After fix: gateway's TOOL_CAPABILITY_MAP knows delete_document requires
+    # document:delete and rejects the mismatched document:read.
+    assert not result.executed, (
+        f"CRITICAL: delete executed under document:read policy! "
+        f"decision={result.decision_record.decision}, executed={result.executed}"
+    )
+    assert result.capability_mismatch, "Expected capability_mismatch flag"
+    # Document must be unmodified
+    assert store_s1.read("secret", "tenant-A") is not None, \
+        "Document was deleted — action_type downgrade attack succeeded!"
+    assert store_s1.read("secret", "tenant-A").content == "sensitive content"
+
+
+def test_s2_action_type_mismatch_blocked_in_execute():
+    """
+    FINDING-S2 (MEDIUM): SandboxedDocumentTools had TOOL_ACTION_TYPES defined
+    but not enforced in execute(). After fix, execute() checks that
+    expected_action_type matches the tool's required type. This provides
+    defense-in-depth even if the gateway's capability map check is bypassed.
+    """
+    from aigov_sdk_adapter import SandboxedDocumentTools
+    from execution_token import ExecutionTokenAuthority
+
+    tmp = tempfile.NamedTemporaryFile(suffix="s2.sqlite", delete=False)
+    tmp.close()
+    store_s2 = DocumentStore(tmp.name)
+    store_s2.seed("classified", "tenant-A", "classified data")
+
+    sdt = SandboxedDocumentTools(store_s2)
+    authority = ExecutionTokenAuthority()
+    sdt._token_authority = authority
+
+    # Issue a valid token for delete_document with the WRONG action_type
+    # (simulating what the gateway would issue if the capability check were bypassed)
+    exec_id = str(uuid.uuid4())
+    args = {"doc_id": "classified"}
+    from sandboxed_tools import compute_args_binding_hash
+    binding_hash = compute_args_binding_hash(
+        tool_name="delete_document",
+        arguments=args,
+        action_type="document:read",        # wrong
+        resource_id="tenant-A/classified",
+    )
+    token = authority.issue(
+        execution_id=exec_id,
+        tool_name="delete_document",
+        args_binding_hash=binding_hash,
+        action_type="document:read",        # wrong action_type
+        resource_id="tenant-A/classified",
+        tenant_id="tenant-A",
+    )
+
+    result = sdt.execute(
+        tool_name="delete_document",
+        arguments=args,
+        execution_id=exec_id,
+        tenant_id="tenant-A",
+        args_binding_hash=binding_hash,
+        execution_token=token,
+        expected_action_type="document:read",   # propagated wrong type
+        expected_resource_id="tenant-A/classified",
+    )
+
+    # Defense-in-depth: execute() rejects the action_type mismatch
+    assert not result["success"], "Delete should be blocked by action_type mismatch check"
+    assert "action_type_mismatch" in result.get("blocked_reason", ""), \
+        f"Expected action_type_mismatch in {result}"
+    # Document must be unmodified
+    assert store_s2.read("classified", "tenant-A") is not None
+    assert store_s2.read("classified", "tenant-A").content == "classified data"
+
+
+def test_s3_direct_execute_no_token_blocked():
+    """
+    Fail-closed: calling SandboxedDocumentTools.execute() directly without a
+    token (bypassing the gateway entirely) must not execute any side effect.
+    """
+    from aigov_sdk_adapter import SandboxedDocumentTools
+
+    tmp = tempfile.NamedTemporaryFile(suffix="s3.sqlite", delete=False)
+    tmp.close()
+    store_s3 = DocumentStore(tmp.name)
+    store_s3.seed("bypass-target", "tenant-A", "content")
+
+    sdt = SandboxedDocumentTools(store_s3)
+    # No _token_authority installed, no token passed
+    result = sdt.execute(
+        tool_name="delete_document",
+        arguments={"doc_id": "bypass-target"},
+        execution_id="fake-exec",
+        tenant_id="tenant-A",
+        args_binding_hash="fake-hash",
+        execution_token=None,
+    )
+
+    assert not result["success"]
+    assert "no_execution_token" in result.get("blocked_reason", "")
+    assert store_s3.read("bypass-target", "tenant-A") is not None
+
+
+def test_s4_audit_persistence_across_restart():
+    """
+    After process restart (simulated by opening a new DocumentStore against
+    the same SQLite file), soft-deleted documents remain visible in the full
+    audit view. The in-process execution_history is NOT durable — a new store
+    has an empty history — but the persisted soft-delete row confirms the
+    operation occurred.
+    """
+    guarded, store, registry = _make_harness("s4-restart", current_time=_NOW)
+    db_path = store._db_path
+    store.seed("audit-doc", "tenant-A", "content")
+
+    registry.register("delete_document", "document:delete",
+                       "tenant-A/audit-doc", "tenant-A", "alice@example.com")
+    result = guarded.execute_tool("delete_document", {"doc_id": "audit-doc"}, "tenant-A")
+    assert result.authorized
+
+    # Simulate restart: open a fresh DocumentStore against the same file
+    fresh_store = DocumentStore(db_path)
+    # Live query: document is gone
+    assert fresh_store.read("audit-doc", "tenant-A") is None
+    # Audit view: soft-delete row is present
+    all_recs = fresh_store.all_records("tenant-A")
+    deleted_rows = [r for r in all_recs if r.doc_id == "audit-doc" and r.deleted]
+    assert len(deleted_rows) == 1, "Soft-delete row must persist across store restart"
+
+
+def test_s5_malformed_sdk_args_handled():
+    """
+    If the OpenAI Agents SDK provides malformed JSON as args_json to
+    on_invoke_tool, the invoke functions must return a structured JSON error
+    string rather than raising an unhandled JSONDecodeError.
+    """
+    import asyncio
+    guarded, store, registry = _make_harness("s5-json", current_time=_NOW)
+
+    try:
+        from aigov_sdk_adapter import make_sdk_tools
+        tools = make_sdk_tools(guarded, "tenant-A")
+    except ImportError:
+        pytest.skip("openai-agents not installed")
+
+    # Find the read_document tool
+    read_tool = next(t for t in tools if t.name == "read_document")
+
+    async def _run():
+        # Pass malformed JSON — should return a structured error, not raise
+        return await read_tool.on_invoke_tool(None, "{not valid json}")
+
+    response_str = asyncio.run(_run())
+    import json
+    resp = json.loads(response_str)
+    assert resp["authorized"] is False
+    assert resp["decision"] == "deny"
+    assert "malformed_args" in resp.get("block_reason", "")
 
 
 # ---------------------------------------------------------------------------
