@@ -24,7 +24,7 @@ permissions: {}
 
 jobs:
   cla-v2:
-    name: CLA-v2-enforcement
+    name: CLA v2 engine (posts CLA v2 / agreement)
     if: >-
       github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request &&
