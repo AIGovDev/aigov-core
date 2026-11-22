@@ -231,9 +231,14 @@ class SqlNonceStore:
     # -------------------------------------------------------------------------
 
     def _init_postgres(self) -> None:
-        with self._pg_conn() as conn:
-            conn.execute(self._PG_CREATE)
-            conn.commit()
+        try:
+            with self._pg_conn() as conn:
+                conn.execute(self._PG_CREATE)
+                conn.commit()
+        except NonceStoreError:
+            raise
+        except Exception as exc:
+            raise NonceStoreError(f"PostgreSQL init failed: {exc}") from exc
 
     def _pg_conn(self):  # type: ignore[return]
         try:

@@ -171,9 +171,14 @@ class SandboxedGitHubTools:
         "request_deployment",
     })
 
-    def __init__(self, token_authority: "ExecutionTokenAuthority | None" = None) -> None:
+    def __init__(
+        self,
+        token_authority: "ExecutionTokenAuthority | None" = None,
+        audit_store: "Any | None" = None,
+    ) -> None:
         self._lock = threading.Lock()
         self._token_authority: ExecutionTokenAuthority | None = token_authority
+        self._audit_store = audit_store  # SqlAuditStore | None; optional persistent audit
         # Repo state keyed by (tenant_id, repo_id)
         self._repos: dict[tuple[str, str], dict[str, Any]] = {}
         # Execution history — includes both authorized executions and blocked attempts
@@ -245,6 +250,23 @@ class SandboxedGitHubTools:
         )
         with self._lock:
             self._history.append(record)
+            # Write to persistent audit store if configured.
+            # This commit is SEPARATE from the nonce-consumption commit.
+            # See sql_audit_store.py module docstring for the atomicity gap.
+            if self._audit_store is not None:
+                key_id = execution_token.key_id if execution_token is not None else None
+                self._audit_store.record(
+                    execution_id=execution_id,
+                    tenant_id=tenant_id,
+                    tool_name=tool_name,
+                    action_type=execution_token.action_type if execution_token else "",
+                    resource_id=execution_token.resource_id if execution_token else "",
+                    args_binding_hash=args_binding_hash,
+                    key_id=key_id,
+                    decision=effective_decision,
+                    authorized=authorized,
+                    block_reason=block_reason or None,
+                )
 
             if not authorized:
                 return {

@@ -168,6 +168,7 @@ class ToolGateway:
         current_time: float | None = None,
         key_provider: PolicyKeyProvider | None = None,
         token_authority: ExecutionTokenAuthority | None = None,
+        audit_store: "Any | None" = None,
     ) -> None:
         self._policy_provider = policy_provider
         self._tools = tools
@@ -175,6 +176,10 @@ class ToolGateway:
         self._revocation_list = revocation_list
         self._current_time = current_time
         self._key_provider = key_provider
+        # Wire audit store into tools so every execute() call is logged.
+        # If tools already has an audit_store, do not overwrite.
+        if audit_store is not None and getattr(tools, "_audit_store", None) is None:
+            tools._audit_store = audit_store
 
         # Install the token authority into the tools object so it can verify
         # EATs independently. If none is provided, create a fresh one.
