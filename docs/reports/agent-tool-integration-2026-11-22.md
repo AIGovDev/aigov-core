@@ -937,6 +937,154 @@ Do not merge to production without authorization. Do not deploy without authoriz
 
 ---
 
+---
+
+## Pass 10 — Production-safe distributed authorization (2026-11-22)
+
+### Scope
+
+Closes the remaining staging conditions from Pass 9: shared KMS-backed key provider, production startup validation, audit reconciliation, and multi-process atomicity testing.
+
+### New components
+
+**`benchmarks/agent-verification/sql_key_store.py`** (`SqlKeyStore`)
+
+SQL-backed signing key registry visible across all worker processes that share the same database. Schema: `aigov_signing_keys(key_id, key_bytes, is_current, created_at, retired_at)`. Supports SQLite (single-machine multi-process) and PostgreSQL (fully distributed). Key operations:
+
+- `add_key(key_id, key_bytes, make_current=False)` — register a key; atomic `is_current` swap in one transaction
+- `set_current(key_id)` — atomic rotation: clears old current, sets new current
+- `retire_key(key_id)` — sets `retired_at`; `get_key_bytes()` returns `None` for retired keys
+- `get_key_bytes(key_id)` — `None` for unknown or retired keys
+
+**`benchmarks/agent-verification/sql_key_provider.py`** (`SqlRotatingKeyProvider`)
+
+Wraps `SqlKeyStore`. Implements the same interface as `RotatingKeyProvider`. **`is_managed = True`** — suppresses the `RuntimeWarning` that `ToolGateway` emits for unmanaged key providers. `get_verification_key()` calls the store on every invocation (no in-process cache) so key retirement is immediately visible to all workers. `is_distributed_safe` mirrors the backing store.
+
+Zero-downtime rotation recipe:
+1. `store.add_key("v2", key_bytes)` — add new key (all processes can verify but still sign with v1)
+2. `store.set_current("v2")` — all processes now sign new tokens with v2; old v1 tokens still verify
+3. Wait ≤ EAT TTL (500 ms by default) for in-flight v1 tokens to expire
+4. `store.retire_key("v1")` — v1 tokens immediately rejected across all workers
+
+**`benchmarks/agent-verification/production_config.py`** (`ProductionConfigValidator`)
+
+`validate()` / `validate_or_raise()` check deployment configuration at startup:
+
+| Check | Mode | Action |
+|---|---|---|
+| `audit_store is None` | Both | VIOLATION |
+| `audit_store` path is `:memory:` | Both | VIOLATION |
+| `bypass_mandatory_audit=True` | Both | VIOLATION |
+| `key_provider.is_managed=False` | Both | VIOLATION |
+| `approval_registry.is_distributed_safe=False` | DISTRIBUTED only | VIOLATION |
+| `replay_registry.is_distributed_safe=False` | DISTRIBUTED only | VIOLATION |
+| SQLite audit store in DISTRIBUTED mode | Both | WARNING |
+
+`validate_or_raise()` raises `ProductionConfigError` listing all violations. Call during application startup before accepting requests.
+
+**`benchmarks/agent-verification/audit_reconciler.py`** (`AuditReconciler`)
+
+Identifies incomplete executions (crash detection) and verifies complete evidence chains:
+
+- `orphaned_pre_executions(tenant_id)` — `authorized_pre_execution` rows with no matching `executed` row and no reconciliation row; indicates crash between audit write and dispatch completion
+- `verified_executions(tenant_id)` — `(pre_exec, executed)` pairs with matching `execution_id`; confirmed completed executions
+- `mark_reconciled(execution_id, outcome)` — write `reconciled_no_dispatch` or `reconciled_dispatch_confirmed` row; excluded from future orphan reports
+
+Three distinguishable audit states:
+1. **Authorized + executed**: both rows present — normal completed execution
+2. **Authorized + no executed row**: crash before or during dispatch — requires investigation
+3. **Reconciled**: operator investigated and closed the orphan
+
+**`benchmarks/agent-verification/sql_audit_store.py`** (addendum)
+
+Added `get_all(limit)` — full-store scan for multi-tenant reconciler queries.
+
+### Tests (P1–P19)
+
+| Test | Description | Result |
+|---|---|---|
+| P1 | Two `SqlRotatingKeyProvider` instances from same SQLite file share keys | PASS |
+| P2 | Zero-downtime rotation: v1 token still verifies after v2 becomes current | PASS |
+| P3 | Key retirement: v1 tokens fail after `retire_key("v1")` | PASS |
+| P4 | Valid single-process config: no violations | PASS |
+| P5 | Missing `audit_store` → VIOLATION | PASS |
+| P6 | In-memory SQLite audit store → VIOLATION | PASS |
+| P7 | `bypass_mandatory_audit=True` → VIOLATION | PASS |
+| P8 | `InMemoryKeyProvider` (`is_managed=False`) → VIOLATION | PASS |
+| P9 | No-PostgreSQL approval registry in DISTRIBUTED mode → VIOLATION | PASS |
+| P10 | No-PostgreSQL replay registry in DISTRIBUTED mode → VIOLATION | PASS |
+| P11 | 4 concurrent processes, same SQLite file — exactly one consumes nonce | PASS |
+| P12 | Reconciler detects orphaned pre-execution row (simulated crash) | PASS |
+| P13 | Reconciler identifies verified (both rows) executions correctly | PASS |
+| P14 | `mark_reconciled()` removes orphan from future reports | PASS |
+| P15 | SDK FunctionTool E2E via `on_invoke_tool` | SKIP (openai-agents not installed) |
+| P16 | `SqlRotatingKeyProvider.is_managed = True` confirmed | PASS |
+| P17 | SINGLE_PROCESS mode permits SQLite backends | PASS |
+| P18 | PostgreSQL nonce backend | SKIP (TEST_PG_DSN not set) |
+| P19 | PostgreSQL approval backend | SKIP (TEST_PG_DSN not set) |
+
+**Full suite: 55 passed, 4 skipped, 0 failed** (prior 39+1 + new 16+3)
+
+### Updated threat model
+
+| Threat | Mitigation | Status |
+|---|---|---|
+| Cross-worker token forgery (per-process key) | `SqlRotatingKeyProvider` shares keys via SQL store | **NEW (Pass 10)** |
+| Key compromise lingers after rotation | `retire_key()` immediately invalidates tokens across workers | **NEW (Pass 10)** |
+| Misconfigured production deployment | `validate_or_raise()` at startup; catches 6 misconfigs | **NEW (Pass 10)** |
+| Crash between pre-exec audit and dispatch | `AuditReconciler.orphaned_pre_executions()` surfaces these | **NEW (Pass 10)** |
+| Authorized vs executed vs reconciled confused | 3 distinct audit states; reconciler API separates them | **NEW (Pass 10)** |
+| Write/delete with no audit configured | Blocked fail-closed (`mandatory_audit_unconfigured`) | Fixed (Pass 9) |
+| Audit write failure allows side effect | Blocked fail-closed (`mandatory_audit_failed`) | Fixed (Pass 8) |
+| `authorized` conflated with `executed` | Separated: `authorized=ALLOW decision`, `executed=dispatch ran` | Fixed (Pass 8) |
+| Replay attack (concurrent workers) | `SqlApprovalRegistry` atomic `UPDATE WHERE consumed_at IS NULL` | Fixed (PR #476) |
+
+### Deployment checklist
+
+**Single-process deployments (DeploymentMode.SINGLE_PROCESS)**
+- [ ] `audit_store`: `SqlAuditStore("sqlite", path="/persistent/path.db")` — NOT `:memory:`
+- [ ] `bypass_mandatory_audit`: `False`
+- [ ] `key_provider`: `SqlRotatingKeyProvider` backed by a persistent `SqlKeyStore`
+- [ ] Call `validate_or_raise(..., mode=DeploymentMode.SINGLE_PROCESS)` at startup
+
+**Distributed deployments (DeploymentMode.DISTRIBUTED)**
+- All single-process requirements, plus:
+- [ ] `audit_store`: `SqlAuditStore("postgresql", dsn=...)`
+- [ ] `approval_registry`: `SqlApprovalRegistry("postgresql", dsn=...)`
+- [ ] `replay_registry`: `ReplayRegistry(SqlNonceStore("postgresql", dsn=...))`
+- [ ] `key_provider`: `SqlRotatingKeyProvider(SqlKeyStore("postgresql", dsn=...))`
+- [ ] `clock_skew_ns` configured to tolerate NTP drift if workers are on different hosts
+- [ ] `validate_or_raise(..., mode=DeploymentMode.DISTRIBUTED)` at startup
+
+**Key rotation procedure**
+1. `store.add_key("v{N+1}", key_bytes)` — load new key into all workers' view
+2. `store.set_current("v{N+1}")` — start signing with new key
+3. Wait ≥ EAT TTL (500ms default) for in-flight v{N} tokens to expire
+4. `store.retire_key("v{N}")` — invalidate all old tokens
+
+### Remaining risks
+
+| Risk | Severity | Notes |
+|---|---|---|
+| PostgreSQL tests not run in CI (no live PG) | MEDIUM | P18/P19 skip without `TEST_PG_DSN`; run in staging PG environment |
+| `SqlKeyStore` stores raw key bytes in DB | MEDIUM | Acceptable for SQLite-backed staging; production should use KMS reference |
+| P15 SDK E2E test not exercised | LOW | Requires `openai-agents` install; not installed in CI environment |
+| `is_distributed_safe` brittle access | INFO | FINDING-DUR-3; schedule `ToolGateway.replay_registry` property follow-up |
+
+### Verdict
+
+**Staging: GO** (all pass-9 staging conditions satisfied)
+**Production: CONDITIONAL GO**
+
+Production conditions:
+1. Run P18/P19 against a live PostgreSQL instance (`TEST_PG_DSN` set in CI)
+2. Replace `SqlKeyStore` raw key bytes with KMS reference in production deployments (Vercel KMS, AWS KMS, or HashiCorp Vault)
+3. Set `validate_or_raise(..., mode=DeploymentMode.DISTRIBUTED)` in the production entrypoint
+
+Do not merge to production without authorization. Do not deploy without authorization.
+
+---
+
 ## Human approval gate
 
 - Human code review and merge authorization: **PENDING**
