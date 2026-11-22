@@ -24,9 +24,22 @@ context, the co-author policy, or signature records.
 
 ## Evaluation gate
 
-Status: **PENDING CI on the policy commit.** The Haiku 5.5 exact-match policy
-(see the policy update section) was added on top of the blocked state. CI results
-for the final head are recorded in the "Verification" section after the run.
+Status on head `9d06495`:
+
+- Passing: `report_gate`, `report_content`, `make_verify`, `evidence_pack`,
+  `upload_evidence_packs`, `aigov-core-portable`, `cargo-audit`,
+  `oss-developer-experience-checks`, `CLA-v2-tests`, `CLA-v2-trusted-shadow`,
+  `cla-security-guard`, and the remaining supply-chain and security jobs.
+- `CLA v2 / agreement`: **still `error`.** `CLA-v2-enforcement` checks out
+  `ref: staging` (`.github/workflows/cla-v2-production.yml`) and runs staging's
+  `scripts/cla_v2_production.py`. The PR's own policy change is not in effect
+  for its own gate. This is intended: a PR cannot approve its own policy change.
+- Read-only check: the new parser run against PR #473's real commit range (4
+  commits, all with the Haiku trailer and human author `MonikaDvorackova`,
+  ID `95243292`) returns `{'MonikaDvorackova': 95243292}`. The owner is
+  allowlisted as `("monikadvorackova", 95243292)`.
+- **Unblocking path:** the policy must reach `staging` through review and
+  merge. Then re-run `CLA v2 — Enforcement` on #473. This PR has not been merged.
 
 - `report_gate` and `report_content`: pass after this report was added.
 - `oss-developer-experience-checks`: failed on the earlier head because this
