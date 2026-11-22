@@ -127,6 +127,13 @@ class SandboxedDocumentTools:
         "delete_document": "document:delete",
     }
 
+    # Tools requiring mandatory pre-execution audit evidence (fail-closed).
+    # If the audit write fails for these tools, execution is blocked entirely.
+    # document:read is omitted — it is read-only and uses best-effort audit only.
+    # NOTE: mandatory audit only applies when an audit_store is configured.
+    # In production deployments, an audit_store MUST be provided.
+    MANDATORY_AUDIT_TOOLS: frozenset[str] = frozenset({"update_document", "delete_document"})
+
     def __init__(self, document_store: DocumentStore) -> None:
         self._store = document_store
         self._lock = threading.Lock()
@@ -210,6 +217,28 @@ class SandboxedDocumentTools:
             "allow" if authorized else "blocked_no_valid_token"
         )
 
+        # Mandatory pre-execution audit for high-impact tools (write / delete).
+        # A durable audit row MUST be committed BEFORE dispatch. If the write
+        # fails, block execution (fail-closed) — no side effect runs without evidence.
+        # document:read is not included: read-only and uses best-effort audit only.
+        # Mandatory audit only activates when an audit_store is configured; configure
+        # one in every production deployment.
+        if authorized and tool_name in self.MANDATORY_AUDIT_TOOLS and self._audit_store is not None:
+            _kid = getattr(getattr(self._token_authority, "key_provider", None), "key_id", None)
+            try:
+                self._audit_store.record_mandatory(
+                    execution_id=execution_id, tenant_id=tenant_id, tool_name=tool_name,
+                    action_type=expected_action_type or "", resource_id=expected_resource_id or "",
+                    args_binding_hash=args_binding_hash,
+                    key_id=str(_kid) if _kid is not None else None,
+                    decision="pre_execution_authorized", authorized=True, block_reason=None,
+                )
+            except Exception as exc:
+                # Audit write failed — deny execution to preserve evidence integrity.
+                authorized = False
+                block_reason = f"mandatory_audit_failed:{exc}"
+                effective_decision = "mandatory_audit_failed"
+
         record = _ExecRecord(
             execution_id=execution_id,
             tool_name=tool_name,
@@ -224,12 +253,11 @@ class SandboxedDocumentTools:
         with self._lock:
             self._history.append(record)
 
-        # Persist to durable audit log when one is configured.
-        # Non-fatal: audit failure never blocks authorization (best-effort).
-        if self._audit_store is not None:
-            key_id = getattr(
-                getattr(self._token_authority, "key_provider", None), "key_id", None
-            )
+        # Best-effort audit for reads and denial cases.
+        # Mandatory-audit tools already wrote their pre-execution row above when
+        # authorized=True; for them, skip the duplicate write here.
+        if self._audit_store is not None and not (authorized and tool_name in self.MANDATORY_AUDIT_TOOLS):
+            _kid = getattr(getattr(self._token_authority, "key_provider", None), "key_id", None)
             self._audit_store.record(
                 execution_id=execution_id,
                 tenant_id=tenant_id,
@@ -237,7 +265,7 @@ class SandboxedDocumentTools:
                 action_type=expected_action_type or "",
                 resource_id=expected_resource_id or "",
                 args_binding_hash=args_binding_hash,
-                key_id=str(key_id) if key_id is not None else None,
+                key_id=str(_kid) if _kid is not None else None,
                 decision=effective_decision,
                 authorized=authorized,
                 block_reason=block_reason or None,
@@ -429,7 +457,7 @@ class AIGovGuardedDocumentTools:
         gw_result = self._gateway.request(req)
 
         return ToolCallResult(
-            authorized=gw_result.executed,
+            authorized=gw_result.decision_record.decision == PolicyDecision.ALLOW,
             executed=gw_result.executed,
             decision=gw_result.decision_record.decision.value,
             data=gw_result.tool_result.get("data") if gw_result.executed else None,

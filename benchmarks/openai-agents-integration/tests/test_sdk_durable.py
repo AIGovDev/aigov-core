@@ -392,8 +392,14 @@ def test_d8_expired_eat_blocked_and_audited():
         time.sleep(0.001)  # ensure 1ns has elapsed
         result = g.execute_tool("delete_document", {"doc_id": "eat-doc"}, "tenant-A")
 
-    assert not result.authorized
-    # Document untouched
+    # FINDING-DUR-2: policy decision (authorized) and execution outcome (executed) are distinct.
+    # The gateway issued ALLOW (authorization was granted) but the EAT expired between
+    # issuance and verification in execute(). Policy approved; dispatch was blocked.
+    assert result.authorized, "gateway issued ALLOW; authorized must be True"
+    assert not result.executed, "expired EAT must prevent dispatch"
+    assert "token_expired" in result.block_reason
+
+    # Document must be untouched — no side effect ran despite ALLOW
     doc = store.read("eat-doc", "tenant-A")
     assert doc is not None and doc.content == "original"
 
@@ -507,12 +513,13 @@ def test_d11_audit_write_failure_does_not_block_authorization():
         policy_fixture=_doc_policy(), replay_registry=replay, audit_store=audit,
     )
 
-    # Make audit.record() raise — it must be swallowed silently
+    # Make audit.record() raise — it must be swallowed silently for reads
     with patch.object(audit, "_do_record", side_effect=RuntimeError("audit DB down")):
         result = g.execute_tool("read_document", {"doc_id": "audit-fail-doc"}, "tenant-A")
 
-    # Authorization must still succeed despite audit failure
+    # read_document is best-effort only: audit failure must not block authorization or execution
     assert result.authorized
+    assert result.executed
 
 
 # ---------------------------------------------------------------------------
@@ -653,3 +660,86 @@ def test_d15_registry_distributed_safe_documentation():
     assert sql_reg.is_distributed_safe is False
     # In-memory: no is_distributed_safe attribute (defaults to False via getattr)
     assert getattr(mem_reg, "is_distributed_safe", False) is False
+
+
+# ---------------------------------------------------------------------------
+# D16 — Mandatory audit failure blocks delete_document (fail-closed)
+#
+# FINDING-DUR-1 regression: without mandatory audit, a delete could succeed
+# with no durable evidence when the audit store is unavailable.
+# ---------------------------------------------------------------------------
+
+
+def test_d16_mandatory_audit_failure_blocks_delete():
+    db_store = _tmp_db()
+    db_reg = _tmp_db()
+    db_nonce = _tmp_db()
+    db_audit = _tmp_db()
+
+    store = DocumentStore(db_store)
+    store.seed("protected-doc", "tenant-A", "must not be deleted")
+
+    reg = SqlApprovalRegistry("sqlite", path=db_reg)
+    reg.register("delete_document", "document:delete", "tenant-A/protected-doc", "tenant-A",
+                 approver_email="alice@example.com")
+
+    audit = SqlAuditStore("sqlite", path=db_audit)
+    replay = ReplayRegistry(backend=SqlNonceStore("sqlite", path=db_nonce))
+    g = AIGovGuardedDocumentTools(
+        document_store=store, approval_registry=reg,
+        policy_fixture=_doc_policy(), replay_registry=replay, audit_store=audit,
+    )
+
+    with patch.object(audit, "_do_record", side_effect=RuntimeError("audit DB down")):
+        result = g.execute_tool("delete_document", {"doc_id": "protected-doc"}, "tenant-A")
+
+    # Policy decision was ALLOW (gateway authorized the call)
+    assert result.authorized, "policy approved; authorized must be True"
+    # But dispatch was blocked by mandatory audit failure
+    assert not result.executed, "mandatory audit failure must prevent dispatch"
+    assert "mandatory_audit_failed" in result.block_reason
+
+    # Document must remain intact — no side effect without durable evidence
+    doc = store.read("protected-doc", "tenant-A")
+    assert doc is not None, "document must not be deleted when audit write fails"
+    assert doc.content == "must not be deleted"
+
+
+# ---------------------------------------------------------------------------
+# D17 — Mandatory audit failure blocks update_document (fail-closed)
+# ---------------------------------------------------------------------------
+
+
+def test_d17_mandatory_audit_failure_blocks_update():
+    db_store = _tmp_db()
+    db_reg = _tmp_db()
+    db_nonce = _tmp_db()
+    db_audit = _tmp_db()
+
+    store = DocumentStore(db_store)
+    store.seed("write-doc", "tenant-A", "original content")
+
+    reg = SqlApprovalRegistry("sqlite", path=db_reg)
+    reg.register("update_document", "document:write", "tenant-A/write-doc", "tenant-A",
+                 approver_email="alice@example.com")
+
+    audit = SqlAuditStore("sqlite", path=db_audit)
+    replay = ReplayRegistry(backend=SqlNonceStore("sqlite", path=db_nonce))
+    g = AIGovGuardedDocumentTools(
+        document_store=store, approval_registry=reg,
+        policy_fixture=_doc_policy(), replay_registry=replay, audit_store=audit,
+    )
+
+    with patch.object(audit, "_do_record", side_effect=RuntimeError("audit DB down")):
+        result = g.execute_tool(
+            "update_document", {"doc_id": "write-doc", "content": "injected"}, "tenant-A"
+        )
+
+    assert result.authorized, "policy approved; authorized must be True"
+    assert not result.executed, "mandatory audit failure must prevent dispatch"
+    assert "mandatory_audit_failed" in result.block_reason
+
+    # Document must remain unmodified — no side effect without durable evidence
+    doc = store.read("write-doc", "tenant-A")
+    assert doc is not None
+    assert doc.content == "original content", "document must not be updated when audit write fails"

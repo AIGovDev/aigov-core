@@ -749,6 +749,102 @@ Delta: +18 new durable authorization tests. No pre-existing tests regressed.
 
 ---
 
+## Pass 8 — Final security and durability review (PR #477, 2026-11-22)
+
+### Review focus
+
+1. Atomic single-use approval consumption under concurrent PostgreSQL transactions
+2. Process crashes between approval consumption, EAT verification, execution, audit
+3. SQL audit record durability and correct association
+4. Best-effort audit write gap — protected side effects without durable evidence
+5. Explicit fail-closed policy for mandatory audit evidence
+6. PostgreSQL outages, rollback, retry, cross-process replay
+7. `is_distributed_safe` accuracy
+8. Authorization vs execution outcome separation
+9. Regression tests with exact counts
+
+---
+
+### Findings
+
+#### FINDING-DUR-1 — HIGH (FIXED)
+**Best-effort audit permits destructive side effects without durable evidence**
+
+`SandboxedDocumentTools.execute()` previously called `self._audit_store.record(...)` (best-effort, exceptions swallowed) BEFORE `_dispatch()`. If the audit store was unavailable at that exact moment, `_dispatch()` still ran: a document could be deleted or updated with no durable audit row. An audit store outage or intermittent failure is the attack surface.
+
+**Fix:** Added `SandboxedDocumentTools.MANDATORY_AUDIT_TOOLS = frozenset({"update_document", "delete_document"})` and `SqlAuditStore.record_mandatory()` (propagates exceptions, no suppression). For authorized write/delete calls, `execute()` now attempts `record_mandatory()` BEFORE dispatch. If the write fails → `authorized` is set `False`, `block_reason = "mandatory_audit_failed:<exc>"`, `effective_decision = "mandatory_audit_failed"`, and `_dispatch()` is never called. `document:read` remains best-effort only (read-only, no mutation risk).
+
+**Operational requirement:** An `audit_store` must be configured in every production deployment that uses document write or delete tools. Without one, mandatory audit is not enforced (no audit_store configured → no audit attempted, by design).
+
+**Tests:** D16 (delete blocked), D17 (update blocked) — both confirm:
+- `result.authorized = True` (policy approved)
+- `result.executed = False` (dispatch blocked)
+- `"mandatory_audit_failed" in result.block_reason`
+- Document unchanged after the blocked call
+
+---
+
+#### FINDING-DUR-2 — MEDIUM (FIXED)
+**`ToolCallResult.authorized` conflated policy decision with execution outcome**
+
+`execute_tool()` previously set `authorized = gw_result.executed`. This made `authorized=False` whenever execution failed for any reason — including EAT expiry after a valid ALLOW decision. An incident investigator seeing `authorized=False` in the audit log would incorrectly conclude the authorization was denied, when in reality the policy approved but execution was blocked post-authorization (expired token, mandatory audit failure, etc.).
+
+**Fix:** Changed to `authorized = gw_result.decision_record.decision == PolicyDecision.ALLOW`. Now `authorized=True` faithfully records "the authorization pipeline approved this call"; `executed=True` records "the tool side effect actually ran". The two can differ when:
+- EAT expires between issuance and verification (D8: `authorized=True, executed=False`)
+- Mandatory audit write fails (D16/D17: `authorized=True, executed=False`)
+
+**Tests:** D8 updated to assert `result.authorized` (True) + `result.executed` (False). D16/D17 also validate the distinction.
+
+---
+
+#### FINDING-DUR-3 — INFO (NOT FIXED — documented)
+**`is_distributed_safe` reads `_gateway._replay_registry` via private attribute**
+
+`AIGovGuardedDocumentTools.is_distributed_safe` accesses `self._gateway._replay_registry` — a private attribute. If `ToolGateway` renames this attribute, the property silently returns `False`, which is the safe (conservative) default. Not a security bug, but brittle. Recommend `ToolGateway.expose_replay_registry` property in a future refactor.
+
+---
+
+### Threat model update (addendum to § 3)
+
+| Threat | Before Pass 8 | After Pass 8 |
+|---|---|---|
+| Destructive op with no audit evidence (audit store down) | **POSSIBLE** — best-effort audit, dispatch always ran | **BLOCKED** — mandatory pre-dispatch audit for write/delete |
+| Authorization/execution confusion in audit log | **POSSIBLE** — `authorized` = `executed` → misleading | **FIXED** — `authorized` = policy ALLOW; `executed` = dispatch ran |
+| Cross-process audit attribute access brittle | INFO — private `_replay_registry` attribute | DOCUMENTED, low risk (fails safe) |
+
+---
+
+### Test results
+
+| Suite | Pass | Fail | Skip | Notes |
+|---|---|---|---|---|
+| `test_sdk_durable.py` | 20 | 0 | 0 | +D16, +D17; D8, D11 assertions updated |
+| `test_sdk_harness.py` | 16 | 0 | 1 | S5 skipped (no live SDK — pre-existing) |
+
+**Total: 36 passed, 0 failed, 1 skipped**
+
+Pre-existing staging-level failures (unchanged from PR #476 baseline):
+- `test_dependabot_yml_targets_staging_for_all_ecosystems` — config mismatch
+- `test_epistemic_readiness_cli_json` — CLI entrypoint
+- `test_repo_root_module_entrypoint_policy_compile` — policy compile CLI
+- `test_generate_script_roundtrip` — signed audit export
+- `test_sigstore_dependency_importable` — sigstore not installed
+
+---
+
+### Verdict: **CONDITIONAL GO** (staging merge)
+
+All confirmed HIGH and MEDIUM vulnerabilities are fixed with regression tests. The PR is safe to merge to staging under the following conditions:
+
+1. **Configure `audit_store` in production**: mandatory audit enforcement only activates when an `SqlAuditStore` is configured. Any production deployment using `update_document` or `delete_document` MUST wire in an `audit_store`. Document this in the deployment runbook.
+2. **Share KMS-backed `KeyProvider` across workers**: the `InMemoryKeyProvider` in `SandboxedDocumentTools` is per-process. Multi-worker deployments must inject a shared managed provider (the `RuntimeWarning` in the test run documents this requirement).
+3. **PostgreSQL for `SqlApprovalRegistry` and `SqlNonceStore`** in multi-process deployments: `is_distributed_safe` must return `True` before claiming distributed replay safety. SQLite backends are correct for single-process only.
+4. **FINDING-DUR-3 (INFO)**: private attribute access in `is_distributed_safe` — not blocking, but schedule a `ToolGateway.replay_registry` property in a follow-up.
+
+Do not merge to production without authorization. Do not deploy without authorization.
+
+---
+
 ## Human approval gate
 
 - Human code review and merge authorization: **PENDING**
