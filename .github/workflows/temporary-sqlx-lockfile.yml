@@ -1,0 +1,24 @@
+name: temporary SQLx lockfile resolver
+on:
+  push:
+    branches:
+      - dependabot/cargo/rust/staging/sqlx-0.9.1
+    paths:
+      - .github/workflows/temporary-sqlx-lockfile.yml
+permissions:
+  contents: read
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve lockfile with Cargo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd rust
+          cargo update
+          echo CARGO_LOCK_BEGIN
+          base64 -w512 Cargo.lock | sed 's/^/LOCKDATA:/'
+          echo CARGO_LOCK_END
