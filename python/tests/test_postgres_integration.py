@@ -5,8 +5,12 @@ Requirements:
   - PostgreSQL 14+ running and accessible
   - Set DATABASE_URL environment variable, e.g.:
     DATABASE_URL=postgresql://aigov_test:aigov_test_pass@localhost:15432/aigov_integration
+  - Set AIGOV_PG_TEST_DESTRUCTIVE=1 explicitly. Several fixtures run DROP TABLE, so the
+    database must be a dedicated, local test database (name "aigov_integration" or containing
+    "test"), never a shared or production database. See _pg_safety.py.
 
-  All tests are skipped when DATABASE_URL is not set.
+  All tests are skipped when DATABASE_URL is not set. If DATABASE_URL is set but the target
+  is not an isolated test database, or the opt-in is missing, destructive tests FAIL.
 
 What is tested:
   1. TestPgNonceStore           — Atomic INSERT ON CONFLICT, rowcount semantics
@@ -38,6 +42,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from _pg_safety import UnsafeTestDatabase, check_isolated_test_database
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -87,6 +93,16 @@ def _imports():
 def _pg_dsn() -> str:
     assert DATABASE_URL is not None
     return DATABASE_URL
+
+
+def _destructive_dsn() -> str:
+    """DSN for tests that run DROP TABLE. Fails the test (never skips) unless the target is an isolated test DB."""
+    dsn = _pg_dsn()
+    try:
+        check_isolated_test_database(dsn)
+    except UnsafeTestDatabase as exc:
+        pytest.fail(f"Refusing destructive PostgreSQL test: {exc}", pytrace=False)
+    return dsn
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +167,7 @@ def pg_clean_db():
     except ImportError:
         pytest.skip("psycopg[binary] not installed")
 
-    with psycopg.connect(DATABASE_URL) as conn:
+    with psycopg.connect(_destructive_dsn()) as conn:
         conn.execute("DROP TABLE IF EXISTS aigov_consumed_nonces CASCADE")
         conn.execute("DROP TABLE IF EXISTS aigov_revocations CASCADE")
         conn.execute("DROP TABLE IF EXISTS aigov_audit_log CASCADE")
@@ -456,7 +472,7 @@ class TestPgFailClosed:
         store = SqlNonceStore("postgresql", dsn=pg_clean_db)
 
         # Drop the nonces table so try_consume() raises NonceStoreError
-        with psycopg.connect(pg_clean_db) as conn:
+        with psycopg.connect(_destructive_dsn()) as conn:
             conn.execute("DROP TABLE IF EXISTS aigov_consumed_nonces")
             conn.commit()
 
@@ -678,7 +694,7 @@ class TestPgAuditStore:
         assert consumed is True
 
         # Step 2: Simulate audit write failure by dropping the audit table mid-flight
-        with psycopg.connect(pg_clean_db) as conn:
+        with psycopg.connect(_destructive_dsn()) as conn:
             conn.execute("DROP TABLE IF EXISTS aigov_audit_log")
             conn.commit()
 
