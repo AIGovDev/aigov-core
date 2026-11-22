@@ -41,12 +41,16 @@ _BENCH = Path(__file__).parent.parent.parent / "agent-verification"
 sys.path.insert(0, str(_BENCH))
 
 from approval_registry import ApprovalNotFound, ApprovalRegistry
+from sql_approval_registry import ApprovalRegistryError, SqlApprovalRegistry
 from document_store import DocumentRecord, DocumentStore
 from execution_token import ExecutionToken, ExecutionTokenAuthority
+from nonce_store import SqlNonceStore
 from policy_decision import PolicyDecision
 from replay_protection import ReplayRegistry
 from revocation_list import RevocationList
 from sandboxed_tools import DVOScenarioState, compute_args_binding_hash
+from sql_approval_registry import SqlApprovalRegistry
+from sql_audit_store import SqlAuditStore
 from tool_gateway import ToolGateway, ToolRequest, ToolExecutionResult
 from trusted_policy_provider import TrustedPolicyProvider
 
@@ -123,13 +127,23 @@ class SandboxedDocumentTools:
         "delete_document": "document:delete",
     }
 
-    def __init__(self, document_store: DocumentStore) -> None:
+    # Tools requiring mandatory pre-execution audit evidence (fail-closed).
+    # If no audit_store is configured, calls to these tools are BLOCKED unless
+    # bypass_mandatory_audit=True (test isolation only — never use in production).
+    # document:read is omitted — it is read-only and uses best-effort audit only.
+    MANDATORY_AUDIT_TOOLS: frozenset[str] = frozenset({"update_document", "delete_document"})
+
+    def __init__(self, document_store: DocumentStore,
+                 bypass_mandatory_audit: bool = False) -> None:
         self._store = document_store
         self._lock = threading.Lock()
         self._history: list[_ExecRecord] = []
         # Assigned by ToolGateway after construction:
         self._token_authority: ExecutionTokenAuthority | None = None
         self._audit_store = None  # optional; can be set externally
+        # Set True ONLY in test isolation to skip the audit_store requirement.
+        # Never set this to True in production deployments.
+        self._bypass_mandatory_audit = bypass_mandatory_audit
 
     def execute(
         self,
@@ -206,6 +220,33 @@ class SandboxedDocumentTools:
             "allow" if authorized else "blocked_no_valid_token"
         )
 
+        # Mandatory pre-execution audit for high-impact tools (write / delete).
+        # Two fail-closed conditions are enforced when _bypass_mandatory_audit is False:
+        #   1. audit_store is None → block (no audit infrastructure configured)
+        #   2. record_mandatory() raises → block (write failed, evidence cannot be committed)
+        # document:read is excluded: read-only, uses best-effort audit only.
+        # _bypass_mandatory_audit is True ONLY in test isolation. Never set it in production.
+        if authorized and tool_name in self.MANDATORY_AUDIT_TOOLS and not self._bypass_mandatory_audit:
+            if self._audit_store is None:
+                authorized = False
+                block_reason = "mandatory_audit_unconfigured:no_audit_store_set"
+                effective_decision = "mandatory_audit_unconfigured"
+            else:
+                _kid = getattr(getattr(self._token_authority, "key_provider", None), "key_id", None)
+                try:
+                    self._audit_store.record_mandatory(
+                        execution_id=execution_id, tenant_id=tenant_id, tool_name=tool_name,
+                        action_type=expected_action_type or "", resource_id=expected_resource_id or "",
+                        args_binding_hash=args_binding_hash,
+                        key_id=str(_kid) if _kid is not None else None,
+                        decision="authorized_pre_execution", authorized=True, block_reason=None,
+                    )
+                except Exception as exc:
+                    # Audit write failed — deny execution to preserve evidence integrity.
+                    authorized = False
+                    block_reason = f"mandatory_audit_failed:{exc}"
+                    effective_decision = "mandatory_audit_failed"
+
         record = _ExecRecord(
             execution_id=execution_id,
             tool_name=tool_name,
@@ -219,6 +260,24 @@ class SandboxedDocumentTools:
         )
         with self._lock:
             self._history.append(record)
+
+        # Best-effort audit for reads and denial cases.
+        # Mandatory-audit tools already wrote their pre-execution row above when
+        # authorized=True; for them, skip the duplicate write here.
+        if self._audit_store is not None and not (authorized and tool_name in self.MANDATORY_AUDIT_TOOLS):
+            _kid = getattr(getattr(self._token_authority, "key_provider", None), "key_id", None)
+            self._audit_store.record(
+                execution_id=execution_id,
+                tenant_id=tenant_id,
+                tool_name=tool_name,
+                action_type=expected_action_type or "",
+                resource_id=expected_resource_id or "",
+                args_binding_hash=args_binding_hash,
+                key_id=str(_kid) if _kid is not None else None,
+                decision=effective_decision,
+                authorized=authorized,
+                block_reason=block_reason or None,
+            )
 
         if not authorized:
             return {
@@ -237,6 +296,21 @@ class SandboxedDocumentTools:
             }
 
         result = self._dispatch(tool_name, arguments, tenant_id, execution_id)
+
+        # Post-execution best-effort audit: "authorized_pre_execution" proves authorization
+        # intent; this row proves the dispatch actually completed. Neither row alone is
+        # proof of the other — forensics should require both for verified execution.
+        # Best-effort: never roll back or undo a completed execution if this write fails.
+        if self._audit_store is not None and tool_name in self.MANDATORY_AUDIT_TOOLS:
+            _kid = getattr(getattr(self._token_authority, "key_provider", None), "key_id", None)
+            self._audit_store.record(  # best-effort; exceptions swallowed by record()
+                execution_id=execution_id, tenant_id=tenant_id, tool_name=tool_name,
+                action_type=expected_action_type or "", resource_id=expected_resource_id or "",
+                args_binding_hash=args_binding_hash,
+                key_id=str(_kid) if _kid is not None else None,
+                decision="executed", authorized=True, block_reason=None,
+            )
+
         return {"success": True, "execution_id": execution_id, "data": result,
                 "blocked_reason": None}
 
@@ -310,15 +384,20 @@ class AIGovGuardedDocumentTools:
     def __init__(
         self,
         document_store: DocumentStore,
-        approval_registry: ApprovalRegistry,
+        approval_registry: "ApprovalRegistry | SqlApprovalRegistry",
         policy_fixture: dict,
         replay_registry: ReplayRegistry | None = None,
         revocation_list: RevocationList | None = None,
         current_time: float | None = None,
+        audit_store: "SqlAuditStore | None" = None,
+        bypass_mandatory_audit: bool = False,
     ) -> None:
         self._store = document_store
         self._approvals = approval_registry
-        self._sandboxed = SandboxedDocumentTools(document_store)
+        self._sandboxed = SandboxedDocumentTools(document_store,
+                                                 bypass_mandatory_audit=bypass_mandatory_audit)
+        if audit_store is not None:
+            self._sandboxed._audit_store = audit_store
 
         self._gateway = ToolGateway(
             policy_provider=TrustedPolicyProvider(policy_fixture),
@@ -326,6 +405,7 @@ class AIGovGuardedDocumentTools:
             replay_registry=replay_registry or ReplayRegistry(),
             revocation_list=revocation_list or RevocationList(),
             current_time=current_time,
+            audit_store=audit_store,
         )
 
     def execute_tool(
@@ -359,6 +439,8 @@ class AIGovGuardedDocumentTools:
         resource_id = _resource_id_from_args(tool_name, arguments, tenant_id)
 
         # Step 1: consume a pre-registered approval.
+        # ApprovalNotFound → no approval exists (normal deny path).
+        # ApprovalRegistryError → DB I/O error; fail closed (authorization denied).
         try:
             entry, dvo_state = self._approvals.consume(
                 tool_name=tool_name,
@@ -371,6 +453,13 @@ class AIGovGuardedDocumentTools:
                 authorized=False, executed=False,
                 decision="no_approval", data=None,
                 block_reason=str(exc),
+                execution_id="", args_binding_hash="",
+            )
+        except ApprovalRegistryError as exc:
+            return ToolCallResult(
+                authorized=False, executed=False,
+                decision="registry_error", data=None,
+                block_reason=f"approval_registry_error:{exc}",
                 execution_id="", args_binding_hash="",
             )
 
@@ -393,7 +482,7 @@ class AIGovGuardedDocumentTools:
         gw_result = self._gateway.request(req)
 
         return ToolCallResult(
-            authorized=gw_result.executed,
+            authorized=gw_result.decision_record.decision == PolicyDecision.ALLOW,
             executed=gw_result.executed,
             decision=gw_result.decision_record.decision.value,
             data=gw_result.tool_result.get("data") if gw_result.executed else None,
@@ -410,6 +499,21 @@ class AIGovGuardedDocumentTools:
     @property
     def sandboxed_tools(self) -> SandboxedDocumentTools:
         return self._sandboxed
+
+    @property
+    def audit_store(self) -> "SqlAuditStore | None":
+        return self._sandboxed._audit_store
+
+    @property
+    def is_distributed_safe(self) -> bool:
+        """True when both the approval registry and replay registry use distributed-safe backends."""
+        reg_safe = getattr(self._approvals, "is_distributed_safe", False)
+        replay_safe = getattr(
+            getattr(self._gateway, "_replay_registry", None),
+            "is_distributed_safe",
+            False,
+        )
+        return bool(reg_safe and replay_safe)
 
 
 def _resource_id_from_args(

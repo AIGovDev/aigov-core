@@ -649,6 +649,294 @@ Conditions for production deployment (unchanged from pass 5, plus one new):
 
 ---
 
+---
+
+## Pass 7 — Durable authorization hardening (PR #477, 2026-11-22)
+
+**Branch:** `feat/durable-sdk-authorization` → PR #477  
+**Base:** `5a0c3eb` (staging after PR #476 merged)  
+**Objective:** Make authorization, replay protection, and audit evidence durable across restarts and multiple processes.
+
+### What changed
+
+#### `SqlApprovalRegistry` (new file: `adapter/sql_approval_registry.py`)
+
+Replaces the in-memory `ApprovalRegistry` for production use. Key properties:
+
+| Property | SQLite backend | PostgreSQL backend |
+|---------|---------------|-------------------|
+| Durable across restarts | ✓ | ✓ |
+| Multi-thread atomic consume | ✓ (file-level WAL locking) | ✓ (row-level FOR UPDATE SKIP LOCKED) |
+| Multi-process atomic consume | ✓ (single machine) | ✓ (distributed) |
+| `is_distributed_safe` | `False` | `True` |
+
+**Atomicity guarantee:** Consumption uses `UPDATE … WHERE consumed_at IS NULL`. Exactly one concurrent caller wins (rowcount == 1); all others get `ApprovalNotFound`. Two threads racing for the same approval: exactly one succeeds. Verified by D2 (20 concurrent threads) and D13 (10-thread nonce race across shared SQLite).
+
+**Schema:** `aigov_sdk_approvals` table with `registered_at` and `consumed_at` lifecycle columns. `consumed_at IS NULL` = pending. Indexed on `(tool_name, action_type, resource_id, tenant_id, consumed_at)` for fast key lookup.
+
+#### `SandboxedDocumentTools.execute()` — durable audit writes
+
+When an `audit_store` (`SqlAuditStore`) is configured, `execute()` now appends an audit row for every authorization outcome: ALLOW, DENY, capability_mismatch, action_type_mismatch, expired EAT, revoked approval. Writes are best-effort (non-fatal): a DB outage during the audit write does NOT block the authorization decision (D11 verified). `key_id` from the EAT signing key is included for key-rotation forensics.
+
+#### `AIGovGuardedDocumentTools` — durable backend wiring
+
+New `audit_store` parameter (optional `SqlAuditStore`). When provided:
+- Wired into `SandboxedDocumentTools` for per-execution audit rows
+- Passed through to `ToolGateway` (which also wires it in for blocked attempts at the gateway level)
+
+New `is_distributed_safe` property: `True` only when BOTH the approval registry AND the replay registry use distributed-safe backends (PostgreSQL). Correctly `False` for all SQLite combinations.
+
+New error handling: `ApprovalRegistryError` (I/O failure during approval consume) is caught in `execute_tool()` and returns a denial, preventing any authorization bypass from an erroring registry.
+
+#### `aigov_sdk_adapter.py` — new imports
+
+Added: `SqlApprovalRegistry`, `SqlAuditStore`, `SqlNonceStore` imports. `ApprovalNotFound` is now the unified base exception from `approval_registry.py` (re-exported by `sql_approval_registry.py`); both registries raise it.
+
+---
+
+### Test results (D1–D15, 18 tests)
+
+| Test | Coverage | Result |
+|------|----------|--------|
+| D1 | Approval survives process restart (fresh SqlApprovalRegistry, same file) | ✓ PASS |
+| D2 | 20 concurrent threads race for 1 approval; exactly 1 wins; document version increments once | ✓ PASS |
+| D3 | consumed_at persisted; fresh instance sees 0 pending, 1 consumed; replay raises ApprovalNotFound | ✓ PASS |
+| D4 | SqlAuditStore records ALLOW and DENY rows; decision/tool_name/authorized fields verified | ✓ PASS |
+| D5 | Audit log survives restart; row count matches across fresh SqlAuditStore instances | ✓ PASS |
+| D6 | Tenant-B approval cannot consume tenant-A's resource; document intact | ✓ PASS |
+| D7 | delete_document approval cannot be consumed by read_document (key mismatch) | ✓ PASS |
+| D8 | Expired EAT (1ns max_age_ns) is blocked; document untouched | ✓ PASS |
+| D9 | Revoked approval (RevocationList) blocks after consumption; document intact | ✓ PASS |
+| D10 | ApprovalRegistryError during consume: fails closed; no authorization; document untouched | ✓ PASS |
+| D11 | Audit write failure swallowed silently; authorization proceeds normally (best-effort audit) | ✓ PASS |
+| D12 | is_distributed_safe=False for SQLite (approval + replay); documented accurately | ✓ PASS |
+| D13 | 10 threads sharing same SqlNonceStore file: exactly 1 nonce consume wins | ✓ PASS |
+| D14 | 4 parametrized scenarios (no_approval, wrong_tool, wrong_resource, wrong_tenant): all deny; zero side effects | ✓ PASS |
+| D15 | is_distributed_safe documented accurately for all backend combinations | ✓ PASS |
+
+**Zero unauthorized side effects in all 18 negative / adversarial tests.**
+
+---
+
+### Full suite results
+
+| Scope | Commit | Pass | Skip | Fail |
+|-------|--------|------|------|------|
+| python/ + benchmarks/ | staging `5a0c3eb` | 913 | 85 | 0 |
+| python/ + benchmarks/ | this PR | **931** | 85 | **0** |
+
+Delta: +18 new durable authorization tests. No pre-existing tests regressed.
+
+---
+
+### Threat model update
+
+| Threat | Before | After |
+|--------|--------|-------|
+| Approval replay after process restart | No cross-restart protection (in-memory lost) | Blocked: consumed_at persisted; replays get ApprovalNotFound |
+| Concurrent approval race (two threads/processes) | Threading.Lock guards single-process; cross-process unprotected | Blocked: atomic UPDATE WHERE consumed_at IS NULL; exactly one winner |
+| Cross-tenant approval substitution | Key includes tenant_id (correctly rejected) | Unchanged; explicitly verified in D6 |
+| Cross-tool approval substitution | Key includes tool_name (correctly rejected) | Unchanged; explicitly verified in D7 |
+| Approval registry I/O error | Exception propagates; undefined behavior | Caught; fail-closed: ApprovalRegistryError → deny |
+| Audit completeness across restarts | In-memory history lost on restart | SqlAuditStore persists to SQLite/PostgreSQL; survives restart |
+| Audit write masking authorization | N/A | Best-effort only: audit failure does NOT block authorization (D11) |
+
+### Remaining limitations (unchanged from pass 6)
+
+1. `InMemoryKeyProvider` must be replaced with a managed KMS/HSM provider for production
+2. `ApprovalRegistry` / `SqlApprovalRegistry` on SQLite: not distributed-safe across machines; use PostgreSQL for multi-host deployments
+3. Audit writes and nonce consumption are in separate transactions (documented in `sql_audit_store.py`); a process crash between them leaves a consumed nonce without an audit record — the authorization is still single-use, but the evidence of the attempt is missing
+
+---
+
+## Pass 8 — Final security and durability review (PR #477, 2026-11-22)
+
+### Review focus
+
+1. Atomic single-use approval consumption under concurrent PostgreSQL transactions
+2. Process crashes between approval consumption, EAT verification, execution, audit
+3. SQL audit record durability and correct association
+4. Best-effort audit write gap — protected side effects without durable evidence
+5. Explicit fail-closed policy for mandatory audit evidence
+6. PostgreSQL outages, rollback, retry, cross-process replay
+7. `is_distributed_safe` accuracy
+8. Authorization vs execution outcome separation
+9. Regression tests with exact counts
+
+---
+
+### Findings
+
+#### FINDING-DUR-1 — HIGH (FIXED)
+**Best-effort audit permits destructive side effects without durable evidence**
+
+`SandboxedDocumentTools.execute()` previously called `self._audit_store.record(...)` (best-effort, exceptions swallowed) BEFORE `_dispatch()`. If the audit store was unavailable at that exact moment, `_dispatch()` still ran: a document could be deleted or updated with no durable audit row. An audit store outage or intermittent failure is the attack surface.
+
+**Fix:** Added `SandboxedDocumentTools.MANDATORY_AUDIT_TOOLS = frozenset({"update_document", "delete_document"})` and `SqlAuditStore.record_mandatory()` (propagates exceptions, no suppression). For authorized write/delete calls, `execute()` now attempts `record_mandatory()` BEFORE dispatch. If the write fails → `authorized` is set `False`, `block_reason = "mandatory_audit_failed:<exc>"`, `effective_decision = "mandatory_audit_failed"`, and `_dispatch()` is never called. `document:read` remains best-effort only (read-only, no mutation risk).
+
+**Operational requirement:** An `audit_store` must be configured in every production deployment that uses document write or delete tools. Without one, mandatory audit is not enforced (no audit_store configured → no audit attempted, by design).
+
+**Tests:** D16 (delete blocked), D17 (update blocked) — both confirm:
+- `result.authorized = True` (policy approved)
+- `result.executed = False` (dispatch blocked)
+- `"mandatory_audit_failed" in result.block_reason`
+- Document unchanged after the blocked call
+
+---
+
+#### FINDING-DUR-2 — MEDIUM (FIXED)
+**`ToolCallResult.authorized` conflated policy decision with execution outcome**
+
+`execute_tool()` previously set `authorized = gw_result.executed`. This made `authorized=False` whenever execution failed for any reason — including EAT expiry after a valid ALLOW decision. An incident investigator seeing `authorized=False` in the audit log would incorrectly conclude the authorization was denied, when in reality the policy approved but execution was blocked post-authorization (expired token, mandatory audit failure, etc.).
+
+**Fix:** Changed to `authorized = gw_result.decision_record.decision == PolicyDecision.ALLOW`. Now `authorized=True` faithfully records "the authorization pipeline approved this call"; `executed=True` records "the tool side effect actually ran". The two can differ when:
+- EAT expires between issuance and verification (D8: `authorized=True, executed=False`)
+- Mandatory audit write fails (D16/D17: `authorized=True, executed=False`)
+
+**Tests:** D8 updated to assert `result.authorized` (True) + `result.executed` (False). D16/D17 also validate the distinction.
+
+---
+
+#### FINDING-DUR-3 — INFO (NOT FIXED — documented)
+**`is_distributed_safe` reads `_gateway._replay_registry` via private attribute**
+
+`AIGovGuardedDocumentTools.is_distributed_safe` accesses `self._gateway._replay_registry` — a private attribute. If `ToolGateway` renames this attribute, the property silently returns `False`, which is the safe (conservative) default. Not a security bug, but brittle. Recommend `ToolGateway.expose_replay_registry` property in a future refactor.
+
+---
+
+### Threat model update (addendum to § 3)
+
+| Threat | Before Pass 8 | After Pass 8 |
+|---|---|---|
+| Destructive op with no audit evidence (audit store down) | **POSSIBLE** — best-effort audit, dispatch always ran | **BLOCKED** — mandatory pre-dispatch audit for write/delete |
+| Authorization/execution confusion in audit log | **POSSIBLE** — `authorized` = `executed` → misleading | **FIXED** — `authorized` = policy ALLOW; `executed` = dispatch ran |
+| Cross-process audit attribute access brittle | INFO — private `_replay_registry` attribute | DOCUMENTED, low risk (fails safe) |
+
+---
+
+### Test results
+
+| Suite | Pass | Fail | Skip | Notes |
+|---|---|---|---|---|
+| `test_sdk_durable.py` | 20 | 0 | 0 | +D16, +D17; D8, D11 assertions updated |
+| `test_sdk_harness.py` | 16 | 0 | 1 | S5 skipped (no live SDK — pre-existing) |
+
+**Total: 36 passed, 0 failed, 1 skipped**
+
+Pre-existing staging-level failures (unchanged from PR #476 baseline):
+- `test_dependabot_yml_targets_staging_for_all_ecosystems` — config mismatch
+- `test_epistemic_readiness_cli_json` — CLI entrypoint
+- `test_repo_root_module_entrypoint_policy_compile` — policy compile CLI
+- `test_generate_script_roundtrip` — signed audit export
+- `test_sigstore_dependency_importable` — sigstore not installed
+
+---
+
+### Verdict: **CONDITIONAL GO** (staging merge)
+
+All confirmed HIGH and MEDIUM vulnerabilities are fixed with regression tests. The PR is safe to merge to staging under the following conditions:
+
+1. **Configure `audit_store` in production**: mandatory audit enforcement only activates when an `SqlAuditStore` is configured. Any production deployment using `update_document` or `delete_document` MUST wire in an `audit_store`. Document this in the deployment runbook.
+2. **Share KMS-backed `KeyProvider` across workers**: the `InMemoryKeyProvider` in `SandboxedDocumentTools` is per-process. Multi-worker deployments must inject a shared managed provider (the `RuntimeWarning` in the test run documents this requirement).
+3. **PostgreSQL for `SqlApprovalRegistry` and `SqlNonceStore`** in multi-process deployments: `is_distributed_safe` must return `True` before claiming distributed replay safety. SQLite backends are correct for single-process only.
+4. **FINDING-DUR-3 (INFO)**: private attribute access in `is_distributed_safe` — not blocking, but schedule a `ToolGateway.replay_registry` property in a follow-up.
+
+Do not merge to production without authorization. Do not deploy without authorization.
+
+---
+
+## Pass 9 — Fail-closed mandatory audit, two-phase evidence, regression tests (2026-11-22)
+
+### Gaps addressed
+
+**GAP-1 (HIGH, FIXED)**: When `audit_store=None`, the mandatory audit condition in `execute()` was guarded by `and self._audit_store is not None`, so the entire check was silently skipped. Write and delete operations proceeded with no audit protection — no fail-closed behavior was enforced when audit infrastructure was absent.
+
+**GAP-2 (DESIGN, FIXED)**: `"pre_execution_authorized"` was used as the decision label for the pre-execution audit row. This name did not clearly distinguish authorization intent from execution outcome. Renamed to `"authorized_pre_execution"` to reflect that this row proves the authorization decision, not that execution completed.
+
+**GAP-3 (DESIGN, FIXED)**: After dispatch, there was no durable record that execution actually completed. The `"authorized_pre_execution"` row is proof of intent; without an `"executed"` row, forensic reconstruction could not distinguish authorized-but-crashed from authorized-and-completed.
+
+### Changes applied
+
+**`adapter/aigov_sdk_adapter.py`**
+
+1. `SandboxedDocumentTools.__init__()`: Added `bypass_mandatory_audit: bool = False` parameter. Must be `False` in production. Allows explicit test isolation without an audit store.
+
+2. `SandboxedDocumentTools.execute()` — mandatory audit condition refactored from:
+   ```python
+   if authorized and tool_name in self.MANDATORY_AUDIT_TOOLS and self._audit_store is not None:
+   ```
+   to:
+   ```python
+   if authorized and tool_name in self.MANDATORY_AUDIT_TOOLS and not self._bypass_mandatory_audit:
+       if self._audit_store is None:
+           authorized = False
+           block_reason = "mandatory_audit_unconfigured:no_audit_store_set"
+           ...
+   ```
+   This enforces fail-closed behavior when audit infrastructure is absent, unless test-isolation bypass is explicitly set.
+
+3. `SandboxedDocumentTools.execute()` — added post-execution best-effort audit row after `_dispatch()`:
+   - `decision="executed"` row written after dispatch completes
+   - Best-effort only (`record()`, not `record_mandatory()`) — a failed post-execution write must NEVER roll back a completed side effect
+   - Two-phase evidence: `"authorized_pre_execution"` = authorization granted, `"executed"` = dispatch completed; both rows needed for verified execution
+
+4. `AIGovGuardedDocumentTools.__init__()`: Added `bypass_mandatory_audit: bool = False` parameter, threaded through to `SandboxedDocumentTools`.
+
+**`tests/test_sdk_durable.py`**
+
+- `_make_guarded()`: defaults to a temp-file `SqlAuditStore` (instead of `None`) so all existing tests exercise the mandatory audit path. Pass `audit_path=""` to get `audit_store=None` (requires `bypass_mandatory_audit=True` for non-mandatory tools, or tests the fail-closed path).
+
+- **D18** (`test_d18_missing_audit_store_blocks_mandatory_tools`): Without `audit_store`, `delete_document` must be blocked (`mandatory_audit_unconfigured` in `block_reason`). Policy ALLOW, but `executed=False`, document untouched.
+
+- **D19** (`test_d19_preaudit_row_persists_across_simulated_crash`): `_dispatch` patched to raise immediately after pre-execution audit commits. Pre-execution row (`"authorized_pre_execution"`) must persist in the SQLite file (opened on a fresh connection), no `"executed"` row (dispatch never ran), document untouched.
+
+- **D20** (`test_d20_post_execution_audit_failure_does_not_roll_back`): Post-execution `_do_record` call patched to fail. Document mutation must succeed, `executed=True`, pre-execution row present. Confirms post-execution audit failure is non-fatal.
+
+**`tests/test_sdk_harness.py`**
+
+- `_make_harness()`: defaults to a temp-file `SqlAuditStore` so all harness tests exercise the mandatory audit path.
+
+### Test results (Pass 9)
+
+| Suite | Passed | Failed | Skipped | Notes |
+|---|---|---|---|---|
+| `test_sdk_durable.py` | 23 | 0 | 0 | +D18, +D19, +D20 |
+| `test_sdk_harness.py` | 16 | 0 | 1 | S5 skipped (no live SDK — pre-existing) |
+
+**Total: 39 passed, 0 failed, 1 skipped**
+
+### Updated threat model
+
+| Threat | Mitigation | Status |
+|---|---|---|
+| Write/delete with no audit configured | Blocked fail-closed (`mandatory_audit_unconfigured`) | **FIXED (Pass 9)** |
+| Audit write failure allows side effect | Blocked fail-closed (`mandatory_audit_failed`) | Fixed (Pass 8) |
+| Pre-execution row confused with execution proof | Renamed `authorized_pre_execution`; `executed` row added post-dispatch | **FIXED (Pass 9)** |
+| `authorized` conflated with `executed` | Separated: `authorized=ALLOW decision`, `executed=dispatch ran` | Fixed (Pass 8) |
+| Replay attack (concurrent workers) | `SqlApprovalRegistry` atomic `UPDATE WHERE consumed_at IS NULL` | Fixed (PR #476) |
+| Approval revocation window | Pre-execution revocation re-check before EAT issuance | Existing |
+| Cross-tenant substitution | Approval key binds `(tool_name, action_type, resource_id, tenant_id)` | Existing |
+| `is_distributed_safe` brittle access | Documented (FINDING-DUR-3); schedule property follow-up | INFO only |
+
+### Verdict: **GO** (staging merge)
+
+Pass 9 closes the remaining gaps from the CONDITIONAL GO verdict in Pass 8:
+
+- GAP-1 (fail-closed on missing audit_store): **FIXED**
+- GAP-2 (authorization intent vs. execution proof semantics): **FIXED**
+- GAP-3 (no post-execution outcome record): **FIXED**
+
+All regression tests pass (39/40, 1 pre-existing skip). The two-phase audit evidence model (`authorized_pre_execution` → `executed`) is verified by D19 (crash: pre row persists, no executed row) and D20 (post-audit failure: execution persists, no rollback).
+
+Remaining staging conditions (unchanged from Pass 8):
+1. Wire `audit_store` in every production deployment using write/delete tools.
+2. Share KMS-backed `KeyProvider` across workers in multi-process deployments.
+3. Use PostgreSQL-backed `SqlApprovalRegistry` and `SqlNonceStore` for distributed deployments.
+
+Do not merge to production without authorization. Do not deploy without authorization.
+
+---
+
 ## Human approval gate
 
 - Human code review and merge authorization: **PENDING**

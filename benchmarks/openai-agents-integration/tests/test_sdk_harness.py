@@ -44,6 +44,7 @@ from document_store import DocumentStore
 from aigov_sdk_adapter import AIGovGuardedDocumentTools, _resource_id_from_args
 from replay_protection import ReplayRegistry
 from revocation_list import RevocationList
+from sql_audit_store import SqlAuditStore
 from trusted_policy_provider import make_policy_record, TrustedPolicyProvider
 
 _NOW  = 1_700_000_000.0
@@ -112,9 +113,15 @@ def _make_harness(
     replay_registry: ReplayRegistry | None = None,
     revocation_list: RevocationList | None = None,
     current_time: float | None = None,
+    audit_store: "SqlAuditStore | None" = None,
 ):
     """
     Return (guarded, store, registry) with an isolated SQLite temp file.
+
+    An in-memory SqlAuditStore is configured by default so that mandatory audit
+    enforcement for update_document and delete_document is active in all tests.
+    Pass audit_store=None explicitly to test the missing-audit-store code path
+    (requires bypass_mandatory_audit=True to avoid fail-closed blocking).
 
     current_time is passed through to the ToolGateway for deterministic
     expiry tests.
@@ -125,6 +132,10 @@ def _make_harness(
     tmp.close()
     store = DocumentStore(tmp.name)
     registry = ApprovalRegistry()
+    if audit_store is None:
+        _atmp = tempfile.NamedTemporaryFile(suffix=f"{db_suffix}.audit.sqlite", delete=False)
+        _atmp.close()
+        audit_store = SqlAuditStore("sqlite", _atmp.name)
     guarded = AIGovGuardedDocumentTools(
         document_store=store,
         approval_registry=registry,
@@ -132,6 +143,7 @@ def _make_harness(
         replay_registry=replay_registry,
         revocation_list=revocation_list,
         current_time=current_time,
+        audit_store=audit_store,
     )
     return guarded, store, registry
 

@@ -230,6 +230,32 @@ class SqlAuditStore:
             print(f"[audit] WARNING: failed to write audit record for {execution_id}: {exc}",
                   file=sys.stderr)
 
+    def record_mandatory(
+        self,
+        execution_id: str,
+        tenant_id: str,
+        tool_name: str,
+        action_type: str,
+        resource_id: str,
+        args_binding_hash: str,
+        key_id: str | None,
+        decision: str,
+        authorized: bool,
+        block_reason: str | None,
+    ) -> None:
+        """
+        Append one audit record with fail-closed semantics.
+
+        Unlike record(), exceptions are NOT swallowed. Use this for high-impact
+        operations (document:write, document:delete) where a missing audit row is
+        a security violation. The caller MUST catch this method's exceptions and
+        block execution when it raises — never execute a destructive side effect
+        without confirmed durable evidence.
+        """
+        self._do_record(execution_id, tenant_id, tool_name, action_type,
+                        resource_id, args_binding_hash, key_id, decision,
+                        authorized, block_reason)
+
     def _do_record(self, execution_id, tenant_id, tool_name, action_type,
                    resource_id, args_hash, key_id, decision, authorized, block_reason):
         if self._backend == "sqlite":
