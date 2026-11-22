@@ -41,12 +41,16 @@ _BENCH = Path(__file__).parent.parent.parent / "agent-verification"
 sys.path.insert(0, str(_BENCH))
 
 from approval_registry import ApprovalNotFound, ApprovalRegistry
+from sql_approval_registry import ApprovalRegistryError, SqlApprovalRegistry
 from document_store import DocumentRecord, DocumentStore
 from execution_token import ExecutionToken, ExecutionTokenAuthority
+from nonce_store import SqlNonceStore
 from policy_decision import PolicyDecision
 from replay_protection import ReplayRegistry
 from revocation_list import RevocationList
 from sandboxed_tools import DVOScenarioState, compute_args_binding_hash
+from sql_approval_registry import SqlApprovalRegistry
+from sql_audit_store import SqlAuditStore
 from tool_gateway import ToolGateway, ToolRequest, ToolExecutionResult
 from trusted_policy_provider import TrustedPolicyProvider
 
@@ -220,6 +224,25 @@ class SandboxedDocumentTools:
         with self._lock:
             self._history.append(record)
 
+        # Persist to durable audit log when one is configured.
+        # Non-fatal: audit failure never blocks authorization (best-effort).
+        if self._audit_store is not None:
+            key_id = getattr(
+                getattr(self._token_authority, "key_provider", None), "key_id", None
+            )
+            self._audit_store.record(
+                execution_id=execution_id,
+                tenant_id=tenant_id,
+                tool_name=tool_name,
+                action_type=expected_action_type or "",
+                resource_id=expected_resource_id or "",
+                args_binding_hash=args_binding_hash,
+                key_id=str(key_id) if key_id is not None else None,
+                decision=effective_decision,
+                authorized=authorized,
+                block_reason=block_reason or None,
+            )
+
         if not authorized:
             return {
                 "success": False,
@@ -310,15 +333,18 @@ class AIGovGuardedDocumentTools:
     def __init__(
         self,
         document_store: DocumentStore,
-        approval_registry: ApprovalRegistry,
+        approval_registry: "ApprovalRegistry | SqlApprovalRegistry",
         policy_fixture: dict,
         replay_registry: ReplayRegistry | None = None,
         revocation_list: RevocationList | None = None,
         current_time: float | None = None,
+        audit_store: "SqlAuditStore | None" = None,
     ) -> None:
         self._store = document_store
         self._approvals = approval_registry
         self._sandboxed = SandboxedDocumentTools(document_store)
+        if audit_store is not None:
+            self._sandboxed._audit_store = audit_store
 
         self._gateway = ToolGateway(
             policy_provider=TrustedPolicyProvider(policy_fixture),
@@ -326,6 +352,7 @@ class AIGovGuardedDocumentTools:
             replay_registry=replay_registry or ReplayRegistry(),
             revocation_list=revocation_list or RevocationList(),
             current_time=current_time,
+            audit_store=audit_store,
         )
 
     def execute_tool(
@@ -359,6 +386,8 @@ class AIGovGuardedDocumentTools:
         resource_id = _resource_id_from_args(tool_name, arguments, tenant_id)
 
         # Step 1: consume a pre-registered approval.
+        # ApprovalNotFound → no approval exists (normal deny path).
+        # ApprovalRegistryError → DB I/O error; fail closed (authorization denied).
         try:
             entry, dvo_state = self._approvals.consume(
                 tool_name=tool_name,
@@ -371,6 +400,13 @@ class AIGovGuardedDocumentTools:
                 authorized=False, executed=False,
                 decision="no_approval", data=None,
                 block_reason=str(exc),
+                execution_id="", args_binding_hash="",
+            )
+        except ApprovalRegistryError as exc:
+            return ToolCallResult(
+                authorized=False, executed=False,
+                decision="registry_error", data=None,
+                block_reason=f"approval_registry_error:{exc}",
                 execution_id="", args_binding_hash="",
             )
 
@@ -410,6 +446,21 @@ class AIGovGuardedDocumentTools:
     @property
     def sandboxed_tools(self) -> SandboxedDocumentTools:
         return self._sandboxed
+
+    @property
+    def audit_store(self) -> "SqlAuditStore | None":
+        return self._sandboxed._audit_store
+
+    @property
+    def is_distributed_safe(self) -> bool:
+        """True when both the approval registry and replay registry use distributed-safe backends."""
+        reg_safe = getattr(self._approvals, "is_distributed_safe", False)
+        replay_safe = getattr(
+            getattr(self._gateway, "_replay_registry", None),
+            "is_distributed_safe",
+            False,
+        )
+        return bool(reg_safe and replay_safe)
 
 
 def _resource_id_from_args(

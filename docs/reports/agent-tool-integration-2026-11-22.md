@@ -649,6 +649,106 @@ Conditions for production deployment (unchanged from pass 5, plus one new):
 
 ---
 
+---
+
+## Pass 7 — Durable authorization hardening (PR #477, 2026-11-22)
+
+**Branch:** `feat/durable-sdk-authorization` → PR #477  
+**Base:** `5a0c3eb` (staging after PR #476 merged)  
+**Objective:** Make authorization, replay protection, and audit evidence durable across restarts and multiple processes.
+
+### What changed
+
+#### `SqlApprovalRegistry` (new file: `adapter/sql_approval_registry.py`)
+
+Replaces the in-memory `ApprovalRegistry` for production use. Key properties:
+
+| Property | SQLite backend | PostgreSQL backend |
+|---------|---------------|-------------------|
+| Durable across restarts | ✓ | ✓ |
+| Multi-thread atomic consume | ✓ (file-level WAL locking) | ✓ (row-level FOR UPDATE SKIP LOCKED) |
+| Multi-process atomic consume | ✓ (single machine) | ✓ (distributed) |
+| `is_distributed_safe` | `False` | `True` |
+
+**Atomicity guarantee:** Consumption uses `UPDATE … WHERE consumed_at IS NULL`. Exactly one concurrent caller wins (rowcount == 1); all others get `ApprovalNotFound`. Two threads racing for the same approval: exactly one succeeds. Verified by D2 (20 concurrent threads) and D13 (10-thread nonce race across shared SQLite).
+
+**Schema:** `aigov_sdk_approvals` table with `registered_at` and `consumed_at` lifecycle columns. `consumed_at IS NULL` = pending. Indexed on `(tool_name, action_type, resource_id, tenant_id, consumed_at)` for fast key lookup.
+
+#### `SandboxedDocumentTools.execute()` — durable audit writes
+
+When an `audit_store` (`SqlAuditStore`) is configured, `execute()` now appends an audit row for every authorization outcome: ALLOW, DENY, capability_mismatch, action_type_mismatch, expired EAT, revoked approval. Writes are best-effort (non-fatal): a DB outage during the audit write does NOT block the authorization decision (D11 verified). `key_id` from the EAT signing key is included for key-rotation forensics.
+
+#### `AIGovGuardedDocumentTools` — durable backend wiring
+
+New `audit_store` parameter (optional `SqlAuditStore`). When provided:
+- Wired into `SandboxedDocumentTools` for per-execution audit rows
+- Passed through to `ToolGateway` (which also wires it in for blocked attempts at the gateway level)
+
+New `is_distributed_safe` property: `True` only when BOTH the approval registry AND the replay registry use distributed-safe backends (PostgreSQL). Correctly `False` for all SQLite combinations.
+
+New error handling: `ApprovalRegistryError` (I/O failure during approval consume) is caught in `execute_tool()` and returns a denial, preventing any authorization bypass from an erroring registry.
+
+#### `aigov_sdk_adapter.py` — new imports
+
+Added: `SqlApprovalRegistry`, `SqlAuditStore`, `SqlNonceStore` imports. `ApprovalNotFound` is now the unified base exception from `approval_registry.py` (re-exported by `sql_approval_registry.py`); both registries raise it.
+
+---
+
+### Test results (D1–D15, 18 tests)
+
+| Test | Coverage | Result |
+|------|----------|--------|
+| D1 | Approval survives process restart (fresh SqlApprovalRegistry, same file) | ✓ PASS |
+| D2 | 20 concurrent threads race for 1 approval; exactly 1 wins; document version increments once | ✓ PASS |
+| D3 | consumed_at persisted; fresh instance sees 0 pending, 1 consumed; replay raises ApprovalNotFound | ✓ PASS |
+| D4 | SqlAuditStore records ALLOW and DENY rows; decision/tool_name/authorized fields verified | ✓ PASS |
+| D5 | Audit log survives restart; row count matches across fresh SqlAuditStore instances | ✓ PASS |
+| D6 | Tenant-B approval cannot consume tenant-A's resource; document intact | ✓ PASS |
+| D7 | delete_document approval cannot be consumed by read_document (key mismatch) | ✓ PASS |
+| D8 | Expired EAT (1ns max_age_ns) is blocked; document untouched | ✓ PASS |
+| D9 | Revoked approval (RevocationList) blocks after consumption; document intact | ✓ PASS |
+| D10 | ApprovalRegistryError during consume: fails closed; no authorization; document untouched | ✓ PASS |
+| D11 | Audit write failure swallowed silently; authorization proceeds normally (best-effort audit) | ✓ PASS |
+| D12 | is_distributed_safe=False for SQLite (approval + replay); documented accurately | ✓ PASS |
+| D13 | 10 threads sharing same SqlNonceStore file: exactly 1 nonce consume wins | ✓ PASS |
+| D14 | 4 parametrized scenarios (no_approval, wrong_tool, wrong_resource, wrong_tenant): all deny; zero side effects | ✓ PASS |
+| D15 | is_distributed_safe documented accurately for all backend combinations | ✓ PASS |
+
+**Zero unauthorized side effects in all 18 negative / adversarial tests.**
+
+---
+
+### Full suite results
+
+| Scope | Commit | Pass | Skip | Fail |
+|-------|--------|------|------|------|
+| python/ + benchmarks/ | staging `5a0c3eb` | 913 | 85 | 0 |
+| python/ + benchmarks/ | this PR | **931** | 85 | **0** |
+
+Delta: +18 new durable authorization tests. No pre-existing tests regressed.
+
+---
+
+### Threat model update
+
+| Threat | Before | After |
+|--------|--------|-------|
+| Approval replay after process restart | No cross-restart protection (in-memory lost) | Blocked: consumed_at persisted; replays get ApprovalNotFound |
+| Concurrent approval race (two threads/processes) | Threading.Lock guards single-process; cross-process unprotected | Blocked: atomic UPDATE WHERE consumed_at IS NULL; exactly one winner |
+| Cross-tenant approval substitution | Key includes tenant_id (correctly rejected) | Unchanged; explicitly verified in D6 |
+| Cross-tool approval substitution | Key includes tool_name (correctly rejected) | Unchanged; explicitly verified in D7 |
+| Approval registry I/O error | Exception propagates; undefined behavior | Caught; fail-closed: ApprovalRegistryError → deny |
+| Audit completeness across restarts | In-memory history lost on restart | SqlAuditStore persists to SQLite/PostgreSQL; survives restart |
+| Audit write masking authorization | N/A | Best-effort only: audit failure does NOT block authorization (D11) |
+
+### Remaining limitations (unchanged from pass 6)
+
+1. `InMemoryKeyProvider` must be replaced with a managed KMS/HSM provider for production
+2. `ApprovalRegistry` / `SqlApprovalRegistry` on SQLite: not distributed-safe across machines; use PostgreSQL for multi-host deployments
+3. Audit writes and nonce consumption are in separate transactions (documented in `sql_audit_store.py`); a process crash between them leaves a consumed nonce without an audit record — the authorization is still single-use, but the evidence of the attempt is missing
+
+---
+
 ## Human approval gate
 
 - Human code review and merge authorization: **PENDING**
