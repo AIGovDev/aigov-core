@@ -33,7 +33,7 @@ The CLA v2 writer (`scripts/cla_v2_production.py`) reads and writes
 
 1. Confirm `cla-signatures` is not covered by rulesets that require PRs or status checks.
 2. Confirm the workflow `branch:` input is still `cla-signatures`.
-3. Push a synchronize event to the pull request, or re-run the CLA v2 — Enforcement job.
+3. Comment `recheck` on the pull request (exact phrase), push a synchronize event, or re-run the CLA v2 — Enforcement job.
 4. Read the failed Actions job log for rule-violation details.
 5. Do not hand-edit `cla.json` to repair a record; escalate to the maintainer, since signature evidence is audited.
 
