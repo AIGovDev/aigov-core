@@ -62,9 +62,9 @@ reach only `staging` do not change the checks shown on PRs until they are promot
 ## Changes in this PR
 
 1. Job display names state their role, so no visible job looks like the gate:
-   - `cla-v2` → `CLA v2 engine (posts CLA v2 / agreement)`
-   - `trusted-shadow` → `CLA v2 independent audit (not a required status)`
-   - `cla-v2-tests` → `CLA v2 unit tests (not a required status)`
+   - `cla-v2` → `CLA enforcement engine (posts agreement status)`
+   - `trusted-shadow` → `CLA independent audit (not a required status)`
+   - `cla-v2-tests` → `CLA unit tests (not a required status)`
    - `cla-security-guard` → `CLA workflow security guard (not a required status)`
 2. `cla-v2-shadow.yml` and `cla-security-guard.yml` path filters now include
    `.github/workflows/cla*.yml`. A reintroduced `cla.yml` therefore triggers the
