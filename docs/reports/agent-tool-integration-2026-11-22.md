@@ -1,6 +1,6 @@
 # Agent-Tool Integration: Real Authorization Enforcement
 
-**Date:** 2026-11-22 (Phase 1–5); hardening update 2026-11-22; pass 2 hardening 2026-11-22; pass 3 PostgreSQL validation 2026-11-22  
+**Date:** 2026-11-22 (Phase 1–5); hardening update 2026-11-22; pass 2 hardening 2026-11-22; pass 3 PostgreSQL validation 2026-11-22; pass 4 adversarial security review 2026-11-22  
 **Branch:** `feat/agent-tool-hardening` (was `feat/agent-tool-integration`, PR #470) → PR #471  
 **Depends on:** PR #452 (Condition I hardening, merged 2026-11-22)  
 **Dataset hash (integration scenarios):** `109def7478261bf9745d0d4caabe836748dba92ebda754cbfc03b2476acb6259`
@@ -226,6 +226,48 @@ The audit searched for direct bypass paths, TOCTOU windows, replay vulnerabiliti
 
 *Documentation*: Module docstrings in `sql_audit_store.py` and test assertions in `test_postgres_integration.py` state this invariant explicitly.
 
+### Pass 4 hardening (independent adversarial security review)
+
+**FINDING-1 (HIGH → FIXED) — args_binding_hash truncated to 64 bits**
+
+*Finding*: `compute_args_binding_hash()` returned `hashlib.sha256(...).hexdigest()[:16]` — only the first 16 hex characters (64 bits) of the SHA-256 digest. Birthday collisions are achievable at ~2^32 trials (~4 seconds on modern hardware), enabling argument substitution attacks where an EAT authorized for arguments A passes `verify_for_execution` when presented with a colliding argument set B.
+
+*Fix*: Removed `[:16]` truncation. `hexdigest()` now returns all 64 hex characters (256 bits). Birthday collisions now require ~2^128 work.
+
+*File*: `benchmarks/agent-verification/sandboxed_tools.py:425`
+
+*Regression test*: `TestFinding1ArgsHashTruncation::test_hash_length_is_64_chars_after_fix`
+
+**FINDING-2 (MEDIUM → FIXED) — verify_for_execution does not check execution_id**
+
+*Finding*: `ExecutionTokenAuthority.verify_for_execution()` had no `expected_execution_id` parameter. The `execution_id` is included in the EAT's signable payload (and therefore covered by the HMAC signature), but was never checked against the calling context's execution_id. In the current single-process gateway, there is no serialization step between EAT issuance and use, so this only manifests as audit inconsistency. In a distributed context where EATs cross a network boundary, it would permit cross-request token reuse: a valid EAT from request exec-A with matching (tool, args, tenant) would pass verification for request exec-B.
+
+*Fix*: Added `expected_execution_id: str | None = None` to `verify_for_execution()`. When provided, `token.execution_id` must match exactly; mismatch returns `("False", "token_execution_id_mismatch")`. `sandboxed_tools.execute()` now always passes `expected_execution_id=execution_id` from its own calling context.
+
+*File*: `benchmarks/agent-verification/execution_token.py:196`; `benchmarks/agent-verification/sandboxed_tools.py:220`
+
+*Regression test*: `TestFinding2ExecutionIdNotVerified::test_execution_id_verified_after_fix`, `test_matching_execution_id_accepted_after_fix`, `test_tools_execute_passes_execution_id_to_verify`
+
+**FINDING-3 (MEDIUM → DOCUMENTED) — Tautological action_type/resource_id check**
+
+*Finding*: `sandboxed_tools.execute()` calls `verify_for_execution()` with `expected_action_type=execution_token.action_type` and `expected_resource_id=execution_token.resource_id`. These values come from the token being verified, so the field checks always pass for a structurally valid token regardless of the calling context. The HMAC signature prevents forgery, so this is NOT exploitable in the current single-process architecture. In a distributed context, a correctly signed token for a higher-privilege action_type (e.g., `repo:admin`) could be substituted without the field check detecting it.
+
+*Current mitigation*: HMAC covers both `action_type` and `resource_id`. Substitution requires forging the HMAC or obtaining a legitimately signed token with the wrong action_type — both are prevented by the signing key controls.
+
+*Future fix*: propagate `action_type` and `resource_id` as independent call-context parameters to `tools.execute()` and `verify_for_execution()`. Deferred — requires updating 10+ call sites; the HMAC is an effective substitute in the current architecture.
+
+*Regression test*: `TestFinding3TautologicalActionTypeCheck::test_action_type_verified_against_caller_context`
+
+**FINDING-4 (LOW → DOCUMENTED) — Nonce consumed before revocation check; partial DB failure burns approval**
+
+*Finding*: `ConditionIOrchestrator.orchestrate()` calls `try_consume()` before `is_revoked()`. If `is_revoked()` raises (e.g., revocation store is briefly unavailable), the nonce is permanently consumed but no execution happened. The approval is irrecoverably burned. This is **fail-closed** (no unauthorized execution), but constitutes a denial-of-service on approvals under partial DB failures: a flapping revocation store would permanently invalidate approvals.
+
+*Future fix*: check revocation before nonce consumption (reverse ordering), or use a single DB transaction for both. Deferred — requires unifying the nonce and revocation stores under one connection.
+
+**FINDING-5 (LOW → DOCUMENTED) — EAT uses time.monotonic_ns() for expiry (non-portable)**
+
+*Finding*: `is_expired()` computes `time.monotonic_ns() - self.issued_at_ns > self.max_age_ns`. Monotonic clock values are per-process and not comparable across processes or machines. In the current single-process gateway, the EAT is issued and verified in the same process, so this is not exploitable. In a distributed deployment where EATs are serialized and passed across a network, the expiry check would be meaningless (or wildly incorrect). `time.time_ns()` with wall-clock synchronization (NTP within ±100ms) would be appropriate for distributed use.
+
 ### Findings not confirmed (all passes)
 
 **Model reasoning injection** — model_reasoning stored for audit only; never parsed by decision logic. ✓
@@ -233,6 +275,12 @@ The audit searched for direct bypass paths, TOCTOU windows, replay vulnerabiliti
 **DVOScenarioState re-entrancy** — read-only after construction; concurrent reads safe. ✓
 
 **ReplayRegistry thread safety** — 10 concurrent threads, exactly 1 True per nonce, 0 errors. ✓
+
+**SQL injection** — all queries use parameterized placeholders (`%s`/`?`); no string interpolation of user input. ✓
+
+**Algorithm confusion** — `key_id` is part of the signed payload; a verifier cannot be tricked into verifying with a different key by changing `key_id` on an issued token. ✓
+
+**Cross-tenant authorization** — `tenant_id` is independently checked in `verify_for_execution` against the call context; the HMAC also covers it. Cross-tenant EAT substitution is blocked. ✓
 
 ---
 
@@ -398,8 +446,8 @@ uv run --with pytest python -m pytest python/tests/test_agent_integration.py -v
 - [x] Policy fixture defined before scenarios; `should_execute` derived from policy, not labels
 - [x] **Unauthorized operations executed: 0** (FAR=0.000)
 - [x] Authorized operations blocked: 0 (FRR=0.000)
-- [x] **179 tests pass**: 91 security-invariant + adversarial (test_agent_integration) + 55 distributed-safety (test_distributed_safety) + **33 PostgreSQL integration (test_postgres_integration, all NEW in pass 3)**
-- [x] 10 confirmed vulnerabilities/gaps found and addressed (BYPASS-1–2, BYPASS-3, BUG-4, HARDENING-5–10)
+- [x] **194 tests pass**: 91 security-invariant + adversarial (test_agent_integration) + 55 distributed-safety (test_distributed_safety) + 33 PostgreSQL integration (test_postgres_integration) + **15 adversarial security review (test_adversarial_security_review, all NEW in pass 4)**
+- [x] 14 confirmed vulnerabilities/gaps found and addressed (BYPASS-1–2, BYPASS-3, BUG-4, HARDENING-5–10, FINDING-1 HIGH, FINDING-2 MEDIUM, FINDING-3–5 documented)
 - [x] Regression tests added for all issues
 - [x] Concurrent 10-thread test: exactly 1 execution per approval_id, 0 races
 - [x] Cross-process replay DEMONSTRATED (SQLite): exactly 1 of 5 workers consumes nonce; process-restart rejected
@@ -413,8 +461,28 @@ uv run --with pytest python -m pytest python/tests/test_agent_integration.py -v
 - [x] No production data modified
 - [x] No test credentials in production source files
 
-**Evaluation verdict: PASS — PostgreSQL-validated distributed replay protection.**  
-PostgreSQL-backed replay protection is now validated against real infrastructure: 5-worker concurrent nonce consumption, transaction rollback, fail-closed on DB unavailability, and all 39 adversarial scenarios with PostgreSQL backends (FAR=0.000, FRR=0.000). The earlier claim "cross-host replay safety requires PostgreSQL" is now backed by actual multi-process tests against PostgreSQL 16, not architecture alone.
+**Evaluation verdict (pass 3): PASS — PostgreSQL-validated distributed replay protection.**  
+PostgreSQL-backed replay protection is now validated against real infrastructure: 5-worker concurrent nonce consumption, transaction rollback, fail-closed on DB unavailability, and all 39 adversarial scenarios with PostgreSQL backends (FAR=0.000, FRR=0.000).
+
+**Evaluation verdict (pass 4 — independent adversarial review): CONDITIONAL GO**
+
+Final commit SHA: `dc5f616`
+
+| Finding | Severity | Status |
+|---|---|---|
+| FINDING-1: args_binding_hash truncated to 64 bits | HIGH | **FIXED** (commit dc5f616) |
+| FINDING-2: verify_for_execution missing execution_id check | MEDIUM | **FIXED** (commit dc5f616) |
+| FINDING-3: tautological action_type/resource_id checks | MEDIUM | Documented; HMAC mitigates; fix deferred |
+| FINDING-4: nonce consumed before revocation → DoS on approvals | LOW | Documented; fail-closed; fix deferred |
+| FINDING-5: monotonic_ns EAT expiry non-portable across processes | LOW | Documented; acceptable in single-process arch |
+
+**Remaining conditions before production deployment:**
+
+1. FINDING-3 must be remediated before EATs are serialized and passed over a network (distributed deployment). The tautological field check is safe today because the gateway issue-and-use pipeline is single-process.
+2. FINDING-4 must be evaluated against the target deployment's availability SLA. Under a stable DB, this is not a live risk.
+3. FINDING-5 must be remediated before EATs cross process boundaries (switch to `time.time_ns()` with NTP clock synchronization).
+4. `InMemoryKeyProvider` (`is_managed=False`) must be replaced with a managed KMS provider before production deployment. The gateway already emits a `RuntimeWarning`; it must be treated as a hard blocker.
+5. Human code review and merge authorization: **PENDING** (do not merge without authorization).
 
 ---
 
