@@ -1762,7 +1762,8 @@ def build_parser() -> GovaiArgumentParser:
     s_sign_export.add_argument("--out", dest="out_path", required=True, help="Output signed audit export JSON path.")
     s_sign_export.add_argument("--issuer-id", required=True, help="Issuer id for signature trust lookup.")
     s_sign_export.add_argument("--signer", required=True, help="Signer identity label.")
-    s_sign_export.add_argument("--private-key-base64", required=True, help="Ed25519 private key (base64, 32-byte seed).")
+    s_sign_export.add_argument("--private-key-file", default=None, help="Path to file with Ed25519 private key (base64, 32-byte seed); must be chmod 600.")
+    s_sign_export.add_argument("--private-key-base64", default=None, help="Legacy: Ed25519 private key (base64) on the command line. Prefer --private-key-file.")
     s_sign_export.add_argument("--created-at-utc", required=True, help="RFC3339 UTC timestamp.")
     s_sign_export.add_argument("--expires-at-utc", default=None, help="Optional RFC3339 UTC timestamp.")
 
@@ -1966,7 +1967,8 @@ def build_parser() -> GovaiArgumentParser:
     s_policy_sign.add_argument("--out", dest="out_path", required=True, help="Output policy bundle JSON path.")
     s_policy_sign.add_argument("--issuer-id", required=True, help="Policy issuer id (must match policy.issuer.issuer_id).")
     s_policy_sign.add_argument("--signer", required=True, help="Signer identity label.")
-    s_policy_sign.add_argument("--private-key-base64", required=True, help="Ed25519 private key (base64, 32 bytes seed).")
+    s_policy_sign.add_argument("--private-key-file", default=None, help="Path to file with Ed25519 private key (base64, 32 bytes seed); must be chmod 600.")
+    s_policy_sign.add_argument("--private-key-base64", default=None, help="Legacy: Ed25519 private key (base64) on the command line. Prefer --private-key-file.")
     s_policy_sign.add_argument("--created-at-utc", required=True, help="RFC3339 UTC timestamp.")
     s_policy_sign.add_argument("--expires-at-utc", default=None, help="Optional RFC3339 UTC timestamp.")
 
@@ -2049,6 +2051,37 @@ def build_parser() -> GovaiArgumentParser:
     return p
 
 
+def _resolve_private_key_base64(args: Any) -> str:
+    """Return the Ed25519 seed (base64) from exactly one source.
+
+    Preferred: ``--private-key-file`` (must not be group- or world-readable).
+    Legacy: ``--private-key-base64`` still works, with a warning, because a key on the
+    command line is visible in the process list and shell history.
+    """
+    key_file = getattr(args, "private_key_file", None)
+    key_arg = getattr(args, "private_key_base64", None)
+    if bool(key_file) == bool(key_arg):
+        raise ValueError("provide exactly one of --private-key-file or --private-key-base64")
+    if key_file:
+        path = Path(str(key_file))
+        try:
+            mode = path.stat().st_mode
+        except OSError as e:
+            raise ValueError(f"cannot read private key file: {e.strerror}") from e
+        if mode & 0o077:
+            raise ValueError("private key file must not be readable by group or others (chmod 600)")
+        value = path.read_text(encoding="utf-8").strip()
+        if not value:
+            raise ValueError("private key file is empty")
+        return value
+    print(
+        "warning: --private-key-base64 exposes the signing key in the process list and shell history; "
+        "prefer --private-key-file",
+        file=sys.stderr,
+    )
+    return str(key_arg)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(argv if argv is not None else sys.argv[1:])
     parser = build_parser()
@@ -2101,7 +2134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 out_path=str(getattr(args, "out_path")),
                 issuer_id=str(getattr(args, "issuer_id")),
                 signer=str(getattr(args, "signer")),
-                private_key_base64=str(getattr(args, "private_key_base64")),
+                private_key_base64=_resolve_private_key_base64(args),
                 created_at_utc=str(getattr(args, "created_at_utc")),
                 expires_at_utc=getattr(args, "expires_at_utc"),
             )
@@ -3074,7 +3107,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 out_path=str(getattr(args, "out_path")),
                 issuer_id=str(getattr(args, "issuer_id")),
                 signer=str(getattr(args, "signer")),
-                private_key_base64=str(getattr(args, "private_key_base64")),
+                private_key_base64=_resolve_private_key_base64(args),
                 created_at_utc=str(getattr(args, "created_at_utc")),
                 expires_at_utc=getattr(args, "expires_at_utc"),
             )
