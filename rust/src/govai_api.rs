@@ -80,36 +80,62 @@ async fn pool_from_env() -> Result<DbPool, String> {
     Ok(pool)
 }
 
-/// Production fails closed unless a signed policy bundle is configured, and no override is present.
-/// Environment variables and flags cannot substitute for the signed bundle.
-pub fn enforce_production_policy_inputs() -> Result<(), String> {
+/// Whether a signed policy bundle is configured for this environment. Mirrors the loader's lookup:
+/// `AIGOV_POLICY_BUNDLE_FILE`, then `policy.bundle.<env>.json` or `policy.bundle.json` in `AIGOV_POLICY_DIR`.
+pub fn signed_bundle_configured(env: GovaiEnvironment) -> bool {
+    let set = |k: &str| {
+        std::env::var(k)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    };
+    let dir = std::env::var("AIGOV_POLICY_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    set("AIGOV_POLICY_BUNDLE_FILE")
+        || dir
+            .join(format!("policy.bundle.{}.json", env.as_str()))
+            .exists()
+        || dir.join("policy.bundle.json").exists()
+}
+
+/// Staging and production fail closed on the legacy policy path once a signed bundle is configured.
+///
+/// Production always requires a signed bundle. Staging requires one only when it is configured, so
+/// staging without a bundle keeps its existing (opt-in) behavior. Environment overrides and legacy
+/// policy files cannot participate in verdicts when the signed bundle governs.
+pub fn enforce_signed_bundle_only(env: GovaiEnvironment) -> Result<(), String> {
+    let label = match env {
+        GovaiEnvironment::Prod => "production",
+        GovaiEnvironment::Staging => "staging",
+        GovaiEnvironment::Dev => return Ok(()),
+    };
     let set = |k: &str| {
         std::env::var(k)
             .map(|v| !v.trim().is_empty())
             .unwrap_or(false)
     };
     if set("AIGOV_POLICY_FILE") {
-        return Err("refusing to start: AIGOV_POLICY_FILE is not permitted in production; use a signed policy bundle".to_string());
+        return Err(format!(
+            "refusing to start: AIGOV_POLICY_FILE is not permitted in {label}; use a signed policy bundle"
+        ));
     }
     if std::env::var_os("AIGOV_ALLOW_UNSIGNED_POLICY_FILE").is_some() {
-        return Err(
-            "refusing to start: AIGOV_ALLOW_UNSIGNED_POLICY_FILE is not permitted in production"
-                .to_string(),
-        );
+        return Err(format!(
+            "refusing to start: AIGOV_ALLOW_UNSIGNED_POLICY_FILE is not permitted in {label}"
+        ));
     }
     if set("AIGOV_APPROVER_ALLOWLIST") {
-        return Err("refusing to start: AIGOV_APPROVER_ALLOWLIST is not permitted in production; express the allowlist in the signed bundle".to_string());
+        return Err(format!(
+            "refusing to start: AIGOV_APPROVER_ALLOWLIST is not permitted in {label}; express the allowlist in the signed bundle"
+        ));
     }
-    let dir = std::env::var("AIGOV_POLICY_DIR")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let bundle_present = set("AIGOV_POLICY_BUNDLE_FILE")
-        || dir.join("policy.bundle.prod.json").exists()
-        || dir.join("policy.bundle.json").exists();
-    if !bundle_present {
-        return Err("refusing to start: production requires a signed policy bundle (AIGOV_POLICY_BUNDLE_FILE, or policy.bundle.prod.json / policy.bundle.json in AIGOV_POLICY_DIR)".to_string());
+    if matches!(env, GovaiEnvironment::Prod) && !signed_bundle_configured(env) {
+        return Err(
+            "refusing to start: production requires a signed policy bundle (AIGOV_POLICY_BUNDLE_FILE, or policy.bundle.prod.json / policy.bundle.json in AIGOV_POLICY_DIR)"
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -149,9 +175,14 @@ pub fn enforce_policy_file_trust(
 
 pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
-    let resolved = if matches!(deployment_env, GovaiEnvironment::Prod) {
-        // Production verdicts come only from a verified signed bundle. No legacy file is read.
-        enforce_production_policy_inputs()?;
+    let bundle_only = match deployment_env {
+        GovaiEnvironment::Prod => true,
+        GovaiEnvironment::Staging => signed_bundle_configured(deployment_env),
+        GovaiEnvironment::Dev => false,
+    };
+    let resolved = if bundle_only {
+        // The verified signed bundle is the only policy source. No legacy file is read.
+        enforce_signed_bundle_only(deployment_env)?;
         policy_config::ResolvedPolicyConfig {
             config: policy_config::PolicyConfig::default(),
             source: policy_config::PolicySource {

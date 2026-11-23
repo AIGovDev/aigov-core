@@ -138,10 +138,15 @@ pub fn write_bundle(dir: &Path, doc: &Value) -> PathBuf {
 
 /// Process environment for a production-style start. Callers add the policy source under test.
 pub fn prod_env(ledger: &Path, bundle: Option<&Path>) {
+    environment_env(ledger, bundle, "prod");
+}
+
+/// Process environment for a start in `environment` ("staging" or "prod").
+pub fn environment_env(ledger: &Path, bundle: Option<&Path>, environment: &str) {
     std::env::set_var("GOVAI_LEDGER_DIR", ledger);
     std::env::set_var("GOVAI_API_KEYS", "tb-key-admin");
     std::env::set_var("GOVAI_API_KEYS_JSON", r#"{"tb-key-admin":"tenant-tb"}"#);
-    std::env::set_var("AIGOV_ENVIRONMENT", "prod");
+    std::env::set_var("AIGOV_ENVIRONMENT", environment);
     std::env::set_var("GOVAI_API_USAGE_STORE", "memory");
     std::env::set_var("AIGOV_POLICY_TRUST_ED25519_JSON", trust_env_json());
     std::env::remove_var("AIGOV_POLICY_FILE");
