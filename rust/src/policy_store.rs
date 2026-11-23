@@ -113,7 +113,7 @@ impl PolicyStore {
                         return Err("Invalid policy configuration: refusing to start — AIGOV_POLICY_TRUST_ED25519_JSON required for signed policy verification".to_string());
                     }
                     policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
-                enforce_production_contract(deployment_env, &doc)?;
+                    enforce_production_contract(deployment_env, &doc)?;
                 }
                 let rp = load_bundle_doc(&doc)
                     .map_err(|e| format!("policy bundle load failed {}: {e}", p.display()))?;
@@ -207,7 +207,9 @@ pub fn enforce_production_contract(
         return Err("production policy requires non-empty policy_id and version".to_string());
     }
     if !doc.inherits.is_empty() {
-        return Err("production policy: inherits is not supported by this build; remove it".to_string());
+        return Err(
+            "production policy: inherits is not supported by this build; remove it".to_string(),
+        );
     }
     if !doc.verdict_rules.required_evidence_codes.is_empty()
         || !doc.verdict_rules.invalid_conditions.is_empty()
@@ -218,7 +220,8 @@ pub fn enforce_production_contract(
         );
     }
     let env_label = deployment_env.as_str();
-    let tenants_global = doc.selectors.tenants.iter().all(|t| t.trim() == "*") && !doc.selectors.tenants.is_empty();
+    let tenants_global =
+        doc.selectors.tenants.iter().all(|t| t.trim() == "*") && !doc.selectors.tenants.is_empty();
     let env_match = doc
         .selectors
         .environments

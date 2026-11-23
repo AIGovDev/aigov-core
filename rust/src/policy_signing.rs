@@ -118,13 +118,15 @@ pub fn verify_policy_signatures(
 
     for sig in policy.signatures.iter() {
         match sig.kind.as_str() {
-            "ed25519" => match verify_ed25519(deployment_env, trust, policy, &payload_digest, sig) {
-                Ok(()) => {
-                    any_ok = true;
-                    break;
+            "ed25519" => {
+                match verify_ed25519(deployment_env, trust, policy, &payload_digest, sig) {
+                    Ok(()) => {
+                        any_ok = true;
+                        break;
+                    }
+                    Err(e) => last_err = Some(e),
                 }
-                Err(e) => last_err = Some(e),
-            },
+            }
             other => {
                 let msg = format!("unsupported policy signature kind: {other}");
                 if matches!(deployment_env, GovaiEnvironment::Dev) {
@@ -195,7 +197,11 @@ fn verify_ed25519(
             }
             payload_digest.to_string()
         }
-        Some(other) => return Err(format!("unsupported policy signature payload_version {other}")),
+        Some(other) => {
+            return Err(format!(
+                "unsupported policy signature payload_version {other}"
+            ))
+        }
     };
 
     if sig.payload_digest_sha256.trim().to_ascii_lowercase() != expected_digest {
@@ -260,13 +266,7 @@ mod tests {
             "f038c7ff58adc61c0bbb1c4803f7aaf87e01f78a55dd118ae5409ab91a4a4466"
         );
         assert_eq!(
-            policy_signature_digest_v2(
-                &"a".repeat(64),
-                "iss",
-                "ci",
-                "2026-01-01T00:00:00Z",
-                None,
-            ),
+            policy_signature_digest_v2(&"a".repeat(64), "iss", "ci", "2026-01-01T00:00:00Z", None,),
             "4921b668db2abb463a835ab0165f9694ba966a204c400205b0cbf3bbb4bf5da7"
         );
     }
