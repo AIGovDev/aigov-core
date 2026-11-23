@@ -9,10 +9,9 @@ import os
 import stat
 
 import pytest
-from nacl.signing import SigningKey, VerifyKey
-
 from aigov_py.cli import main
 from aigov_py.policy_bundle_signing import policy_payload_digest_sha256_hex
+from nacl.signing import SigningKey, VerifyKey
 
 TEST_SEED = bytes(range(32))
 TEST_SEED_B64 = base64.b64encode(TEST_SEED).decode("ascii")
@@ -88,8 +87,17 @@ def test_no_key_source_is_refused(tmp_path):
     assert not (tmp_path / "signed.json").exists()
 
 
-def test_legacy_command_line_key_still_works_with_warning(tmp_path, capsys):
+def test_command_line_key_is_refused_by_default(tmp_path, capsys):
     rc = main(_argv(tmp_path, "--private-key-base64", TEST_SEED_B64))
+    assert rc != 0
+    assert not (tmp_path / "signed.json").exists()
+    assert TEST_SEED_B64 not in capsys.readouterr().err
+
+
+def test_command_line_key_works_only_with_explicit_opt_in_and_warns(tmp_path, capsys):
+    rc = main(_argv(tmp_path, "--private-key-base64", TEST_SEED_B64, "--allow-private-key-argv"))
     assert rc == 0
     assert (tmp_path / "signed.json").exists()
-    assert "exposes the signing key" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "exposes the signing key" in err
+    assert TEST_SEED_B64 not in err

@@ -322,6 +322,51 @@ pub fn sign_audit_export_ed25519(
     Ok(())
 }
 
+/// Strict Ed25519 seed parse: exactly 64 hex characters (32 bytes), surrounding whitespace allowed.
+/// Errors never include the input, so a malformed seed cannot leak into logs.
+pub fn parse_seed_hex_strict(s: &str) -> Result<[u8; 32], String> {
+    let t = s.trim();
+    if t.len() != 64 || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("seed must be exactly 64 hex characters (32 bytes)".to_string());
+    }
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&t[2 * i..2 * i + 2], 16)
+            .map_err(|_| "seed must be exactly 64 hex characters (32 bytes)".to_string())?;
+    }
+    Ok(out)
+}
+
+/// Read a seed from a file. On Unix the file must not be readable by group or others.
+pub fn read_seed_hex_file(path: &std::path::Path) -> Result<[u8; 32], String> {
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("cannot read seed file: {}", e.kind()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o077 != 0 {
+            return Err(
+                "seed file must not be readable by group or others (chmod 600)".to_string(),
+            );
+        }
+    }
+    let _ = meta;
+    let txt = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read seed file: {}", e.kind()))?;
+    parse_seed_hex_strict(&txt)
+}
+
+/// Read one seed line from a reader (used for stdin). Input is capped at 1 KiB.
+pub fn read_seed_hex_from_reader<R: std::io::Read>(reader: R) -> Result<[u8; 32], String> {
+    use std::io::Read;
+    let mut buf = String::new();
+    reader
+        .take(1024)
+        .read_to_string(&mut buf)
+        .map_err(|e| format!("cannot read seed from stdin: {}", e.kind()))?;
+    parse_seed_hex_strict(&buf)
+}
+
 pub fn signing_key_from_seed(seed: &[u8; 32]) -> SigningKey {
     SigningKey::from_bytes(seed)
 }
