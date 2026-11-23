@@ -12,6 +12,14 @@ PR #492 changes production verdict configuration to use an Ed25519-verified poli
 - Bundle contents are constrained where the current runtime does not implement the corresponding semantics: unresolved inheritance, unevaluated rule conditions, non-global selectors and missing approver allowlist gates are rejected.
 - Staging retains a documented explicit unsigned-policy opt-in for compatibility. Production does not.
 
+## Evaluation gate
+
+The production verdict uses the verified policy bundle's explicit evaluation requirements; a legacy unsigned `require_passed_evaluation_for_promotion` flag does not control production behavior after migration. Operators must encode the intended event-type evaluation gate in the signed bundle and verify both a passing evaluation and a blocked or missing evaluation through the signed-bundle HTTP verdict tests before promotion. The proposed PR's tests do not substitute for live deployment configuration validation.
+
+## Human approval gate
+
+The signed bundle must explicitly carry the `human_approved` rule and a non-empty `requires_approver_allowlist` gate. Production rejects `AIGOV_APPROVER_ALLOWLIST` as an unsigned environment override; operators must migrate the allowlist into the signed bundle and test both authorized and unauthorized approvers. Missing or malformed approver gates fail closed at startup in the scenario tests.
+
 ## Demonstrated behavior and regression coverage
 
 The changes add scenario tests in `rust/tests/tb_*.rs`, including production startup without a bundle, unsigned override refusal, invalid and expired signatures, untrusted keys, modified policy identifiers and rules, and a positive HTTP verdict path using a signed bundle. Python tests cover v2 signing and tampering in `python/tests/test_policy_bundle_v2.py` and `python/tests/test_cli_signing_key_input.py`.
