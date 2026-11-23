@@ -1,0 +1,33 @@
+# Staging overlay for docker-compose.yml. Use both files:
+#   docker compose -p aigov-staging-local -f docker-compose.yml -f docker-compose.staging.yml up -d --no-build
+#
+# No value in this file is a secret. Every secret and the signed bundle location is required at deploy
+# time (`:?` makes compose fail when a variable is unset), so a missing value cannot fall back to the
+# development credentials in docker-compose.yml. scripts/staging_local_deploy.sh sets them.
+#
+# Staging is isolated from production: its own Postgres volume, its own API keys, its own trust store,
+# and its own bundle. Nothing here references production infrastructure.
+
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: govai
+      POSTGRES_USER: govai
+      POSTGRES_PASSWORD: ${GOVAI_STAGING_DB_PASSWORD:?set GOVAI_STAGING_DB_PASSWORD}
+    ports: !reset []
+
+  aigov-core:
+    image: ${GOVAI_STAGING_IMAGE:-aigov-core:staging-local}
+    ports: !override
+      - "127.0.0.1:8088:8088"
+    environment:
+      AIGOV_ENVIRONMENT: staging
+      AIGOV_POLICY_DIR: /app/policies
+      AIGOV_POLICY_BUNDLE_FILE: /app/policies/policy.bundle.staging.json
+      AIGOV_POLICY_TRUST_ED25519_JSON: ${GOVAI_STAGING_TRUST_JSON:?set GOVAI_STAGING_TRUST_JSON}
+      GOVAI_API_KEYS: ${GOVAI_STAGING_API_KEY:?set GOVAI_STAGING_API_KEY}
+      GOVAI_API_KEYS_JSON: ${GOVAI_STAGING_API_KEYS_JSON:?set GOVAI_STAGING_API_KEYS_JSON}
+      DATABASE_URL: postgres://govai:${GOVAI_STAGING_DB_PASSWORD:?set GOVAI_STAGING_DB_PASSWORD}@postgres:5432/govai
+    volumes: !override
+      - govai-ledger-data:/var/lib/govai/ledger
+      - ${GOVAI_STAGING_BUNDLE_DIR:?set GOVAI_STAGING_BUNDLE_DIR}:/app/policies:ro
