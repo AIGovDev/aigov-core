@@ -10,7 +10,10 @@ import stat
 
 import pytest
 from aigov_py.cli import main
-from aigov_py.policy_bundle_signing import policy_payload_digest_sha256_hex
+from aigov_py.policy_bundle_signing import (
+    policy_payload_digest_sha256_hex,
+    policy_signature_digest_v2,
+)
 from nacl.signing import SigningKey, VerifyKey
 
 TEST_SEED = bytes(range(32))
@@ -48,7 +51,16 @@ def test_key_file_with_owner_only_mode_signs_and_verifies(tmp_path):
     assert rc == 0
     doc = json.loads((tmp_path / "signed.json").read_text(encoding="utf-8"))
     rec = doc["signatures"][0]
-    digest = policy_payload_digest_sha256_hex({"schema": "govai.policy.v1", "issuer": {"issuer_id": ISSUER}})
+    doc_digest = policy_payload_digest_sha256_hex({"schema": "govai.policy.v1", "issuer": {"issuer_id": ISSUER}})
+    # v2 record: the signed digest binds issuer, signer, creation time and expiry.
+    assert rec["payload_version"] == 2
+    digest = policy_signature_digest_v2(
+        policy_digest_sha256=doc_digest,
+        issuer_id=ISSUER,
+        signer="ci-test",
+        created_at_utc="2026-11-23T00:00:00Z",
+        expires_at_utc=None,
+    )
     assert rec["payload_digest_sha256"] == digest
     VerifyKey(SigningKey(TEST_SEED).verify_key.encode()).verify(
         digest.encode("utf-8"), base64.b64decode(rec["signature"]["value"])

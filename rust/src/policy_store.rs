@@ -81,6 +81,7 @@ impl PolicyStore {
                     return Err("Invalid policy configuration: refusing to start — AIGOV_POLICY_TRUST_ED25519_JSON required for signed policy verification".to_string());
                 }
                 policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
+                enforce_production_contract(deployment_env, &doc)?;
             }
             let rp =
                 load_bundle_doc(&doc).map_err(|e| format!("policy bundle load failed: {e}"))?;
@@ -112,6 +113,7 @@ impl PolicyStore {
                         return Err("Invalid policy configuration: refusing to start — AIGOV_POLICY_TRUST_ED25519_JSON required for signed policy verification".to_string());
                     }
                     policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
+                enforce_production_contract(deployment_env, &doc)?;
                 }
                 let rp = load_bundle_doc(&doc)
                     .map_err(|e| format!("policy bundle load failed {}: {e}", p.display()))?;
@@ -183,6 +185,65 @@ impl PolicyStore {
     pub fn deployment_env(&self) -> GovaiEnvironment {
         self.deployment_env
     }
+}
+
+/// Production contract for a verified signed bundle. Refuses declared controls that this build does
+/// not enforce, so a signature can never vouch for a control that silently does nothing.
+///
+/// * `verdict_rules` are parsed but not evaluated: refused when non-empty.
+/// * `inherits` is not resolved: refused when non-empty.
+/// * `selectors` are not evaluated (resolution is global): tenants must be `["*"]`, and
+///   environments must include `"*"` or the deployment environment.
+/// * Any `human_approved` rule must constrain the approver with a `requires_approver_allowlist` gate.
+/// * `policy_id` and `version` must be present.
+pub fn enforce_production_contract(
+    deployment_env: GovaiEnvironment,
+    doc: &GovaiPolicyV1,
+) -> Result<(), String> {
+    if matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Ok(());
+    }
+    if doc.policy_id.trim().is_empty() || doc.version.trim().is_empty() {
+        return Err("production policy requires non-empty policy_id and version".to_string());
+    }
+    if !doc.inherits.is_empty() {
+        return Err("production policy: inherits is not supported by this build; remove it".to_string());
+    }
+    if !doc.verdict_rules.required_evidence_codes.is_empty()
+        || !doc.verdict_rules.invalid_conditions.is_empty()
+    {
+        return Err(
+            "production policy: verdict_rules are not enforced by this build; remove them or they would have no effect"
+                .to_string(),
+        );
+    }
+    let env_label = deployment_env.as_str();
+    let tenants_global = doc.selectors.tenants.iter().all(|t| t.trim() == "*") && !doc.selectors.tenants.is_empty();
+    let env_match = doc
+        .selectors
+        .environments
+        .iter()
+        .any(|e| e.trim() == "*" || e.trim() == env_label);
+    if !tenants_global || !env_match {
+        return Err(format!(
+            "production policy: selectors are not enforced by this build (tenants must be [\"*\"], environments must include \"*\" or {env_label})"
+        ));
+    }
+    if let Some(rule) = doc.ingest_rules.event_types.get("human_approved") {
+        let has_allowlist = rule.gates.iter().any(|g| {
+            g.get("type").and_then(|t| t.as_str()) == Some("requires_approver_allowlist")
+                && g.get("allowlist")
+                    .and_then(|a| a.as_array())
+                    .is_some_and(|a| !a.is_empty())
+        });
+        if !has_allowlist {
+            return Err(
+                "production policy: human_approved must include a requires_approver_allowlist gate with a non-empty allowlist"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn load_bundle_doc(doc: &GovaiPolicyV1) -> Result<RuntimePolicy, String> {
