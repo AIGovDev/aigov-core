@@ -115,6 +115,20 @@ def validate(
             "store (or a real KMS provider) in production."
         )
 
+    # 5b. Distributed mode: key provider must use asymmetric signing (private key in KMS).
+    #     HMAC/symmetric providers (EnvKMSClient, SqlKeyStore) return raw key bytes to the
+    #     application and are only suitable for single-process staging deployments.
+    if mode == DeploymentMode.DISTRIBUTED:
+        is_asymmetric = getattr(key_provider, "is_asymmetric", False)
+        if not is_asymmetric:
+            result.violations.append(
+                "key_provider.is_asymmetric is False in DISTRIBUTED mode: HMAC/symmetric "
+                "providers expose raw signing key bytes to the application process. "
+                "Use an asymmetric KMS provider (LocalEd25519KMSProvider for staging, "
+                "VercelKMSProvider or equivalent for production) where the private key "
+                "never leaves the KMS boundary."
+            )
+
     # 6. Distributed mode: approval registry must be PostgreSQL
     if mode == DeploymentMode.DISTRIBUTED:
         reg_safe = getattr(approval_registry, "is_distributed_safe", False)

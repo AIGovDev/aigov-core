@@ -1177,6 +1177,81 @@ Do not merge to production without authorization. Do not deploy without authoriz
 
 ---
 
+## Pass 12 — 2026-11-23
+
+**Branch:** `feat/asymmetric-kms-ci-pg`  
+**Tests:** 72 passed, 0 failed, 0 skipped (all three suites)  
+**Previous conditions met in this pass:**
+1. ✅ Genuine asymmetric KMS provider — private signing keys never reach the application
+2. ✅ Production validator rejects HMAC in DISTRIBUTED mode
+3. ✅ CI PG tests fail (not skip) when `TEST_PG_DSN` absent; `postgres-integration.yml` triggers on `staging`
+4. ✅ P28–P32 cover signature validity, rotation, retirement, KMS failure, downgrade attack
+
+### New files
+
+**`benchmarks/agent-verification/asymmetric_kms_provider.py`**
+- `AsymmetricKMSBase` — interface: `sign(payload) → bytes`; `get_public_key_bytes(key_id) → bytes | None`. No `get_key()` method (key material boundary).
+- `LocalEd25519KMSProvider` — test/staging: ephemeral Ed25519 keypairs. Private key objects confined inside `_keys` dict; never serialized or returned from any public method. `get_verification_key()` always returns `None` (asymmetric provider has no symmetric key). `is_distributed_safe = False`.
+- `VercelKMSProvider` — production: HTTP client for Vercel KMS sign (`POST /v1/sign`) and JWKS verification (`GET /.well-known/jwks.json`). `is_distributed_safe = True`.
+
+**Changes to `execution_token.py`**
+- `_build_signable()`: `algo` parameter added and included in the signed JSON payload. Prevents downgrade attacks: changing `algo` from `ed25519` → `hmac-sha256` changes the signed bytes → HMAC over the new payload never matches any real HMAC key's output for the original payload.
+- `ExecutionToken` dataclass: `algo: str = "hmac-sha256"` field (default preserves backward compat for HMAC providers).
+- `ExecutionTokenAuthority.issue()`: detects `is_asymmetric=True` on provider → calls `provider.sign(signable)` → base64url-encodes signature. HMAC path unchanged.
+- `ExecutionTokenAuthority._verify_signature()`: dispatches on `token.algo`. Ed25519: fetches public key bytes, verifies locally with `cryptography`. HMAC: existing path unchanged.
+
+**Changes to `production_config.py`**
+- Check 5b: `DISTRIBUTED` mode now requires `key_provider.is_asymmetric = True`. HMAC/symmetric providers (`EnvKMSClient`, `SqlKeyStore`) expose raw key bytes in-process and are only suitable for `SINGLE_PROCESS` staging. Violation message names `VercelKMSProvider` as the production replacement.
+
+### Updated threat model
+
+| Threat | Mitigation | Status |
+|---|---|---|
+| SQL database compromise exposes signing key material | `SqlKeyMetadataStore` stores no key bytes | **CONFIRMED (Pass 11)** |
+| In-process key bytes readable by application code | Asymmetric KMS: `sign()` only; no `signing_key` property | **NEW (Pass 12)** |
+| Algorithm downgrade: forge HMAC token from Ed25519 context | `algo` field included in `_build_signable()`; HMAC over `algo="hmac-sha256"` payload never matches | **NEW (Pass 12)** |
+| PG tests silently skip in CI (false green) | `_pg_skip` marker: `skipif(not _PG_DSN and not _CI)`; CI without PG → test runs → fails at connection | **NEW (Pass 12)** |
+| Misconfigured production uses symmetric keys | `validate_production_config(DISTRIBUTED)` now rejects `is_asymmetric=False` | **NEW (Pass 12)** |
+
+### Updated deployment checklist additions
+
+**Asymmetric KMS (new requirement for DISTRIBUTED mode):**
+- [ ] Deploy `VercelKMSProvider` (or equivalent: AWS KMS, HashiCorp Vault) with an Ed25519 key pair
+- [ ] Never set `AIGOV_SIGNING_KEY_*` env vars in DISTRIBUTED deployments — use the KMS provider
+- [ ] Provision the key in Vercel KMS; set `key_id` in `VercelKMSProvider` constructor
+- [ ] Run `validate_production_config(mode=DeploymentMode.DISTRIBUTED)` at startup — it will reject symmetric providers
+
+**CI PostgreSQL (new):**
+- [ ] `TEST_PG_DSN` is now set in `postgres-integration.yml` from the postgres service — no manual action needed for CI
+- [ ] `postgres-integration.yml` now triggers on `staging` — PG tests run on every staging push/PR
+
+### Remaining risks (Pass 12)
+
+| Risk | Severity | Notes |
+|---|---|---|
+| `LocalEd25519KMSProvider` is not distributed-safe | BY-DESIGN | In-process only; `validate_production_config(DISTRIBUTED)` flags it. Use `VercelKMSProvider` for multi-process. |
+| `VercelKMSProvider.rotate()` raises `NotImplementedError` | BY-DESIGN | Key rotation managed in Vercel dashboard; no programmatic rotation needed from app code. |
+| JWKS cache in `VercelKMSProvider` not invalidated on key retirement | LOW | Call `provider.retire_key(key_id)` to bust cache. Full retirement must be done in Vercel dashboard. |
+
+### Verdict
+
+**Staging: GO** (unchanged)  
+**Production: CONDITIONAL GO**
+
+Conditions met in Pass 12:
+1. ✅ Private signing keys never reach the application (asymmetric KMS)
+2. ✅ Algorithm downgrade attack rejected at token verification
+3. ✅ Production validator rejects symmetric providers in DISTRIBUTED mode
+4. ✅ PostgreSQL CI tests fail (not skip) when database unavailable
+5. ✅ 72/72 tests pass, 0 skipped
+
+Remaining condition before full Production GO:
+- **Provision a real KMS** (`VercelKMSProvider` or equivalent) with an Ed25519 key pair. `LocalEd25519KMSProvider` is test-only; `VercelKMSProvider.sign()` will fail until a key is provisioned in the Vercel dashboard.
+
+Do not merge to production without authorization. Do not deploy without authorization.
+
+---
+
 ## Human approval gate
 
 - Human code review and merge authorization: **PENDING**
