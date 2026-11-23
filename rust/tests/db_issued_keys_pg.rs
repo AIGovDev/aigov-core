@@ -143,4 +143,10 @@ async fn issued_key_auth_revocation_and_team_scope() {
     // Issuance rejects tenant ids that could collide in the ledger file namespace.
     let bad = tenant_api_keys::issue_api_key(&pool, team_a, "team.a", actor, "bad").await;
     assert!(bad.is_err(), "issuance must reject tenant ids outside [A-Za-z0-9_-]");
+
+    // Issuance refuses a tenant that differs from an existing one only by ASCII case
+    // (the ledger file name would collide on case-insensitive file systems).
+    let upper = tenant_a.to_ascii_uppercase();
+    let case_clash = tenant_api_keys::issue_api_key(&pool, team_a, &upper, actor, "case").await;
+    assert!(case_clash.is_err(), "case-variant of an existing tenant must be refused at issuance");
 }

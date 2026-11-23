@@ -84,17 +84,22 @@ def upload_artifacts_for_run(
     client,
     *,
     run_id: str,
+    tenant_id: str,
     pack_zip: Path,
     audit_json: Path,
     evidence_json: Path,
 ) -> list[UploadResult]:
+    """Upload run artifacts under ``<tenant_id>/<run_id>...`` so tenants never share object names."""
+    from aigov_py.tenant_ledger import validate_tenant_id
+
+    prefix = validate_tenant_id(tenant_id) + "/"
     results: list[UploadResult] = []
 
     results.append(
         upload_file_path(
             client,
             bucket="packs",
-            object_name=f"{run_id}.zip",
+            object_name=f"{prefix}{run_id}.zip",
             path=pack_zip,
             content_type="application/zip",
         )
@@ -104,7 +109,7 @@ def upload_artifacts_for_run(
         upload_file_path(
             client,
             bucket="audit",
-            object_name=f"{run_id}.json",
+            object_name=f"{prefix}{run_id}.json",
             path=audit_json,
             content_type="application/json",
         )
@@ -114,7 +119,7 @@ def upload_artifacts_for_run(
         upload_file_path(
             client,
             bucket="evidence",
-            object_name=f"{run_id}.json",
+            object_name=f"{prefix}{run_id}.json",
             path=evidence_json,
             content_type="application/json",
         )

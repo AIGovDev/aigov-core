@@ -73,6 +73,22 @@ async fn lookup_tenant_by_key_hash(
 }
 
 /// Whether the bearer token is authorized for audit routes (env allowlist or active issued key).
+/// Startup check: no database-issued tenant may collide with an environment-configured tenant.
+/// Only meaningful when a database is configured. Errors fail startup.
+pub async fn check_db_tenants_against_env(pool: &DbPool) -> Result<(), String> {
+    let db_tenants: Vec<String> = sqlx::query_scalar::<_, String>(
+        "select distinct ledger_tenant_id from public.govai_issued_api_keys",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("could not list issued tenants for collision check: {e}"))?;
+    let env_tenants = crate::audit_api_key::configured_env_tenants();
+    for d in &db_tenants {
+        crate::audit_api_key::check_new_tenant_against_existing(d, &env_tenants)?;
+    }
+    Ok(())
+}
+
 pub async fn bearer_token_is_authorized(
     pool: &DbPool,
     token: &str,
@@ -106,6 +122,14 @@ pub async fn issue_api_key(
     label: &str,
 ) -> Result<(IssuedKeyRow, String), sqlx::Error> {
     crate::audit_api_key::validate_issued_tenant_id(ledger_tenant_id)
+        .map_err(sqlx::Error::Protocol)?;
+    let mut existing: Vec<String> = sqlx::query_scalar::<_, String>(
+        "select distinct ledger_tenant_id from public.govai_issued_api_keys",
+    )
+    .fetch_all(pool)
+    .await?;
+    existing.extend(crate::audit_api_key::configured_env_tenants());
+    crate::audit_api_key::check_new_tenant_against_existing(ledger_tenant_id, &existing)
         .map_err(sqlx::Error::Protocol)?;
     let raw = generate_raw_api_key();
     let hash = key_fingerprint(&raw);

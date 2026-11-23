@@ -105,6 +105,19 @@ pub fn resolve_ledger_tenant_id_for_bearer(token: &str) -> Option<String> {
         .and_then(|guard| guard.get(token).cloned())
 }
 
+/// Tenant ids configured through `GOVAI_API_KEYS_JSON` (values only, never keys).
+pub fn configured_env_tenants() -> Vec<String> {
+    API_KEY_TENANT_MAP
+        .get()
+        .map(|m| {
+            let mut v: Vec<String> = m.values().cloned().collect();
+            v.sort();
+            v.dedup();
+            v
+        })
+        .unwrap_or_default()
+}
+
 pub fn api_key_tenant_map_is_initialized() -> bool {
     API_KEY_TENANT_MAP.get().is_some()
 }
@@ -201,25 +214,64 @@ pub fn init_api_key_tenant_map(deployment_env: GovaiEnvironment) -> Result<(), S
     Ok(())
 }
 
-/// Refuse maps where two distinct tenant ids share one ledger file.
+/// Refuse maps whose tenant ids would share, or be ambiguous about, a ledger file.
 ///
-/// Ledger files are named from the sanitised tenant id (`project::resolve_ledger_path`), and
-/// characters outside `[A-Za-z0-9_-]` become `_`. So `team.a` and `team_a` would read and write
-/// the same evidence. This check fails closed in every environment. Tenant ids are not secrets.
+/// * Two distinct tenants whose segments are equal ignoring ASCII case (case-insensitive file
+///   systems) are refused.
+/// * A tenant whose pre-v2 (lossy) ledger file exists on disk must be listed in
+///   `AIGOV_LEDGER_LEGACY_TENANTS`. Otherwise its evidence would silently appear empty. This is
+///   an explicit operator decision, and nothing is moved or overwritten.
+///
+/// Fails closed in every environment. Tenant ids are not secrets.
 pub fn check_tenant_ledger_collisions(map: &HashMap<String, String>) -> Result<(), String> {
     let mut tenants: Vec<&String> = map.values().collect();
     tenants.sort();
     tenants.dedup();
+    let legacy = crate::project::legacy_tenant_ids();
     let mut seen: HashMap<String, &String> = HashMap::new();
     for tenant in tenants {
-        let segment = crate::project::tenant_ledger_segment(tenant);
-        if let Some(prev) = seen.get(&segment) {
+        let segment = crate::project::ledger_segment_for_tenant(tenant);
+        let key = crate::project::segment_collision_key(&segment);
+        if let Some(prev) = seen.get(&key) {
             return Err(format!(
-                "tenant ids {prev:?} and {tenant:?} would share one ledger file; rename one so the \
-                 names differ in characters other than [A-Za-z0-9_-]"
+                "tenant ids {prev:?} and {tenant:?} would share one ledger file (names collide, \
+                 ignoring ASCII case); rename one tenant"
             ));
         }
-        seen.insert(segment, tenant);
+        seen.insert(key, tenant);
+
+        if !legacy.contains(tenant) {
+            let legacy_segment = crate::project::tenant_ledger_segment_legacy(tenant);
+            if legacy_segment != crate::project::tenant_ledger_segment(tenant) {
+                let legacy_file = crate::project::ledger_file_for_segment(
+                    crate::project::TENANT_LEDGER_BASE,
+                    &legacy_segment,
+                );
+                if std::path::Path::new(&legacy_file).exists() {
+                    return Err(format!(
+                        "tenant {tenant:?} has an existing pre-v2 ledger file; add it to \
+                         {} to keep reading that file, or migrate it explicitly",
+                        crate::project::LEGACY_TENANTS_ENV
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a new tenant id whose ledger file would collide with an existing tenant's file.
+/// Used when issuing database keys. `existing` should include environment-configured tenants.
+pub fn check_new_tenant_against_existing(new_tenant: &str, existing: &[String]) -> Result<(), String> {
+    let new_key = crate::project::segment_collision_key(&crate::project::ledger_segment_for_tenant(new_tenant));
+    for other in existing {
+        if other == new_tenant {
+            continue;
+        }
+        let other_key = crate::project::segment_collision_key(&crate::project::ledger_segment_for_tenant(other));
+        if other_key == new_key {
+            return Err("ledger_tenant_id would share a ledger file with an existing tenant".to_string());
+        }
     }
     Ok(())
 }
@@ -888,15 +940,26 @@ mod tests {
     }
 
     #[test]
-    fn tenant_ledger_collision_refused_for_names_that_sanitise_alike() {
+    fn tenant_ledger_collision_accepts_dotted_and_underscored_names_under_injective_mapping() {
         let map: HashMap<String, String> = [
             ("k1".to_string(), "team.a".to_string()),
             ("k2".to_string(), "team_a".to_string()),
         ]
         .into_iter()
         .collect();
-        let err = check_tenant_ledger_collisions(&map).expect_err("must refuse");
-        assert!(err.contains("share one ledger file"), "{err}");
+        check_tenant_ledger_collisions(&map).expect("distinct under the injective mapping");
+    }
+
+    #[test]
+    fn tenant_ledger_collision_refuses_names_equal_ignoring_case() {
+        let map: HashMap<String, String> = [
+            ("k1".to_string(), "Team".to_string()),
+            ("k2".to_string(), "team".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let err = check_tenant_ledger_collisions(&map).expect_err("case-only collision must refuse");
+        assert!(err.contains("ignoring ASCII case"), "{err}");
     }
 
     #[test]
