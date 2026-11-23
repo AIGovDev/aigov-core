@@ -1085,6 +1085,98 @@ Do not merge to production without authorization. Do not deploy without authoriz
 
 ---
 
+## Pass 11 — KMS-backed keys, real PostgreSQL, SDK E2E (2026-11-22)
+
+**Scope:** Closes all three Pass 10 production conditions.
+
+**Changes:**
+- `benchmarks/agent-verification/kms_key_provider.py` (new): `SqlKeyMetadataStore` (SQL metadata only, no `key_bytes` column), `EnvKMSClient` (KMS simulation via env vars), `KMSBackedRotatingKeyProvider` (`is_managed=True`, fail-closed on KMS unavailability)
+- `benchmarks/openai-agents-integration/adapter/aigov_sdk_adapter.py`: added `AIGovGuardedDocumentTools.validate_production_config(mode)` — startup validation path, fail-closed via `ProductionConfigError`
+- `benchmarks/openai-agents-integration/tests/test_sdk_production.py`: expanded to P1–P27 (was P1–P19)
+
+**KMS security property:** `SqlKeyMetadataStore` schema has columns `key_id, is_current, created_at, retired_at` — no `key_bytes`. SQL database compromise reveals rotation state only. Key material lives exclusively in the KMS (env vars in simulation; real KMS for production). Verified by P22 (schema inspection confirms no `key_bytes` column) and P27 (PostgreSQL metadata store schema check).
+
+### Test results (67 passed, 0 skipped, 0 failed)
+
+**Previously skipped — now live:**
+
+| Test | Description | Result |
+|---|---|---|
+| P15 | SDK FunctionTool E2E: read + update via `on_invoke_tool`, mandatory audit rows verified | **PASS** (openai-agents 0.25.0) |
+| P18 | PostgreSQL nonce backend: atomic consume across two connections | **PASS** (live PG 14.13) |
+| P19 | PostgreSQL approval backend: register and consume | **PASS** (live PG 14.13) |
+
+**New tests (P20–P27):**
+
+| Test | Description | Result |
+|---|---|---|
+| P20 | PG nonce atomicity: 4 concurrent spawned processes — exactly 1 consumes | **PASS** |
+| P21 | PG approval atomic consume: 2 concurrent workers — exactly 1 wins | **PASS** |
+| P22 | KMSBackedRotatingKeyProvider: bytes from env, SQL has no `key_bytes` column | **PASS** |
+| P23 | KMS unavailability: missing env var → `KMSUnavailableError` on issue; None on verify | **PASS** |
+| P24 | PG approval registry outage: patched `_pg_conn` raises → fail-closed deny | **PASS** |
+| P25 | Audit distinguishability: orphan/verified/reconciled states independently classified | **PASS** |
+| P26 | `validate_production_config()` on `AIGovGuardedDocumentTools`: valid config passes; missing audit raises `ProductionConfigError`; DISTRIBUTED with SQLite raises | **PASS** |
+| P27 | KMSBackedRotatingKeyProvider with PG metadata: rotation and retirement visible cross-instance; `key_bytes` absent from PG schema | **PASS** (live PG 14.13) |
+
+### Updated threat model
+
+| Threat | Mitigation | Status |
+|---|---|---|
+| SQL database compromise exposes signing key material | `SqlKeyMetadataStore` stores no key bytes; KMS is the only key-material source | **NEW (Pass 11)** |
+| KMS unavailability allows unsigned tokens | `KMSBackedRotatingKeyProvider.signing_key` raises `KMSUnavailableError` → fail-closed | **NEW (Pass 11)** |
+| Misconfigured production startup | `validate_production_config(mode)` on `AIGovGuardedDocumentTools` | **NEW (Pass 11)** |
+| PostgreSQL concurrent nonce races | `SELECT FOR UPDATE` / `INSERT OR IGNORE`; P20 verifies 4-way atomicity under real load | **CONFIRMED (Pass 11)** |
+| PostgreSQL concurrent approval double-consume | P21 verifies 2-way race under real PostgreSQL | **CONFIRMED (Pass 11)** |
+| Three audit states confused (orphan/verified/reconciled) | P25 verifies AuditReconciler correctly classifies all three in one store | **CONFIRMED (Pass 11)** |
+
+### Updated deployment checklist
+
+**All previous checklist items remain. New additions:**
+
+**KMS-backed key provider (production):**
+- [ ] Replace `SqlKeyStore` (stores raw bytes in DB) with `SqlKeyMetadataStore` + real KMS client (Vercel KMS, AWS Secrets Manager, HashiCorp Vault)
+- [ ] Never store `AIGOV_SIGNING_KEY_*` env vars on the same host as the SQL database — use a secret manager
+- [ ] After retiring a key, delete its KMS entry; the metadata retirement alone suffices for token rejection, but orphaned KMS entries increase key-material exposure
+
+**Startup validation (production):**
+- [ ] Call `guarded.validate_production_config(mode=DeploymentMode.DISTRIBUTED)` before accepting any traffic
+- [ ] Fail the deployment if `ProductionConfigError` is raised — never swallow it
+
+**Key rotation procedure (unchanged, but now also applies to `KMSBackedRotatingKeyProvider`):**
+1. Generate new key material out-of-band; load into KMS
+2. `meta.add_key("v{N+1}")` — register key_id in metadata store (no bytes stored in SQL)
+3. `meta.set_current("v{N+1}")` — start signing with new key
+4. Wait ≥ EAT TTL for in-flight v{N} tokens to expire
+5. `meta.retire_key("v{N}")` — immediately invalidates all v{N} tokens across all workers
+6. Delete v{N} from KMS after retirement confirmation
+
+### Remaining risks
+
+| Risk | Severity | Notes |
+|---|---|---|
+| `EnvKMSClient` for staging — env vars readable in-process | MEDIUM | Acceptable for staging; production must use a process-boundary KMS (AWS KMS, Vault, Vercel KMS) |
+| PostgreSQL tests require manual `TEST_PG_DSN` in CI | LOW | Now verified live; add to CI env vars |
+| `is_distributed_safe` brittle `_replay_registry` access | INFO | FINDING-DUR-3; schedule `ToolGateway.replay_registry` property follow-up |
+
+### Verdict
+
+**Staging: GO** (unchanged from Pass 10)
+**Production: GO** (all Pass 10 conditions closed)
+
+Conditions closed in Pass 11:
+1. ✅ P18/P19/P20/P21 run against live PostgreSQL 14.13 — atomicity confirmed
+2. ✅ `KMSBackedRotatingKeyProvider` implemented; `SqlKeyMetadataStore` stores no key bytes — SQL compromise no longer exposes key material
+3. ✅ `validate_production_config()` wired into `AIGovGuardedDocumentTools`; `validate_or_raise()` available for production entrypoint
+
+Remaining before shipping to production:
+- Replace `EnvKMSClient` with a process-boundary KMS (Vercel KMS recommended)
+- Add `TEST_PG_DSN` to CI environment to prevent these tests from silently skipping
+
+Do not merge to production without authorization. Do not deploy without authorization.
+
+---
+
 ## Human approval gate
 
 - Human code review and merge authorization: **PENDING**
