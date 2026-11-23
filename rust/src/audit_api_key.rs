@@ -359,27 +359,43 @@ pub fn validate_api_key_allowlist_consistency(
     let json_map = parse_api_key_tenant_map_from_env_value(&json_raw)?;
     let allowlist = parse_api_keys_allowlist(&allowlist_raw);
 
-    if json_map.is_empty() {
-        return Ok(());
-    }
-
+    // Orphans: tenant-mapped keys the bearer allowlist rejects (HTTP 401 INVALID_API_KEY).
     let orphans: Vec<String> = json_map
         .keys()
         .filter(|k| !allowlist.contains(*k))
         .map(|k| key_fingerprint(k))
         .collect();
+    // Unmapped: allowlisted keys with no tenant (ledger routes return TENANT_RESOLUTION_FAILED).
+    let unmapped: Vec<String> = allowlist
+        .iter()
+        .filter(|k| !json_map.contains_key(*k))
+        .map(|k| key_fingerprint(k))
+        .collect();
 
-    if orphans.is_empty() {
+    if orphans.is_empty() && unmapped.is_empty() {
         return Ok(());
     }
 
-    let summary = format!(
-        "GOVAI_API_KEYS_JSON contains {} key(s) not present in GOVAI_API_KEYS \
-         (sha256 fingerprints: {}). Audit routes will return HTTP 401 INVALID_API_KEY \
-         for these keys until both env vars include them. Never log raw API keys.",
-        orphans.len(),
-        orphans.join(",")
-    );
+    let mut problems = Vec::new();
+    if !orphans.is_empty() {
+        problems.push(format!(
+            "GOVAI_API_KEYS_JSON contains {} key(s) not present in GOVAI_API_KEYS \
+             (sha256 fingerprints: {}). Audit routes will return HTTP 401 INVALID_API_KEY \
+             for these keys until both env vars include them.",
+            orphans.len(),
+            orphans.join(",")
+        ));
+    }
+    if !unmapped.is_empty() {
+        problems.push(format!(
+            "GOVAI_API_KEYS lists {} key(s) with no tenant in GOVAI_API_KEYS_JSON \
+             (sha256 fingerprints: {}). Ledger routes return TENANT_RESOLUTION_FAILED for these keys; \
+             GOVAI_API_KEYS_JSON must map every allowlisted key to a tenant.",
+            unmapped.len(),
+            unmapped.join(",")
+        ));
+    }
+    let summary = format!("{} Never log raw API keys.", problems.join(" "));
 
     match deployment_env {
         GovaiEnvironment::Dev => {
@@ -807,5 +823,29 @@ mod tests {
         std::env::set_var("GOVAI_API_KEYS_JSON", r#"{"k1":"t1","k2":"t2"}"#);
         validate_api_key_allowlist_consistency(GovaiEnvironment::Prod)
             .expect("prod should pass when allowlist covers JSON keys (per-key caps stripped)");
+    }
+
+    #[test]
+    fn validate_api_key_allowlist_consistency_prod_fails_when_allowlisted_key_has_no_tenant() {
+        // Allowlist without a tenant map: the key passes the bearer gate but every ledger route
+        // returns TENANT_RESOLUTION_FAILED. Staging/prod must refuse to start.
+        let _g = validator_env_lock().lock().unwrap();
+        let _scoped = ScopedEnv::new(&["GOVAI_API_KEYS", "GOVAI_API_KEYS_JSON"]);
+        std::env::set_var("GOVAI_API_KEYS", "k-prod-1");
+        std::env::remove_var("GOVAI_API_KEYS_JSON");
+        let err = validate_api_key_allowlist_consistency(GovaiEnvironment::Prod)
+            .expect_err("prod must reject an allowlisted key without a tenant");
+        assert!(err.contains("no tenant"), "unexpected message: {err}");
+        assert!(!err.contains("k-prod-1"), "raw key must not be logged");
+    }
+
+    #[test]
+    fn validate_api_key_allowlist_consistency_dev_allowlist_without_tenant_warns_only() {
+        let _g = validator_env_lock().lock().unwrap();
+        let _scoped = ScopedEnv::new(&["GOVAI_API_KEYS", "GOVAI_API_KEYS_JSON"]);
+        std::env::set_var("GOVAI_API_KEYS", "k-dev-1");
+        std::env::remove_var("GOVAI_API_KEYS_JSON");
+        validate_api_key_allowlist_consistency(GovaiEnvironment::Dev)
+            .expect("dev stays warn-only for unmapped allowlisted keys");
     }
 }

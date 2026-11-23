@@ -262,14 +262,21 @@ class VercelKMSProvider(AsymmetricKMSBase):
     never receives private key material. Authentication is via OIDC, which
     Vercel Functions obtain automatically from the runtime.
 
-    API shape:
-      Sign:    POST {base_url}/v1/sign
-               Body: {"keyId": "...", "data": "<base64url(payload)>"}
-               Response: {"signature": "<base64url(sig)>", "keyId": "..."}
+    UNVERIFIED API SHAPE. The endpoints below are NOT the documented Vercel KMS API and
+    must not be used in production until checked against live Vercel KMS. Documented API
+    (https://vercel.com/docs/rest-api/kms/sign-a-message and https://vercel.com/docs/kms/concepts/authentication):
 
-      Verify:  GET  {base_url}/.well-known/jwks.json
-               Response: {"keys": [{"kid": "...", "kty": "OKP", "crv": "Ed25519",
-                                    "x": "<base64url(public_key)>"}]}
+      Sign:    POST https://kms.vercel.com/v1/kms/issuers/{issuerId}/sign/message
+               Body: {"message": "<standard base64 of the payload>"}
+               Response: {"algorithm", "fingerprint", "keyId", "signature" (standard base64)}
+
+      Verify:  GET  https://kms.vercel.com/<issuerId>/jwks.json  (KMS sets the JWT kid header)
+
+      Ed25519 support and the JWK crv value are NOT stated in the documentation.
+
+    The implementation below still uses the assumed shape (POST {base_url}/v1/sign and
+    /.well-known/jwks.json). Treat it as a placeholder until it is rewritten against the
+    documented API and verified live.
 
     Usage:
         import os
