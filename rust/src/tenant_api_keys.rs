@@ -105,6 +105,8 @@ pub async fn issue_api_key(
     created_by: Uuid,
     label: &str,
 ) -> Result<(IssuedKeyRow, String), sqlx::Error> {
+    crate::audit_api_key::validate_issued_tenant_id(ledger_tenant_id)
+        .map_err(sqlx::Error::Protocol)?;
     let raw = generate_raw_api_key();
     let hash = key_fingerprint(&raw);
     let prefix = raw.chars().take(12).collect::<String>();

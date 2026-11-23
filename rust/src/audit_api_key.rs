@@ -192,11 +192,49 @@ pub fn init_api_key_tenant_map(deployment_env: GovaiEnvironment) -> Result<(), S
         };
     }
 
+    check_tenant_ledger_collisions(&cleaned)?;
+
     API_KEY_TENANT_MAP
         .set(Arc::new(cleaned))
         .map_err(|_| "GOVAI_API_KEYS_JSON was initialized more than once".to_string())?;
     ensure_hosted_hash_map();
     Ok(())
+}
+
+/// Refuse maps where two distinct tenant ids share one ledger file.
+///
+/// Ledger files are named from the sanitised tenant id (`project::resolve_ledger_path`), and
+/// characters outside `[A-Za-z0-9_-]` become `_`. So `team.a` and `team_a` would read and write
+/// the same evidence. This check fails closed in every environment. Tenant ids are not secrets.
+pub fn check_tenant_ledger_collisions(map: &HashMap<String, String>) -> Result<(), String> {
+    let mut tenants: Vec<&String> = map.values().collect();
+    tenants.sort();
+    tenants.dedup();
+    let mut seen: HashMap<String, &String> = HashMap::new();
+    for tenant in tenants {
+        let segment = crate::project::tenant_ledger_segment(tenant);
+        if let Some(prev) = seen.get(&segment) {
+            return Err(format!(
+                "tenant ids {prev:?} and {tenant:?} would share one ledger file; rename one so the \
+                 names differ in characters other than [A-Za-z0-9_-]"
+            ));
+        }
+        seen.insert(segment, tenant);
+    }
+    Ok(())
+}
+
+/// Tenant ids issued to database keys must use only characters that the ledger file name keeps
+/// unchanged, so two issued tenants can never collide.
+pub fn validate_issued_tenant_id(tenant_id: &str) -> Result<(), String> {
+    let ok = !tenant_id.is_empty()
+        && tenant_id.len() <= 128
+        && tenant_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if ok {
+        Ok(())
+    } else {
+        Err("ledger_tenant_id must be 1-128 characters from [A-Za-z0-9_-]".to_string())
+    }
 }
 
 /// Server-controlled tenant id for the tenant-isolated ledger.
@@ -847,5 +885,37 @@ mod tests {
         std::env::remove_var("GOVAI_API_KEYS_JSON");
         validate_api_key_allowlist_consistency(GovaiEnvironment::Dev)
             .expect("dev stays warn-only for unmapped allowlisted keys");
+    }
+
+    #[test]
+    fn tenant_ledger_collision_refused_for_names_that_sanitise_alike() {
+        let map: HashMap<String, String> = [
+            ("k1".to_string(), "team.a".to_string()),
+            ("k2".to_string(), "team_a".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let err = check_tenant_ledger_collisions(&map).expect_err("must refuse");
+        assert!(err.contains("share one ledger file"), "{err}");
+    }
+
+    #[test]
+    fn tenant_ledger_collision_allows_distinct_safe_names_and_shared_tenant() {
+        let map: HashMap<String, String> = [
+            ("k1".to_string(), "tenant-a".to_string()),
+            ("k2".to_string(), "tenant-b".to_string()),
+            ("k3".to_string(), "tenant-a".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        check_tenant_ledger_collisions(&map).expect("distinct tenants and one tenant with two keys are fine");
+    }
+
+    #[test]
+    fn issued_tenant_id_must_use_only_stable_characters() {
+        assert!(validate_issued_tenant_id("team-alpha_01").is_ok());
+        for bad in ["", "team.a", "team a", "../x", "a/b", "é", &"x".repeat(129)] {
+            assert!(validate_issued_tenant_id(bad).is_err(), "must reject {bad:?}");
+        }
     }
 }

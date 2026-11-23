@@ -157,7 +157,7 @@ pub fn configuration_block(st: &AppState, policy_source: &PolicySource) -> Value
         "policy_dir_configured": policy_dir_configured,
         "policy_dir_label": policy_dir_label,
         "policy_source_kind": policy_source_kind_label(policy_source.kind),
-        "policy_source_path": policy_source.path,
+        "policy_source_path": policy_source.path.as_deref().map(|p| redact_path_label(Path::new(p))),
         "api_key_allowlist_count": api_key_allowlist_count(&st.api_key_cfg),
         "api_key_tenant_map_count": api_key_tenant_map_count(),
         "signing_trust_configured": signing_trust_configured(),

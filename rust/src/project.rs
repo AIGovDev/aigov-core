@@ -49,6 +49,11 @@ pub async fn require_tenant_id_for_ledger_async(
     crate::tenant_api_keys::resolve_ledger_tenant_for_bearer(pool, headers, deployment_env).await
 }
 
+/// Ledger file segment for a tenant id (the mapping used by [`resolve_ledger_path`]).
+pub fn tenant_ledger_segment(tenant_id: &str) -> String {
+    sanitize_project_segment(tenant_id)
+}
+
 fn sanitize_project_segment(project_id: &str) -> String {
     let s: String = project_id
         .chars()
