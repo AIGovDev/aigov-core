@@ -60,6 +60,10 @@ Documented in `docs/operations/policy-signing.md`:
 - Legacy flags map to bundle gates (approver allowlist, risk review, evidence). Legacy flags with no bundle equivalent have no effect in production.
 - Existing signed bundles without an expiry still verify. Re-sign with `--expires-at-utc`.
 
+## Evaluation gate
+
+Passes when the Rust suite (with PostgreSQL opted in), the Python suite (with and without PostgreSQL), the scenario tests, and the make gate pass on the pull request head. Results are in section 5.
+
 ## 5. Test results (local)
 
 Final code, commit `96c56e4` (branch `verdict/signed-config`).
@@ -95,7 +99,7 @@ environment was exercised.
 - Key custody is file-based. KMS-backed signing is not implemented.
 - Sigstore live verification is still not run (unchanged from the previous report).
 
-## 8. Human approval gate
+## Human approval gate
 
 Not approved for production by this report.
 
