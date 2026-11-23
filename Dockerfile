@@ -2,7 +2,8 @@
 # Build: docker build -t aigov-core:local .
 # Run:   docker run --rm -p 8088:8088 -v govai-ledger:/var/lib/govai/ledger ...
 
-FROM rust:1-bookworm AS builder
+# base image rust:1-bookworm pinned by digest; refresh deliberately (Dependabot or manual review)
+FROM rust:1-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea AS builder
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -20,7 +21,8 @@ COPY rust/policy.json rust/policy.dev.json rust/policy.staging.json rust/policy.
 
 RUN cargo build --locked --release --bin aigov_audit
 
-FROM debian:bookworm-slim AS runtime
+# base image debian:bookworm-slim pinned by digest; refresh deliberately (Dependabot or manual review)
+FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \

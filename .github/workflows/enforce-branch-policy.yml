@@ -8,6 +8,9 @@ on:
       - staging
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   enforce-branch-policy:
     runs-on: ubuntu-latest

@@ -80,9 +80,43 @@ async fn pool_from_env() -> Result<DbPool, String> {
     Ok(pool)
 }
 
+/// Staging and production must not run verdicts from an unsigned policy *file*.
+///
+/// Built-in defaults are part of the code and are allowed. A file from `AIGOV_POLICY_FILE` or the
+/// environment-named file is refused unless the operator sets `AIGOV_ALLOW_UNSIGNED_POLICY_FILE=1`,
+/// which prints a warning. Migration: sign the policy as a bundle and load it with
+/// `AIGOV_POLICY_BUNDLE_FILE` (see docs/operations/policy-signing.md).
+pub fn enforce_policy_file_trust(
+    deployment_env: GovaiEnvironment,
+    source: &policy_config::PolicySource,
+) -> Result<(), String> {
+    if matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Ok(());
+    }
+    if matches!(source.kind, policy_config::PolicySourceKind::Defaults) {
+        return Ok(());
+    }
+    let allowed = std::env::var("AIGOV_ALLOW_UNSIGNED_POLICY_FILE")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+    if allowed {
+        eprintln!(
+            "warning: running staging/prod verdicts from an unsigned policy file (AIGOV_ALLOW_UNSIGNED_POLICY_FILE=1)"
+        );
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to start: unsigned policy file ({:?}) in {}; sign the policy as a bundle and set \
+         AIGOV_POLICY_BUNDLE_FILE, or set AIGOV_ALLOW_UNSIGNED_POLICY_FILE=1 explicitly",
+        source.kind,
+        deployment_env.as_str()
+    ))
+}
+
 pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
     let resolved = policy_config::load_for_deployment(deployment_env)?;
+    enforce_policy_file_trust(deployment_env, &resolved.source)?;
     let policy_store = Arc::new(PolicyStore::load_for_deployment(
         deployment_env,
         resolved.clone(),

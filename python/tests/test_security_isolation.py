@@ -141,6 +141,8 @@ def two_tenant_server() -> Generator[tuple[str, str, str], None, None]:
         }),
         "GOVAI_API_KEYS": f"{key_a},{key_b}",
         "AIGOV_ENVIRONMENT": "staging",
+        # Test fixture uses the repository policy file (unsigned). Production must sign policy verdicts.
+        "AIGOV_ALLOW_UNSIGNED_POLICY_FILE": "1",
         "AIGOV_BIND": f"127.0.0.1:{port}",
         "AIGOV_POLICY_STRICT": "false",
         "AIGOV_POLICY_DIR": POLICY_DIR,

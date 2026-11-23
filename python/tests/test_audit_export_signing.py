@@ -8,10 +8,8 @@ import json
 from pathlib import Path
 
 import pytest
-
 from aigov_py.audit_export_signing import (
     SUPPORTED_EXPORT_SCHEMA,
-    audit_export_payload_digest_sha256_hex,
     sign_audit_export_ed25519,
     verify_signed_audit_export,
 )
@@ -101,8 +99,19 @@ def test_valid_signed_export(tmp_path: Path) -> None:
     payload = verify_signed_audit_export(signed, trust=_trust_for_seed())
     assert payload.run_id == "run-sign-test"
     assert payload.decision_verdict == "BLOCKED"
-    digest = audit_export_payload_digest_sha256_hex(signed)
-    assert signed["signatures"][0]["payload_digest_sha256"] == digest
+    record = signed["signatures"][0]
+    assert record["payload_version"] == 2
+    # v2 binds issuer, signer, creation time, expiry and the whole document (not only the payload).
+    from aigov_py.audit_export_signing import audit_export_signing_digest_v2
+
+    digest = audit_export_signing_digest_v2(
+        signed,
+        issuer_id=record["issuer_id"],
+        signer=record["signer"],
+        created_at_utc=record["created_at_utc"],
+        expires_at_utc=record["expires_at_utc"],
+    )
+    assert record["payload_digest_sha256"] == digest
 
 
 def test_tampered_event_fails(tmp_path: Path) -> None:
