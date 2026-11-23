@@ -88,6 +88,7 @@ pub async fn build_app_state() -> Result<AppState, String> {
         resolved.clone(),
     )?);
     let _ = ledger_storage::validate_startup(deployment_env)?;
+    crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
     let pool = pool_from_env().await?;
