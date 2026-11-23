@@ -29,12 +29,12 @@ Using LocalEd25519KMSProvider for tests:
   pub = provider.get_public_key_bytes(kid)     # 32-byte raw public key
   ok  = provider.verify_signature(b"payload", sig, kid)  # True
 
-Using VercelKMSProvider in production:
+Using VercelKMSProvider (integration must be verified live before production):
   provider = VercelKMSProvider(
-      key_id="aigov-token-signing-v1",
-      base_url="https://kms.vercel.com",
+      issuer_id=os.environ["VERCEL_KMS_ISSUER_ID"],
+      key_id=os.environ["VERCEL_KMS_KEY_ID"],
       team_id=os.environ["VERCEL_TEAM_ID"],
-      oidc_token_fn=lambda: get_vercel_oidc_token(),  # from @vercel/functions
+      oidc_token_fn=lambda: os.environ["VERCEL_OIDC_TOKEN"],
   )
   sig = provider.sign(b"payload")
   pub = provider.get_public_key_bytes("aigov-token-signing-v1")  # from JWKS
@@ -256,13 +256,13 @@ class LocalEd25519KMSProvider(AsymmetricKMSBase):
 
 class VercelKMSProvider(AsymmetricKMSBase):
     """
-    Production KMS provider backed by Vercel KMS (EdDSA / Ed25519).
+    Vercel KMS API adapter (EdDSA / Ed25519; live integration unverified).
 
     Signing is performed entirely inside Vercel's HSM — the application
     never receives private key material. Authentication is via OIDC, which
     Vercel Functions obtain automatically from the runtime.
 
-    Vercel KMS REST API (api.vercel.com):
+    Proposed Vercel KMS REST API integration (not validated against a live issuer):
       Sign:    POST /v1/kms/issuers/{issuer_id}/sign/message
                Body: {"payload": "<base64(payload)>"}
                Response: {"signature": "<base64url(sig)>", "keyId": "...",
@@ -291,7 +291,7 @@ class VercelKMSProvider(AsymmetricKMSBase):
       2. Enable "Sign messages" in the issuer policy.
       3. Set VERCEL_KMS_ISSUER_ID and VERCEL_KMS_KEY_ID in Vercel env vars.
 
-    is_distributed_safe = True: Vercel KMS is a managed external service,
+    Production use requires an authenticated live sign/verify test and trusted JWKS.\n    Until then the provider is UNVERIFIED, regardless of unit-test success.\n\n    is_distributed_safe = True: Vercel KMS is a managed external service,
     inherently safe for distributed deployments.
     """
 
@@ -332,7 +332,7 @@ class VercelKMSProvider(AsymmetricKMSBase):
     def sign(self, payload: bytes) -> bytes:
         """
         Sign payload via Vercel KMS. Returns Ed25519 signature bytes (64 bytes).
-        Private key never leaves Vercel HSM.
+        A live issuer and policy must be verified before relying on HSM confinement.
 
         Requires raw-message signing to be enabled in the issuer's KMS policy
         (Vercel dashboard → KMS → issuer → policy → allow sign-message).

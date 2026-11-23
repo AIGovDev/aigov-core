@@ -110,6 +110,20 @@ impl ImmutableStoreConfig {
         })
     }
 
+    /// Startup gate called by `build_app_state`. This build does not link the enterprise
+    /// `immutable_s3` adapter, so no anchors are written. Any configured backend therefore
+    /// refuses to start, rather than running without immutable anchoring.
+    pub fn validate_startup_wiring(&self, env: GovaiEnvironment) -> Result<(), String> {
+        self.validate_startup(env)?;
+        if !matches!(self.kind, ImmutableBackendKind::Disabled) {
+            return Err(
+                "immutable S3 backend requires the enterprise immutable_s3 adapter, which is not wired into this build; unset GOVAI_IMMUTABLE_BACKEND"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     pub fn validate_startup(&self, env: GovaiEnvironment) -> Result<(), String> {
         let must = self.require_in_staging_prod
             && matches!(env, GovaiEnvironment::Staging | GovaiEnvironment::Prod);
@@ -345,5 +359,51 @@ mod tests {
             s3_anchor_key("govai/anchors/", " tenant ", " abc "),
             "govai/anchors/tenant/abc.json"
         );
+    }
+
+
+    #[test]
+    fn startup_wiring_refuses_configured_backend_without_adapter() {
+        let cfg = ImmutableStoreConfig {
+            kind: ImmutableBackendKind::AwsS3ObjectLock,
+            s3_bucket: Some("b".to_string()),
+            s3_prefix: "p".to_string(),
+            s3_region: Some("us-east-1".to_string()),
+            retention_days: 365,
+            object_lock_mode: "COMPLIANCE".to_string(),
+            require_in_staging_prod: false,
+        };
+        let err = cfg
+            .validate_startup_wiring(GovaiEnvironment::Prod)
+            .expect_err("configured backend must not start without the adapter");
+        assert!(err.contains("not wired"), "{err}");
+    }
+
+    #[test]
+    fn startup_wiring_refuses_required_without_backend_in_prod() {
+        let cfg = ImmutableStoreConfig {
+            kind: ImmutableBackendKind::Disabled,
+            s3_bucket: None,
+            s3_prefix: "p".to_string(),
+            s3_region: None,
+            retention_days: 365,
+            object_lock_mode: "COMPLIANCE".to_string(),
+            require_in_staging_prod: true,
+        };
+        assert!(cfg.validate_startup_wiring(GovaiEnvironment::Prod).is_err());
+    }
+
+    #[test]
+    fn startup_wiring_allows_disabled_backend_in_dev() {
+        let cfg = ImmutableStoreConfig {
+            kind: ImmutableBackendKind::Disabled,
+            s3_bucket: None,
+            s3_prefix: "p".to_string(),
+            s3_region: None,
+            retention_days: 365,
+            object_lock_mode: "COMPLIANCE".to_string(),
+            require_in_staging_prod: false,
+        };
+        assert!(cfg.validate_startup_wiring(GovaiEnvironment::Dev).is_ok());
     }
 }
