@@ -258,13 +258,19 @@ paths:
             type: string
       responses:
         "200":
-          description: Success bundle or logical error (`ok:false` still HTTP 200).
+          description: Success bundle or logical error other than `run_not_found` (`ok:false` still HTTP 200).
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/BundleDocumentSuccess"
                   - $ref: "#/components/schemas/BundleDocumentError"
+        "404":
+          description: Run not found in tenant ledger (error code run_not_found). Same body shape as the 200 error case.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BundleDocumentError"
 
   /bundle-hash:
     get:
