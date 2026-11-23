@@ -117,6 +117,8 @@ def api_base() -> Generator[tuple[str, str], None, None]:
         # logs a mismatch warning and returns 401 for the unregistered key.
         "GOVAI_API_KEYS": f"{api_key},{api_key_2}",
         "AIGOV_ENVIRONMENT": "staging",
+        # Test fixture uses the repository policy file (unsigned). Production must sign policy verdicts.
+        "AIGOV_ALLOW_UNSIGNED_POLICY_FILE": "1",
         "AIGOV_BIND": f"127.0.0.1:{port}",
         "AIGOV_POLICY_STRICT": "false",
         "AIGOV_POLICY_DIR": POLICY_DIR,
