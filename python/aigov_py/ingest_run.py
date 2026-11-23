@@ -11,8 +11,8 @@ from typing import Any, Dict, Optional
 
 from aigov_py.env_resolution import resolve_aigov_environment
 from aigov_py.run_rows import upsert_run_row
-from aigov_py.supabase_db import create_supabase_client
 from aigov_py.storage_upload import upload_artifacts_for_run
+from aigov_py.supabase_db import create_supabase_client
 
 
 @dataclass(frozen=True)
@@ -175,7 +175,7 @@ def _should_upload_to_storage(mode: str) -> bool:
     return m in ("ci", "prod")
 
 
-def build_run_row(run_id: str) -> Dict[str, Any]:
+def build_run_row(run_id: str, tenant_id: str) -> Dict[str, Any]:
     mode = _get_mode()
     environment = resolve_aigov_environment()
     paths = _artifact_paths(run_id)
@@ -207,6 +207,7 @@ def build_run_row(run_id: str) -> Dict[str, Any]:
 
     row: Dict[str, Any] = {
         "id": run_id,
+        "tenant_id": tenant_id,
         "created_at": _utc_now_iso(),
         "mode": mode,
         "status": status,
@@ -222,7 +223,7 @@ def build_run_row(run_id: str) -> Dict[str, Any]:
     return row
 
 
-def upload_run_artifacts(run_id: str, mode: str) -> None:
+def upload_run_artifacts(run_id: str, tenant_id: str, mode: str) -> None:
     if not _should_upload_to_storage(mode):
         print("storage upload skipped")
         return
@@ -233,6 +234,7 @@ def upload_run_artifacts(run_id: str, mode: str) -> None:
     results = upload_artifacts_for_run(
         client,
         run_id=run_id,
+        tenant_id=tenant_id,
         pack_zip=paths.pack_zip,
         audit_json=paths.audit_json,
         evidence_json=paths.evidence_json,
@@ -251,16 +253,55 @@ def upload_run_artifacts(run_id: str, mode: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("Usage: python -m aigov_py.ingest_run <RUN_ID>", file=sys.stderr)
+    """Usage: python -m aigov_py.ingest_run RUN_ID --tenant-id TENANT (or AIGOV_TENANT_ID)."""
+    from aigov_py.tenant_ledger import (
+        TenantLedgerError,
+        run_recorded_for_tenant,
+        validate_tenant_id,
+    )
+
+    args = list(argv[1:])
+    tenant_arg: Optional[str] = None
+    if "--tenant-id" in args:
+        i = args.index("--tenant-id")
+        if i + 1 >= len(args):
+            print("error: --tenant-id requires a value", file=sys.stderr)
+            return 2
+        tenant_arg = args[i + 1]
+        del args[i : i + 2]
+    if len(args) != 1:
+        print(
+            "Usage: python -m aigov_py.ingest_run <RUN_ID> --tenant-id <TENANT_ID>",
+            file=sys.stderr,
+        )
         return 2
 
-    run_id = argv[1].strip()
+    run_id = args[0].strip()
     if not run_id:
         print("RUN_ID is required", file=sys.stderr)
         return 2
+    tenant_raw = tenant_arg if tenant_arg is not None else os.environ.get("AIGOV_TENANT_ID", "")
+    try:
+        tenant_id = validate_tenant_id(tenant_raw.strip())
+    except TenantLedgerError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
 
-    row = build_run_row(run_id)
+    # Ownership comes from the tenant's own ledger, written by the authenticated audit service.
+    # The caller's --tenant-id is a claim that must be proven, not trusted.
+    try:
+        owned = run_recorded_for_tenant(run_id, tenant_id)
+    except TenantLedgerError as e:
+        print(f"error: cannot establish run ownership: {e}", file=sys.stderr)
+        return 2
+    if not owned:
+        print(
+            f"error: run {run_id!r} is not recorded in tenant {tenant_id!r}'s ledger; refusing to ingest",
+            file=sys.stderr,
+        )
+        return 2
+
+    row = build_run_row(run_id, tenant_id)
 
     print("ROW BEING UPSERTED:")
     print(row)
@@ -268,11 +309,7 @@ def main(argv: list[str]) -> int:
     upsert_run_row(row)
 
     mode = str(row.get("mode") or _get_mode())
-    upload_run_artifacts(run_id, mode)
+    upload_run_artifacts(run_id, tenant_id, mode)
 
-    print(f"ingested run {run_id} (run metadata per AIGOV_RUN_PERSISTENCE)")
+    print(f"ingested run {run_id} for tenant {tenant_id} (run metadata per AIGOV_RUN_PERSISTENCE)")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))

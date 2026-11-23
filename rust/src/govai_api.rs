@@ -92,6 +92,9 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
     let pool = pool_from_env().await?;
+    if crate::db::postgres_url_configured_nonempty().is_ok() {
+        crate::tenant_api_keys::check_db_tenants_against_env(&pool).await?;
+    }
     let usage = ApiUsageState::from_env(&pool)?;
     let api_key_cfg = AuditApiKeyConfig::from_env();
     let base_url = std::env::var("GOVAI_BASE_URL")

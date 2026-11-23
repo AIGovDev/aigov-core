@@ -481,8 +481,9 @@ report_prepare_new:
 # ================================
 
 db_ingest: require_run
+	@test -n "$(TENANT_ID)" || (echo "TENANT_ID is required: the tenant whose ledger contains RUN_ID" >&2; exit 2)
 	cd python && . .venv/bin/activate && \
-	AIGOV_MODE=$(AIGOV_MODE) python -m aigov_py.ingest_run $(RUN_ID)
+	AIGOV_MODE=$(AIGOV_MODE) python -m aigov_py.ingest_run $(RUN_ID) --tenant-id $(TENANT_ID)
 
 # ================================
 # Demo
