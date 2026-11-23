@@ -1764,6 +1764,7 @@ def build_parser() -> GovaiArgumentParser:
     s_sign_export.add_argument("--signer", required=True, help="Signer identity label.")
     s_sign_export.add_argument("--private-key-file", default=None, help="Path to file with Ed25519 private key (base64, 32-byte seed); must be chmod 600.")
     s_sign_export.add_argument("--private-key-base64", default=None, help="Legacy: Ed25519 private key (base64) on the command line. Prefer --private-key-file.")
+    s_sign_export.add_argument("--allow-private-key-argv", action="store_true", help="Legacy opt-in: accept --private-key-base64 on the command line (insecure).")
     s_sign_export.add_argument("--created-at-utc", required=True, help="RFC3339 UTC timestamp.")
     s_sign_export.add_argument("--expires-at-utc", default=None, help="Optional RFC3339 UTC timestamp.")
 
@@ -1969,6 +1970,7 @@ def build_parser() -> GovaiArgumentParser:
     s_policy_sign.add_argument("--signer", required=True, help="Signer identity label.")
     s_policy_sign.add_argument("--private-key-file", default=None, help="Path to file with Ed25519 private key (base64, 32 bytes seed); must be chmod 600.")
     s_policy_sign.add_argument("--private-key-base64", default=None, help="Legacy: Ed25519 private key (base64) on the command line. Prefer --private-key-file.")
+    s_policy_sign.add_argument("--allow-private-key-argv", action="store_true", help="Legacy opt-in: accept --private-key-base64 on the command line (insecure).")
     s_policy_sign.add_argument("--created-at-utc", required=True, help="RFC3339 UTC timestamp.")
     s_policy_sign.add_argument("--expires-at-utc", default=None, help="Optional RFC3339 UTC timestamp.")
 
@@ -2055,8 +2057,8 @@ def _resolve_private_key_base64(args: Any) -> str:
     """Return the Ed25519 seed (base64) from exactly one source.
 
     Preferred: ``--private-key-file`` (must not be group- or world-readable).
-    Legacy: ``--private-key-base64`` still works, with a warning, because a key on the
-    command line is visible in the process list and shell history.
+    Legacy: ``--private-key-base64`` is refused unless ``--allow-private-key-argv`` is given,
+    because a key on the command line is visible in the process list and shell history.
     """
     key_file = getattr(args, "private_key_file", None)
     key_arg = getattr(args, "private_key_base64", None)
@@ -2074,9 +2076,13 @@ def _resolve_private_key_base64(args: Any) -> str:
         if not value:
             raise ValueError("private key file is empty")
         return value
+    if not getattr(args, "allow_private_key_argv", False):
+        raise ValueError(
+            "refusing --private-key-base64: the key would appear in the process list and shell history. "
+            "Use --private-key-file, or pass --allow-private-key-argv for legacy use."
+        )
     print(
-        "warning: --private-key-base64 exposes the signing key in the process list and shell history; "
-        "prefer --private-key-file",
+        "warning: --private-key-base64 exposes the signing key in the process list and shell history",
         file=sys.stderr,
     )
     return str(key_arg)
