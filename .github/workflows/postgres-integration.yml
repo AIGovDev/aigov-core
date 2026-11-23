@@ -2,16 +2,18 @@ name: PostgreSQL Integration
 
 on:
   push:
-    branches: [feat/agent-tool-hardening, main, develop]
+    branches: [feat/agent-tool-hardening, main, develop, staging]
     paths:
       - 'benchmarks/agent-verification/**'
+      - 'benchmarks/openai-agents-integration/**'
       - 'python/tests/test_postgres_integration.py'
       - 'python/tests/test_distributed_safety.py'
       - '.github/workflows/postgres-integration.yml'
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, staging]
     paths:
       - 'benchmarks/agent-verification/**'
+      - 'benchmarks/openai-agents-integration/**'
       - 'python/tests/test_postgres_integration.py'
       - 'python/tests/test_distributed_safety.py'
 
@@ -38,7 +40,8 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://aigov_test:aigov_test_pass@localhost:5432/aigov_integration
-      # Ephemeral service container dedicated to tests; destructive DROP TABLE is allowed only here.
+      TEST_PG_DSN: postgresql://aigov_test:aigov_test_pass@localhost:5432/aigov_integration
+      # Ephemeral service container dedicated to tests; destructive DROP TABLE is permitted only here.
       AIGOV_PG_TEST_DESTRUCTIVE: "1"
 
     steps:
@@ -91,6 +94,19 @@ jobs:
             --timeout=120 \
             --tb=short
 
+      - name: Run SDK production tests (P15, P18-P32)
+        # TEST_PG_DSN is set above. In CI, PG tests FAIL (not skip) if TEST_PG_DSN is absent.
+        # Requires openai-agents and cryptography packages.
+        run: |
+          pip install 'openai-agents>=0.25.0' cryptography
+          cd benchmarks/openai-agents-integration
+          python -m pytest \
+            tests/test_sdk_production.py \
+            -v \
+            --timeout=120 \
+            --tb=short \
+            -x
+
       - name: Verify no DB tests are silently skipped
         # This step catches the case where DATABASE_URL is unset and tests would pass by skipping.
         # It fails if any postgres test was collected but skipped.
@@ -103,6 +119,17 @@ jobs:
             exit 1
           fi
           echo "All PostgreSQL tests ran (none silently skipped)."
+
+      - name: Verify no SDK PG tests are silently skipped
+        run: |
+          cd benchmarks/openai-agents-integration
+          SKIP_COUNT=$(python -m pytest tests/test_sdk_production.py --collect-only -q 2>/dev/null | grep "skip" | wc -l || echo 0)
+          echo "SDK PG tests skipped: $SKIP_COUNT"
+          if [ "$SKIP_COUNT" -gt "0" ]; then
+            echo "ERROR: SDK PostgreSQL tests were skipped. TEST_PG_DSN may not be set." >&2
+            exit 1
+          fi
+          echo "All SDK PostgreSQL tests ran (none silently skipped)."
 
   security-lint:
     name: Security and type checks

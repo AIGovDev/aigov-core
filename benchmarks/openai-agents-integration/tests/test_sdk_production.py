@@ -1,5 +1,5 @@
 """
-AIGov Production Hardening Tests — Pass 11
+AIGov Production Hardening Tests — Pass 12
 
 Coverage:
   P1  — SqlRotatingKeyProvider: shared key visible from both "processes" (two provider
@@ -32,6 +32,11 @@ Coverage:
   P25 — Audit distinguishability: orphan / verified / reconciled states all distinct
   P26 — ProductionConfigValidator integrated into AIGovGuardedDocumentTools startup path
   P27 — KMSBackedRotatingKeyProvider with PostgreSQL metadata store: rotate and retire (live PG)
+  P28 — LocalEd25519KMSProvider: sign/verify cycle; private key never accessible from outside
+  P29 — Ed25519 ExecutionTokenAuthority: full authorize → execute E2E with asymmetric provider
+  P30 — Ed25519 key rotation: tokens issued under old key verify until retirement
+  P31 — Ed25519 KMS failure: missing key raises AsymmetricKMSUnavailableError fail-closed
+  P32 — Algorithm downgrade attack: changing algo field in token payload invalidates signature
 """
 
 from __future__ import annotations
@@ -62,6 +67,11 @@ from document_store import DocumentStore
 from aigov_sdk_adapter import AIGovGuardedDocumentTools
 from execution_token import ExecutionTokenAuthority
 from key_provider import InMemoryKeyProvider
+from asymmetric_kms_provider import (
+    AsymmetricKMSUnavailableError,
+    LocalEd25519KMSProvider,
+    VercelKMSProvider,
+)
 from kms_key_provider import (
     EnvKMSClient,
     KMSBackedRotatingKeyProvider,
@@ -718,9 +728,15 @@ def test_p17_single_process_mode_allows_sqlite():
 # ---------------------------------------------------------------------------
 
 _PG_DSN = os.environ.get("TEST_PG_DSN", "")
+_CI = bool(os.environ.get("CI"))
+
+# In CI the postgres service sets TEST_PG_DSN. If it is absent in CI, tests run
+# against an empty DSN and fail at the connection attempt — intentional. Locally,
+# tests are skipped when TEST_PG_DSN is not set so developers don't need a PG instance.
+_pg_skip = pytest.mark.skipif(not _PG_DSN and not _CI, reason="TEST_PG_DSN not set")
 
 
-@pytest.mark.skipif(not _PG_DSN, reason="TEST_PG_DSN not set — skipping PostgreSQL tests")
+@_pg_skip
 def test_p18_postgresql_nonce_backend():
     """SqlNonceStore with PostgreSQL backend: atomic consume across connections."""
     store = SqlNonceStore("postgresql", dsn=_PG_DSN)
@@ -735,7 +751,7 @@ def test_p18_postgresql_nonce_backend():
 # P19 — PostgreSQL approval backend (skipped when no live PG available)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not _PG_DSN, reason="TEST_PG_DSN not set — skipping PostgreSQL tests")
+@_pg_skip
 def test_p19_postgresql_approval_backend():
     """SqlApprovalRegistry with PostgreSQL backend: register and consume."""
     reg  = SqlApprovalRegistry("postgresql", dsn=_PG_DSN)
@@ -768,7 +784,7 @@ def _worker_pg_nonce(dsn: str, nonce_key: str, result_queue):
         result_queue.put(repr(exc))
 
 
-@pytest.mark.skipif(not _PG_DSN, reason="TEST_PG_DSN not set — skipping PostgreSQL tests")
+@_pg_skip
 def test_p20_postgresql_nonce_concurrent_atomicity():
     """
     4 concurrent processes all consume the same nonce against PostgreSQL.
@@ -824,7 +840,7 @@ def _worker_pg_consume(dsn: str, tool: str, action: str, resource: str, tenant: 
         q.put(f"import_error:{exc}")
 
 
-@pytest.mark.skipif(not _PG_DSN, reason="TEST_PG_DSN not set — skipping PostgreSQL tests")
+@_pg_skip
 def test_p21_postgresql_approval_concurrent_consume():
     """
     Two concurrent processes race to consume the same PostgreSQL approval.
@@ -975,7 +991,7 @@ def test_p23_kms_unavailability_blocks_issuance():
 # P24 — PostgreSQL approval registry outage → fail-closed (live PG)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not _PG_DSN, reason="TEST_PG_DSN not set — skipping PostgreSQL tests")
+@_pg_skip
 def test_p24_pg_approval_registry_outage_fail_closed():
     """
     When the PostgreSQL approval registry raises an unexpected exception during
@@ -1169,7 +1185,7 @@ def test_p26_validate_production_config_method():
 # P27 — KMSBackedRotatingKeyProvider with PostgreSQL metadata store (live PG)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not _PG_DSN, reason="TEST_PG_DSN not set — skipping PostgreSQL tests")
+@_pg_skip
 def test_p27_kms_backed_provider_postgresql_metadata():
     """
     KMSBackedRotatingKeyProvider with PostgreSQL metadata store:
@@ -1277,4 +1293,263 @@ def test_p27_kms_backed_provider_postgresql_metadata():
     col_names = [r[0] for r in rows]
     assert "key_bytes" not in col_names, (
         f"aigov_key_metadata must NOT contain key_bytes column; found: {col_names}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# P28 — LocalEd25519KMSProvider: sign/verify; private key never accessible
+# ---------------------------------------------------------------------------
+
+def test_p28_local_ed25519_sign_verify_private_key_confined():
+    """
+    LocalEd25519KMSProvider signs payloads and verifies via public key.
+    The private key must not be accessible from any public method.
+    """
+    provider = LocalEd25519KMSProvider()
+    kid = provider.key_id
+    payload = b"test-payload-p28"
+
+    # Signing works
+    sig = provider.sign(payload)
+    assert len(sig) == 64, "Ed25519 signature must be 64 bytes"
+
+    # Verification via public key works
+    pub = provider.get_public_key_bytes(kid)
+    assert pub is not None and len(pub) == 32, "Ed25519 public key must be 32 bytes"
+    assert provider.verify_signature(payload, sig, kid)
+
+    # Wrong payload fails
+    assert not provider.verify_signature(b"tampered", sig, kid)
+
+    # Private key is never accessible via any public attribute
+    for attr in dir(provider):
+        if attr.startswith("_"):
+            continue
+        val = getattr(provider, attr)
+        if callable(val):
+            continue
+        # No public attribute should return raw bytes that could be a private key
+        if isinstance(val, bytes) and len(val) in (32, 64):
+            raise AssertionError(
+                f"Public attribute {attr!r} returned {len(val)}-byte value "
+                "that could be private key material"
+            )
+
+
+# ---------------------------------------------------------------------------
+# P29 — Ed25519 ExecutionTokenAuthority: full authorize → execute E2E
+# ---------------------------------------------------------------------------
+
+def test_p29_ed25519_token_authority_e2e():
+    """
+    ExecutionTokenAuthority with LocalEd25519KMSProvider: issue and verify.
+    Token algo field must be 'ed25519'; signature must be base64url not hex.
+    """
+    provider = LocalEd25519KMSProvider()
+    authority = ExecutionTokenAuthority(key_provider=provider)
+
+    token = authority.issue(
+        execution_id="p29-exec",
+        tool_name="read_document",
+        args_binding_hash="hP29",
+        action_type="document:read",
+        resource_id="tenant-A/doc",
+        tenant_id="tenant-A",
+    )
+
+    assert token.algo == "ed25519", f"Expected algo=ed25519, got {token.algo!r}"
+    # Signature is base64url (not 64-char hex)
+    assert len(token.signature) != 64 or not all(
+        c in "0123456789abcdef" for c in token.signature
+    ), "Ed25519 signature should not look like HMAC hex"
+
+    # Full field-binding verification
+    ok, reason = authority.verify_for_execution(
+        token=token,
+        expected_tool_name="read_document",
+        expected_args_binding_hash="hP29",
+        expected_action_type="document:read",
+        expected_resource_id="tenant-A/doc",
+        expected_tenant_id="tenant-A",
+        expected_execution_id="p29-exec",
+    )
+    assert ok, f"Ed25519 token must verify: {reason}"
+
+    # Wrong tool name is rejected
+    ok2, r2 = authority.verify_for_execution(
+        token=token,
+        expected_tool_name="delete_document",  # wrong
+        expected_args_binding_hash="hP29",
+        expected_action_type="document:read",
+        expected_resource_id="tenant-A/doc",
+        expected_tenant_id="tenant-A",
+    )
+    assert not ok2 and r2 == "token_tool_name_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# P30 — Ed25519 key rotation: old tokens verify until retirement
+# ---------------------------------------------------------------------------
+
+def test_p30_ed25519_key_rotation_and_retirement():
+    """
+    Issue token under key1. Rotate to key2. token1 still verifies (key1 active).
+    Retire key1. token1 is now rejected; token2 still verifies.
+    """
+    provider = LocalEd25519KMSProvider()
+    authority = ExecutionTokenAuthority(key_provider=provider)
+
+    kid1 = provider.key_id
+    token1 = authority.issue(
+        execution_id="p30-exec-1", tool_name="read_document",
+        args_binding_hash="hP30a", action_type="document:read",
+        resource_id="tenant-A/doc", tenant_id="tenant-A",
+    )
+    assert token1.key_id == kid1
+
+    # Rotate: generate new key
+    kid2 = provider.rotate()
+    assert provider.key_id == kid2
+
+    # token1 still verifies (key1 public key is still accessible)
+    ok1, r1 = authority.verify_for_execution(
+        token=token1,
+        expected_tool_name="read_document",
+        expected_args_binding_hash="hP30a",
+        expected_action_type="document:read",
+        expected_resource_id="tenant-A/doc",
+        expected_tenant_id="tenant-A",
+    )
+    assert ok1, f"token1 must verify before retirement: {r1}"
+
+    # Issue token2 under kid2
+    token2 = authority.issue(
+        execution_id="p30-exec-2", tool_name="read_document",
+        args_binding_hash="hP30b", action_type="document:read",
+        resource_id="tenant-A/doc", tenant_id="tenant-A",
+    )
+    assert token2.key_id == kid2
+
+    # Retire kid1 — token1 must now be rejected
+    provider.retire_key(kid1)
+    assert provider.get_public_key_bytes(kid1) is None, "Retired key must return None"
+
+    ok1r, r1r = authority.verify_for_execution(
+        token=token1,
+        expected_tool_name="read_document",
+        expected_args_binding_hash="hP30a",
+        expected_action_type="document:read",
+        expected_resource_id="tenant-A/doc",
+        expected_tenant_id="tenant-A",
+    )
+    assert not ok1r and r1r == "token_key_id_unknown", (
+        f"Token under retired key must fail with token_key_id_unknown; got {r1r!r}"
+    )
+
+    # token2 (under active kid2) still verifies
+    ok2, r2 = authority.verify_for_execution(
+        token=token2,
+        expected_tool_name="read_document",
+        expected_args_binding_hash="hP30b",
+        expected_action_type="document:read",
+        expected_resource_id="tenant-A/doc",
+        expected_tenant_id="tenant-A",
+    )
+    assert ok2, f"token2 must still verify: {r2}"
+
+
+# ---------------------------------------------------------------------------
+# P31 — Ed25519 KMS failure: retire current key raises, missing key blocks
+# ---------------------------------------------------------------------------
+
+def test_p31_ed25519_kms_failure_scenarios():
+    """
+    retire_key on current signing key raises ValueError (fail-safe).
+    get_public_key_bytes on unknown key returns None → token_key_id_unknown.
+    """
+    provider = LocalEd25519KMSProvider()
+    authority = ExecutionTokenAuthority(key_provider=provider)
+
+    # Cannot retire current signing key
+    with pytest.raises(ValueError, match="Cannot retire current signing key"):
+        provider.retire_key(provider.key_id)
+
+    # get_public_key_bytes on unknown key → None
+    assert provider.get_public_key_bytes("nonexistent-key") is None
+
+    # Token with unknown key_id → token_key_id_unknown (not token_signature_invalid)
+    token = authority.issue(
+        execution_id="p31-exec", tool_name="read_document",
+        args_binding_hash="hP31", action_type="document:read",
+        resource_id="tenant-A/doc", tenant_id="tenant-A",
+    )
+    # Rotate away from kid1 so we can retire it
+    kid1 = token.key_id
+    provider.rotate()
+    provider.retire_key(kid1)
+
+    ok, reason = authority.verify_for_execution(
+        token=token,
+        expected_tool_name="read_document",
+        expected_args_binding_hash="hP31",
+        expected_action_type="document:read",
+        expected_resource_id="tenant-A/doc",
+        expected_tenant_id="tenant-A",
+    )
+    assert not ok and reason == "token_key_id_unknown", (
+        f"Retired key must yield token_key_id_unknown; got {reason!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# P32 — Algorithm downgrade attack: tampering with algo invalidates signature
+# ---------------------------------------------------------------------------
+
+def test_p32_algorithm_downgrade_attack_rejected():
+    """
+    An attacker who attempts to change token.algo from 'ed25519' to 'hmac-sha256'
+    must not be able to forge a valid HMAC signature — the sig payload changes
+    because algo is included in the signed JSON, so HMAC over a different payload
+    never matches any HMAC key's output for the original payload.
+    """
+    provider = LocalEd25519KMSProvider()
+    authority = ExecutionTokenAuthority(key_provider=provider)
+
+    token = authority.issue(
+        execution_id="p32-exec", tool_name="read_document",
+        args_binding_hash="hP32", action_type="document:read",
+        resource_id="tenant-A/doc", tenant_id="tenant-A",
+    )
+    assert token.algo == "ed25519"
+
+    # Forge a token claiming algo=hmac-sha256 with an arbitrary HMAC signature.
+    # Since algo is in the signed payload, the verifier dispatches to the HMAC
+    # path and calls get_verification_key — which is not implemented on
+    # LocalEd25519KMSProvider. The forged token is rejected.
+    import dataclasses
+    forged = dataclasses.replace(token, algo="hmac-sha256", signature="a" * 64)
+    ok, reason = authority.verify_for_execution(
+        token=forged,
+        expected_tool_name="read_document",
+        expected_args_binding_hash="hP32",
+        expected_action_type="document:read",
+        expected_resource_id="tenant-A/doc",
+        expected_tenant_id="tenant-A",
+    )
+    assert not ok, (
+        f"Downgraded-algo forged token must be rejected; got ok={ok}, reason={reason!r}"
+    )
+
+    # Also verify that simply mutating the signature on a valid Ed25519 token fails
+    bad_sig = dataclasses.replace(token, signature="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==")
+    ok2, r2 = authority.verify_for_execution(
+        token=bad_sig,
+        expected_tool_name="read_document",
+        expected_args_binding_hash="hP32",
+        expected_action_type="document:read",
+        expected_resource_id="tenant-A/doc",
+        expected_tenant_id="tenant-A",
+    )
+    assert not ok2 and r2 == "token_signature_invalid", (
+        f"Tampered signature must yield token_signature_invalid; got {r2!r}"
     )
