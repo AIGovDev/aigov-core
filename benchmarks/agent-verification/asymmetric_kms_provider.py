@@ -256,31 +256,40 @@ class LocalEd25519KMSProvider(AsymmetricKMSBase):
 
 class VercelKMSProvider(AsymmetricKMSBase):
     """
-    Production KMS provider backed by Vercel KMS.
+    Production KMS provider backed by Vercel KMS (EdDSA / Ed25519).
 
     Signing is performed entirely inside Vercel's HSM — the application
     never receives private key material. Authentication is via OIDC, which
     Vercel Functions obtain automatically from the runtime.
 
-    API shape:
-      Sign:    POST {base_url}/v1/sign
-               Body: {"keyId": "...", "data": "<base64url(payload)>"}
-               Response: {"signature": "<base64url(sig)>", "keyId": "..."}
+    Vercel KMS REST API (api.vercel.com):
+      Sign:    POST /v1/kms/issuers/{issuer_id}/sign/message
+               Body: {"payload": "<base64(payload)>"}
+               Response: {"signature": "<base64url(sig)>", "keyId": "...",
+                          "algorithm": "EdDSA", "fingerprint": "..."}
+               NOTE: raw-message signing must be explicitly allowed in the
+               issuer's KMS policy (denied by default; enable in Vercel dashboard).
 
-      Verify:  GET  {base_url}/.well-known/jwks.json
-               Response: {"keys": [{"kid": "...", "kty": "OKP", "crv": "Ed25519",
-                                    "x": "<base64url(public_key)>"}]}
+      JWKS:    GET  /v1/kms/issuers/{issuer_id}
+               Response contains a "jwks" object with Ed25519 public keys.
+               Alternatively use the issuer's OIDC discovery JWKS URI.
 
     Usage:
         import os
-        from vercel.oidc import get_vercel_oidc_token  # @vercel/functions equivalent
+        # In a Vercel Function, OIDC tokens are issued automatically.
+        # Outside Vercel, provide a token function that returns a Bearer token.
 
         provider = VercelKMSProvider(
-            key_id="aigov-token-signing-v1",
-            base_url="https://kms.vercel.com",
+            issuer_id=os.environ["VERCEL_KMS_ISSUER_ID"],
+            key_id=os.environ["VERCEL_KMS_KEY_ID"],
             team_id=os.environ["VERCEL_TEAM_ID"],
-            oidc_token_fn=lambda: get_vercel_oidc_token("https://kms.vercel.com"),
+            oidc_token_fn=lambda: os.environ["VERCEL_OIDC_TOKEN"],
         )
+
+    Prerequisites (Vercel dashboard):
+      1. Create a KMS issuer with algorithm=EdDSA.
+      2. Enable "Sign messages" in the issuer policy.
+      3. Set VERCEL_KMS_ISSUER_ID and VERCEL_KMS_KEY_ID in Vercel env vars.
 
     is_distributed_safe = True: Vercel KMS is a managed external service,
     inherently safe for distributed deployments.
@@ -290,16 +299,18 @@ class VercelKMSProvider(AsymmetricKMSBase):
     is_managed: bool = True
     is_asymmetric: bool = True
 
+    _API_BASE = "https://api.vercel.com"
+
     def __init__(
         self,
+        issuer_id: str,
         key_id: str,
-        base_url: str = "https://kms.vercel.com",
         team_id: str = "",
         oidc_token_fn: "Callable[[], str] | None" = None,
         timeout_s: float = 5.0,
     ) -> None:
+        self._issuer_id = issuer_id
         self._key_id = key_id
-        self._base_url = base_url.rstrip("/")
         self._team_id = team_id
         self._oidc_token_fn = oidc_token_fn
         self._timeout = timeout_s
@@ -315,22 +326,27 @@ class VercelKMSProvider(AsymmetricKMSBase):
         if self._oidc_token_fn is not None:
             headers["Authorization"] = f"Bearer {self._oidc_token_fn()}"
         if self._team_id:
-            headers["X-Vercel-Team-Id"] = self._team_id
+            headers["x-vercel-team-id"] = self._team_id
         return headers
 
     def sign(self, payload: bytes) -> bytes:
         """
         Sign payload via Vercel KMS. Returns Ed25519 signature bytes (64 bytes).
         Private key never leaves Vercel HSM.
+
+        Requires raw-message signing to be enabled in the issuer's KMS policy
+        (Vercel dashboard → KMS → issuer → policy → allow sign-message).
+
         Raises AsymmetricKMSUnavailableError on network or HTTP errors.
         """
         import urllib.request
         import urllib.error
         import json as _json
 
-        data = base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
-        body = _json.dumps({"keyId": self._key_id, "data": data}).encode()
-        url = f"{self._base_url}/v1/sign"
+        # Vercel KMS expects standard base64 (not urlsafe) for the message payload
+        data = base64.b64encode(payload).decode()
+        body = _json.dumps({"payload": data}).encode()
+        url = f"{self._API_BASE}/v1/kms/issuers/{self._issuer_id}/sign/message"
         req = urllib.request.Request(
             url, data=body,
             headers={"Content-Type": "application/json", **self._auth_headers()},
@@ -340,8 +356,9 @@ class VercelKMSProvider(AsymmetricKMSBase):
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 result = _json.loads(resp.read())
         except urllib.error.HTTPError as exc:
+            body_text = exc.read().decode(errors="replace")
             raise AsymmetricKMSUnavailableError(
-                f"Vercel KMS sign failed: HTTP {exc.code} {exc.reason}"
+                f"Vercel KMS sign failed: HTTP {exc.code} — {body_text[:200]}"
             ) from exc
         except Exception as exc:
             raise AsymmetricKMSUnavailableError(
@@ -361,9 +378,9 @@ class VercelKMSProvider(AsymmetricKMSBase):
 
     def get_public_key_bytes(self, key_id: str) -> bytes | None:
         """
-        Return raw Ed25519 public key bytes for key_id from Vercel JWKS.
+        Return raw Ed25519 public key bytes for key_id from Vercel KMS JWKS.
         Returns None if key_id is not in the JWKS.
-        Caches JWKS per session (call _refresh_jwks() to bust cache).
+        Caches JWKS per session (call _refresh_jwks() or retire_key() to bust cache).
         """
         with self._jwks_lock:
             if key_id in self._jwks_cache:
@@ -378,11 +395,13 @@ class VercelKMSProvider(AsymmetricKMSBase):
             return self._jwks_cache.get(key_id)
 
     def _refresh_jwks(self) -> None:
+        """Fetch JWKS from the issuer's metadata endpoint and update the cache."""
         import urllib.request
         import urllib.error
         import json as _json
 
-        url = f"{self._base_url}/.well-known/jwks.json"
+        # Vercel KMS exposes the issuer's public keys at the issuer endpoint
+        url = f"{self._API_BASE}/v1/kms/issuers/{self._issuer_id}"
         req = urllib.request.Request(
             url,
             headers={"Accept": "application/json", **self._auth_headers()},
@@ -390,7 +409,7 @@ class VercelKMSProvider(AsymmetricKMSBase):
         )
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                jwks = _json.loads(resp.read())
+                data = _json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             raise AsymmetricKMSUnavailableError(
                 f"Vercel KMS JWKS fetch failed: HTTP {exc.code}"
@@ -400,6 +419,8 @@ class VercelKMSProvider(AsymmetricKMSBase):
                 f"Vercel KMS JWKS fetch failed: {exc}"
             ) from exc
 
+        # Response shape: {"issuer": {..., "jwks": {"keys": [...]}}}
+        jwks = data.get("issuer", data).get("jwks", data.get("jwks", {}))
         new_cache: dict[str, bytes] = {}
         for jwk in jwks.get("keys", []):
             kid = jwk.get("kid", "")
