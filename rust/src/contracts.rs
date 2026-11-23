@@ -81,6 +81,9 @@ pub struct InvalidConditionV1 {
 #[serde(deny_unknown_fields)]
 pub struct PolicySignatureV1 {
     pub kind: String,
+    /// `2` binds signer, creation time and expiry into the signed digest. Absent means legacy (v1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_version: Option<u64>,
     pub signer: String,
     pub created_at_utc: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -101,14 +101,6 @@ fn sort_json_value(v: serde_json::Value) -> serde_json::Value {
     }
 }
 
-fn now_utc_rfc3339() -> String {
-    // For deterministic verification behavior, we do NOT use the system clock here.
-    // Signature expiration is enforced using timestamps embedded in the signature record
-    // and the policy's `created_at_utc` for Phase 1.
-    // (Full clock-source semantics are handled in the crypto evidence TODO (#145).)
-    "1970-01-01T00:00:00Z".to_string()
-}
-
 pub fn verify_policy_signatures(
     deployment_env: GovaiEnvironment,
     trust: &PolicyTrustStore,
@@ -126,7 +118,7 @@ pub fn verify_policy_signatures(
 
     for sig in policy.signatures.iter() {
         match sig.kind.as_str() {
-            "ed25519" => match verify_ed25519(trust, policy, &payload_digest, sig) {
+            "ed25519" => match verify_ed25519(deployment_env, trust, policy, &payload_digest, sig) {
                 Ok(()) => {
                     any_ok = true;
                     break;
@@ -151,24 +143,74 @@ pub fn verify_policy_signatures(
     }
 }
 
+/// Signed digest for a v2 policy signature record. Binds the policy document digest, issuer,
+/// signer, creation time and expiry, so none of them can be changed without invalidating the signature.
+pub const POLICY_PAYLOAD_VERSION_V2: u64 = 2;
+
+pub fn policy_signature_digest_v2(
+    policy_digest_sha256: &str,
+    issuer_id: &str,
+    signer: &str,
+    created_at_utc: &str,
+    expires_at_utc: Option<&str>,
+) -> String {
+    let v = serde_json::json!({
+        "payload_version": POLICY_PAYLOAD_VERSION_V2,
+        "policy_digest_sha256": policy_digest_sha256,
+        "issuer_id": issuer_id,
+        "signer": signer,
+        "created_at_utc": created_at_utc,
+        "expires_at_utc": expires_at_utc,
+    });
+    crate::canonical_json::sha256_hex_bytes(&crate::canonical_json::canonical_json_bytes(&v))
+}
+
 fn verify_ed25519(
+    deployment_env: GovaiEnvironment,
     trust: &PolicyTrustStore,
     policy: &GovaiPolicyV1,
     payload_digest: &str,
     sig: &PolicySignatureV1,
 ) -> Result<(), String> {
-    if sig.payload_digest_sha256.trim().to_ascii_lowercase() != payload_digest {
+    let non_dev = !matches!(deployment_env, GovaiEnvironment::Dev);
+    let issuer_id = policy.issuer.issuer_id.trim();
+
+    // The message that was signed, and the digest the record must declare.
+    let expected_digest = match sig.payload_version {
+        Some(POLICY_PAYLOAD_VERSION_V2) => policy_signature_digest_v2(
+            payload_digest,
+            issuer_id,
+            sig.signer.trim(),
+            sig.created_at_utc.trim(),
+            sig.expires_at_utc.as_deref().map(str::trim),
+        ),
+        None => {
+            // Legacy (v1): covers the document only. Its expiry and signer label are unsigned, so an
+            // expiry is refused outside development.
+            if non_dev && sig.expires_at_utc.is_some() {
+                return Err(
+                    "legacy policy signature cannot carry expires_at_utc (metadata is not signed); re-sign with payload_version 2"
+                        .to_string(),
+                );
+            }
+            payload_digest.to_string()
+        }
+        Some(other) => return Err(format!("unsupported policy signature payload_version {other}")),
+    };
+
+    if sig.payload_digest_sha256.trim().to_ascii_lowercase() != expected_digest {
         return Err("policy signature payload_digest_sha256 mismatch".to_string());
     }
 
-    // Expiration: if present, require it to be >= created_at_utc (syntactic) for Phase 1.
-    if let Some(exp) = sig.expires_at_utc.as_ref() {
-        if exp.trim().is_empty() {
-            return Err("policy signature expires_at_utc is empty".to_string());
+    if non_dev {
+        if let Some(exp) = sig.expires_at_utc.as_deref() {
+            let exp_time = chrono::DateTime::parse_from_rfc3339(exp.trim())
+                .map_err(|_| "policy signature expires_at_utc is not RFC 3339".to_string())?
+                .with_timezone(&chrono::Utc);
+            if chrono::Utc::now() >= exp_time {
+                return Err(format!("policy signature expired at {}", exp.trim()));
+            }
         }
-        // Do not parse timestamps here; that is handled in Phase 1 crypto TODO (#145).
-        // We at least ensure deterministic behavior by rejecting empty.
-        let _ = now_utc_rfc3339();
     }
 
     if sig.signature.encoding != "base64" {
@@ -178,7 +220,6 @@ fn verify_ed25519(
         ));
     }
 
-    let issuer_id = policy.issuer.issuer_id.trim();
     let keys = trust
         .ed25519_pubkeys
         .get(issuer_id)
@@ -190,7 +231,7 @@ fn verify_ed25519(
     let sig_obj = Signature::from_slice(sig_bytes.as_slice())
         .map_err(|e| format!("invalid ed25519 signature bytes: {e}"))?;
 
-    let msg = payload_digest.as_bytes();
+    let msg = expected_digest.as_bytes();
     for vk in keys.iter() {
         if vk.verify_strict(msg, &sig_obj).is_ok() {
             return Ok(());
@@ -198,4 +239,35 @@ fn verify_ed25519(
     }
 
     Err("ed25519 signature verification failed for all trusted keys".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cross-language vector: `aigov_py.policy_bundle_signing.policy_signature_digest_v2` asserts the
+    /// same digests in `python/tests/test_policy_bundle_v2.py`.
+    #[test]
+    fn policy_signature_digest_v2_matches_python_mirror_vector() {
+        assert_eq!(
+            policy_signature_digest_v2(
+                &"a".repeat(64),
+                "iss",
+                "ci",
+                "2026-01-01T00:00:00Z",
+                Some("2999-01-01T00:00:00Z"),
+            ),
+            "f038c7ff58adc61c0bbb1c4803f7aaf87e01f78a55dd118ae5409ab91a4a4466"
+        );
+        assert_eq!(
+            policy_signature_digest_v2(
+                &"a".repeat(64),
+                "iss",
+                "ci",
+                "2026-01-01T00:00:00Z",
+                None,
+            ),
+            "4921b668db2abb463a835ab0165f9694ba966a204c400205b0cbf3bbb4bf5da7"
+        );
+    }
 }

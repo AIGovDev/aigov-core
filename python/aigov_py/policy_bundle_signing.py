@@ -4,10 +4,13 @@ import base64
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from nacl.signing import SigningKey, VerifyKey
+
+from .canonical_json import canonical_bytes
 
 
 def _sort_json_value(v: Any) -> Any:
@@ -32,6 +35,29 @@ def canonical_policy_payload_bytes(policy_doc: Dict[str, Any]) -> bytes:
 
 def policy_payload_digest_sha256_hex(policy_doc: Dict[str, Any]) -> str:
     return hashlib.sha256(canonical_policy_payload_bytes(policy_doc)).hexdigest()
+
+
+POLICY_PAYLOAD_VERSION_V2 = 2
+
+
+def policy_signature_digest_v2(
+    *,
+    policy_digest_sha256: str,
+    issuer_id: str,
+    signer: str,
+    created_at_utc: str,
+    expires_at_utc: Optional[str],
+) -> str:
+    """Digest signed by a v2 policy record. Mirrors rust/src/policy_signing.rs::policy_signature_digest_v2."""
+    value = {
+        "payload_version": POLICY_PAYLOAD_VERSION_V2,
+        "policy_digest_sha256": policy_digest_sha256,
+        "issuer_id": issuer_id,
+        "signer": signer,
+        "created_at_utc": created_at_utc,
+        "expires_at_utc": expires_at_utc,
+    }
+    return hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -90,18 +116,26 @@ def sign_policy_bundle_ed25519(
     if not isinstance(issuer_obj, dict) or str(issuer_obj.get("issuer_id") or "").strip() != issuer_id:
         raise ValueError("policy.issuer.issuer_id does not match --issuer-id")
 
-    digest = policy_payload_digest_sha256_hex(doc)
+    doc_digest = policy_payload_digest_sha256_hex(doc)
+    record_digest = policy_signature_digest_v2(
+        policy_digest_sha256=doc_digest,
+        issuer_id=issuer_id,
+        signer=signer,
+        created_at_utc=created_at_utc,
+        expires_at_utc=expires_at_utc,
+    )
 
     sk = SigningKey(base64.b64decode(private_key_base64.strip()))
-    sig_bytes = sk.sign(digest.encode("utf-8")).signature
+    sig_bytes = sk.sign(record_digest.encode("utf-8")).signature
     sig_b64 = base64.b64encode(sig_bytes).decode("ascii")
 
     sig_record: Dict[str, Any] = {
         "kind": "ed25519",
+        "payload_version": POLICY_PAYLOAD_VERSION_V2,
         "signer": signer,
         "created_at_utc": created_at_utc,
         "expires_at_utc": expires_at_utc,
-        "payload_digest_sha256": digest,
+        "payload_digest_sha256": record_digest,
         "signature": {"encoding": "base64", "value": sig_b64},
         "sigstore": None,
     }
@@ -136,7 +170,7 @@ def verify_policy_bundle_ed25519(
     if not isinstance(sigs, list) or not sigs:
         raise ValueError("policy is unsigned (signatures missing/empty)")
 
-    digest = policy_payload_digest_sha256_hex(policy_doc)
+    doc_digest = policy_payload_digest_sha256_hex(policy_doc)
 
     last_err: Optional[str] = None
     for s in sigs:
@@ -146,9 +180,39 @@ def verify_policy_bundle_ed25519(
         if str(s.get("kind") or "") != "ed25519":
             last_err = "unsupported signature kind"
             continue
-        if str(s.get("payload_digest_sha256") or "").strip().lower() != digest:
-            last_err = "payload digest mismatch"
+        pv = s.get("payload_version")
+        expires = s.get("expires_at_utc")
+        if pv is None:
+            # Legacy (v1): covers the document digest only. An expiry on it cannot be trusted.
+            if expires is not None:
+                last_err = "legacy policy signature cannot carry expires_at_utc; re-sign with payload_version 2"
+                continue
+            expected = doc_digest
+        elif pv == POLICY_PAYLOAD_VERSION_V2:
+            expected = policy_signature_digest_v2(
+                policy_digest_sha256=doc_digest,
+                issuer_id=issuer_id,
+                signer=str(s.get("signer") or "").strip(),
+                created_at_utc=str(s.get("created_at_utc") or "").strip(),
+                expires_at_utc=str(expires).strip() if expires is not None else None,
+            )
+        else:
+            last_err = f"unsupported policy signature payload_version {pv!r}"
             continue
+        if str(s.get("payload_digest_sha256") or "").strip().lower() != expected:
+            last_err = "policy signature payload_digest_sha256 mismatch"
+            continue
+        if expires is not None:
+            try:
+                exp = datetime.fromisoformat(str(expires).strip().replace("Z", "+00:00"))
+            except ValueError:
+                last_err = "policy signature expires_at_utc is not RFC 3339"
+                continue
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) >= exp:
+                last_err = f"policy signature expired at {expires}"
+                continue
         sig = s.get("signature")
         if not isinstance(sig, dict) or str(sig.get("encoding") or "") != "base64":
             last_err = "unsupported signature encoding"
@@ -162,7 +226,7 @@ def verify_policy_bundle_ed25519(
         ok = False
         for vk in _iter_verify_keys(trust, issuer_id):
             try:
-                vk.verify(digest.encode("utf-8"), sig_bytes)
+                vk.verify(expected.encode("utf-8"), sig_bytes)
                 ok = True
                 break
             except Exception as e:  # noqa: BLE001

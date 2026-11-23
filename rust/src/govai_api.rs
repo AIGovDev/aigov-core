@@ -80,6 +80,33 @@ async fn pool_from_env() -> Result<DbPool, String> {
     Ok(pool)
 }
 
+/// Production fails closed unless a signed policy bundle is configured, and no override is present.
+/// Environment variables and flags cannot substitute for the signed bundle.
+pub fn enforce_production_policy_inputs() -> Result<(), String> {
+    let set = |k: &str| std::env::var(k).map(|v| !v.trim().is_empty()).unwrap_or(false);
+    if set("AIGOV_POLICY_FILE") {
+        return Err("refusing to start: AIGOV_POLICY_FILE is not permitted in production; use a signed policy bundle".to_string());
+    }
+    if std::env::var_os("AIGOV_ALLOW_UNSIGNED_POLICY_FILE").is_some() {
+        return Err("refusing to start: AIGOV_ALLOW_UNSIGNED_POLICY_FILE is not permitted in production".to_string());
+    }
+    if set("AIGOV_APPROVER_ALLOWLIST") {
+        return Err("refusing to start: AIGOV_APPROVER_ALLOWLIST is not permitted in production; express the allowlist in the signed bundle".to_string());
+    }
+    let dir = std::env::var("AIGOV_POLICY_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let bundle_present = set("AIGOV_POLICY_BUNDLE_FILE")
+        || dir.join("policy.bundle.prod.json").exists()
+        || dir.join("policy.bundle.json").exists();
+    if !bundle_present {
+        return Err("refusing to start: production requires a signed policy bundle (AIGOV_POLICY_BUNDLE_FILE, or policy.bundle.prod.json / policy.bundle.json in AIGOV_POLICY_DIR)".to_string());
+    }
+    Ok(())
+}
+
 /// Staging and production must not run verdicts from an unsigned policy *file*.
 ///
 /// Built-in defaults are part of the code and are allowed. A file from `AIGOV_POLICY_FILE` or the
@@ -115,8 +142,21 @@ pub fn enforce_policy_file_trust(
 
 pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
-    let resolved = policy_config::load_for_deployment(deployment_env)?;
-    enforce_policy_file_trust(deployment_env, &resolved.source)?;
+    let resolved = if matches!(deployment_env, GovaiEnvironment::Prod) {
+        // Production verdicts come only from a verified signed bundle. No legacy file is read.
+        enforce_production_policy_inputs()?;
+        policy_config::ResolvedPolicyConfig {
+            config: policy_config::PolicyConfig::default(),
+            source: policy_config::PolicySource {
+                kind: policy_config::PolicySourceKind::Defaults,
+                path: None,
+            },
+        }
+    } else {
+        let resolved = policy_config::load_for_deployment(deployment_env)?;
+        enforce_policy_file_trust(deployment_env, &resolved.source)?;
+        resolved
+    };
     let policy_store = Arc::new(PolicyStore::load_for_deployment(
         deployment_env,
         resolved.clone(),
