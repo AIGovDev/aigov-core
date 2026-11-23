@@ -44,6 +44,7 @@ Distributed-safety note:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -64,14 +65,17 @@ def _build_signable(
     issued_at_ns: int,
     not_before_ns: int,
     max_age_ns: int,
+    algo: str = "hmac-sha256",
 ) -> bytes:
     """
     Deterministic bytes representation of the token's protected fields.
     key_id is included so it cannot be changed without invalidating the signature.
     not_before_ns is included so it cannot be zeroed without invalidating the
     signature (prevents stripping the not-before constraint).
+    algo is included to prevent downgrade attacks (changing ed25519 → hmac-sha256).
     """
     payload = json.dumps({
+        "algo": algo,
         "key_id": key_id,
         "execution_id": execution_id,
         "tool_name": tool_name,
@@ -108,7 +112,8 @@ class ExecutionToken:
     issued_at_ns: int         # UTC nanoseconds (time.time_ns()) at issuance
     not_before_ns: int        # UTC nanoseconds; token invalid before this time
     max_age_ns: int           # maximum lifetime in nanoseconds from issued_at_ns
-    signature: str            # HMAC-SHA256 hex over all other fields
+    signature: str            # HMAC-SHA256 hex OR base64url(Ed25519 sig, 64 bytes)
+    algo: str = "hmac-sha256" # signing algorithm; included in signable payload
 
     def is_expired(self, clock_skew_ns: int = 0) -> bool:
         """
@@ -142,6 +147,7 @@ class ExecutionToken:
             issued_at_ns=self.issued_at_ns,
             not_before_ns=self.not_before_ns,
             max_age_ns=self.max_age_ns,
+            algo=self.algo,
         )
 
 
@@ -198,10 +204,13 @@ class ExecutionTokenAuthority:
         within clock_skew_ns nanoseconds.
         """
         key_id = self._key_provider.key_id
-        signing_key = self._key_provider.signing_key
         issued_at_ns = time.time_ns()
         if not_before_ns is None:
             not_before_ns = issued_at_ns
+
+        is_asymmetric = getattr(self._key_provider, "is_asymmetric", False)
+        algo = getattr(self._key_provider, "algo", "hmac-sha256") if is_asymmetric else "hmac-sha256"
+
         signable = _build_signable(
             key_id=key_id,
             execution_id=execution_id,
@@ -213,8 +222,18 @@ class ExecutionTokenAuthority:
             issued_at_ns=issued_at_ns,
             not_before_ns=not_before_ns,
             max_age_ns=self._max_age_ns,
+            algo=algo,
         )
-        signature = hmac.new(signing_key, signable, hashlib.sha256).hexdigest()
+
+        if is_asymmetric:
+            # Asymmetric path: KMS signs; application never receives private key bytes.
+            sig_bytes = self._key_provider.sign(signable)
+            signature = base64.urlsafe_b64encode(sig_bytes).rstrip(b"=").decode()
+        else:
+            # Symmetric HMAC path (default for SqlRotatingKeyProvider etc.)
+            signing_key = self._key_provider.signing_key
+            signature = hmac.new(signing_key, signable, hashlib.sha256).hexdigest()
+
         return ExecutionToken(
             key_id=key_id,
             execution_id=execution_id,
@@ -227,22 +246,41 @@ class ExecutionTokenAuthority:
             not_before_ns=not_before_ns,
             max_age_ns=self._max_age_ns,
             signature=signature,
+            algo=algo,
         )
 
     def _verify_signature(self, token: "ExecutionToken") -> tuple[bool, str]:
         """
-        Verify HMAC using the key identified by token.key_id.
+        Verify token signature. Dispatches on token.algo.
+
+        "ed25519": public key fetched from provider; private key never in-process.
+        "hmac-sha256": symmetric HMAC path (existing behavior).
 
         Returns (ok, reason). reason is "" on success.
-        Returns "token_key_id_unknown" if the key_id is not in the provider
-        (the key was retired or the token was forged with an unknown key_id).
+        Returns "token_key_id_unknown" if the key is unknown or retired.
+        Returns "token_signature_invalid" if the signature does not match.
         """
-        verification_key = self._key_provider.get_verification_key(token.key_id)
-        if verification_key is None:
-            return False, "token_key_id_unknown"
-        expected = hmac.new(verification_key, token.signable(), hashlib.sha256).hexdigest()
-        ok = hmac.compare_digest(expected, token.signature)
-        return ok, ("" if ok else "token_signature_invalid")
+        if token.algo == "ed25519":
+            pub_bytes = self._key_provider.get_public_key_bytes(token.key_id)
+            if pub_bytes is None:
+                return False, "token_key_id_unknown"
+            try:
+                from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+                from cryptography.exceptions import InvalidSignature
+                sig_bytes = base64.urlsafe_b64decode(token.signature + "==")
+                pub = Ed25519PublicKey.from_public_bytes(pub_bytes)
+                pub.verify(sig_bytes, token.signable())
+                return True, ""
+            except Exception:
+                return False, "token_signature_invalid"
+        else:
+            # Symmetric HMAC path (default for SqlRotatingKeyProvider etc.)
+            verification_key = self._key_provider.get_verification_key(token.key_id)
+            if verification_key is None:
+                return False, "token_key_id_unknown"
+            expected = hmac.new(verification_key, token.signable(), hashlib.sha256).hexdigest()
+            ok = hmac.compare_digest(expected, token.signature)
+            return ok, ("" if ok else "token_signature_invalid")
 
     def verify_for_execution(
         self,
