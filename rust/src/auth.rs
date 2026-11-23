@@ -122,6 +122,16 @@ fn pick_decoding_key(jwks: &Jwks, kid: &str) -> Result<DecodingKey, String> {
         .map_err(|e| format!("DecodingKey error: {}", e))
 }
 
+/// Verification policy for Supabase access tokens: RS256 only (no algorithm negotiation),
+/// `exp` validated, issuer pinned. Audience is checked separately by `aud_ok`.
+fn rs256_validation(issuer: &str) -> Validation {
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.validate_exp = true;
+    validation.set_issuer(&[issuer]);
+    validation.validate_aud = false;
+    validation
+}
+
 fn aud_ok(claims: &Claims, expected: &Option<String>) -> bool {
     let Some(exp) = expected else { return true };
     let Some(aud) = &claims.aud else { return false };
@@ -193,10 +203,7 @@ pub async fn require_user(
         )
     })?;
 
-    let mut validation = Validation::new(Algorithm::RS256);
-    validation.validate_exp = true;
-    validation.set_issuer(&[cfg.issuer.as_str()]);
-    validation.validate_aud = false;
+    let validation = rs256_validation(&cfg.issuer);
 
     let data: TokenData<Claims> = decode(token, &key, &validation).map_err(|_| {
         api_error(
@@ -242,4 +249,92 @@ pub async fn require_user(
     })?;
 
     Ok(CurrentUser { user_id })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonwebtoken::errors::ErrorKind;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+
+    const ISSUER: &str = "https://project.supabase.co/auth/v1";
+    const SECRET: &[u8] = b"test-only-hmac-secret";
+
+    #[derive(serde::Serialize)]
+    struct TokenClaims {
+        sub: String,
+        iss: String,
+        aud: String,
+        exp: u64,
+    }
+
+    fn now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs()
+    }
+
+    fn claims(exp: u64, iss: &str) -> TokenClaims {
+        TokenClaims {
+            sub: Uuid::nil().to_string(),
+            iss: iss.to_string(),
+            aud: "authenticated".to_string(),
+            exp,
+        }
+    }
+
+    fn hs256_token(c: &TokenClaims) -> String {
+        encode(&Header::new(Algorithm::HS256), c, &EncodingKey::from_secret(SECRET).expect("hmac key")).expect("encode")
+    }
+
+    /// Same exp/iss rules as production, but with HS256 allowed so the token can be signed in-test.
+    fn hs256_policy(issuer: &str) -> Validation {
+        let mut v = rs256_validation(issuer);
+        v.algorithms = vec![Algorithm::HS256];
+        v
+    }
+
+    #[test]
+    fn policy_pins_rs256_exp_and_issuer() {
+        let v = rs256_validation(ISSUER);
+        assert_eq!(v.algorithms, vec![Algorithm::RS256]);
+        assert!(v.validate_exp);
+        assert!(!v.validate_aud);
+        assert!(v.iss.as_ref().is_some_and(|iss| iss.contains(ISSUER)));
+    }
+
+    #[test]
+    fn hs256_token_is_rejected_by_rs256_policy() {
+        // Algorithm confusion: a token signed with a shared secret must not verify under the RS256 policy,
+        // even with a valid exp and issuer.
+        let token = hs256_token(&claims(now() + 3600, ISSUER));
+        let key = DecodingKey::from_secret(SECRET).expect("hmac key");
+        let err = decode::<Claims>(&token, &key, &rs256_validation(ISSUER)).expect_err("must reject");
+        assert!(matches!(err.kind(), ErrorKind::InvalidAlgorithm), "got {:?}", err.kind());
+    }
+
+    #[test]
+    fn valid_token_passes_exp_and_issuer_checks() {
+        // Positive control: proves the harness accepts a well-formed token, so the rejections below are meaningful.
+        let token = hs256_token(&claims(now() + 3600, ISSUER));
+        let key = DecodingKey::from_secret(SECRET).expect("hmac key");
+        assert!(decode::<Claims>(&token, &key, &hs256_policy(ISSUER)).is_ok());
+    }
+
+    #[test]
+    fn expired_token_is_rejected() {
+        let token = hs256_token(&claims(now().saturating_sub(3600), ISSUER));
+        let key = DecodingKey::from_secret(SECRET).expect("hmac key");
+        let err = decode::<Claims>(&token, &key, &hs256_policy(ISSUER)).expect_err("must reject");
+        assert!(matches!(err.kind(), ErrorKind::ExpiredSignature), "got {:?}", err.kind());
+    }
+
+    #[test]
+    fn wrong_issuer_is_rejected() {
+        let token = hs256_token(&claims(now() + 3600, "https://evil.example/auth/v1"));
+        let key = DecodingKey::from_secret(SECRET).expect("hmac key");
+        let err = decode::<Claims>(&token, &key, &hs256_policy(ISSUER)).expect_err("must reject");
+        assert!(matches!(err.kind(), ErrorKind::InvalidIssuer), "got {:?}", err.kind());
+    }
 }

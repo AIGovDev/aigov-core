@@ -41,6 +41,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://aigov_test:aigov_test_pass@localhost:5432/aigov_integration
       TEST_PG_DSN: postgresql://aigov_test:aigov_test_pass@localhost:5432/aigov_integration
+      # Ephemeral service container dedicated to tests; destructive DROP TABLE is permitted only here.
+      AIGOV_PG_TEST_DESTRUCTIVE: "1"
 
     steps:
       - uses: actions/checkout@v4
