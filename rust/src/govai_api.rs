@@ -83,12 +83,19 @@ async fn pool_from_env() -> Result<DbPool, String> {
 /// Production fails closed unless a signed policy bundle is configured, and no override is present.
 /// Environment variables and flags cannot substitute for the signed bundle.
 pub fn enforce_production_policy_inputs() -> Result<(), String> {
-    let set = |k: &str| std::env::var(k).map(|v| !v.trim().is_empty()).unwrap_or(false);
+    let set = |k: &str| {
+        std::env::var(k)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    };
     if set("AIGOV_POLICY_FILE") {
         return Err("refusing to start: AIGOV_POLICY_FILE is not permitted in production; use a signed policy bundle".to_string());
     }
     if std::env::var_os("AIGOV_ALLOW_UNSIGNED_POLICY_FILE").is_some() {
-        return Err("refusing to start: AIGOV_ALLOW_UNSIGNED_POLICY_FILE is not permitted in production".to_string());
+        return Err(
+            "refusing to start: AIGOV_ALLOW_UNSIGNED_POLICY_FILE is not permitted in production"
+                .to_string(),
+        );
     }
     if set("AIGOV_APPROVER_ALLOWLIST") {
         return Err("refusing to start: AIGOV_APPROVER_ALLOWLIST is not permitted in production; express the allowlist in the signed bundle".to_string());
