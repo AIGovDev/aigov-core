@@ -309,6 +309,15 @@ class VercelKMSProvider(AsymmetricKMSBase):
         oidc_token_fn: "Callable[[], str] | None" = None,
         timeout_s: float = 5.0,
     ) -> None:
+        # Fail closed. The documented Vercel KMS API has no EdDSA/Ed25519 issuer algorithm
+        # (issuer algorithm enum: ES256/384/512, PS256/384/512, RS256/384/512), and the JWKS
+        # path below was not confirmed against a live issuer. Construction is refused so that
+        # no caller can sign with an unverified contract. Use Google Cloud KMS EC_SIGN_ED25519
+        # or AWS KMS ED25519_SHA_512 after a live contract test instead.
+        raise AsymmetricKMSUnavailableError(
+            "VercelKMSProvider is disabled: documented Vercel KMS issuers do not offer an "
+            "Ed25519/EdDSA algorithm, and the integration is not verified live."
+        )
         self._issuer_id = issuer_id
         self._key_id = key_id
         self._team_id = team_id
