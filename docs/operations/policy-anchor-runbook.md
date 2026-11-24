@@ -17,7 +17,7 @@ disagree, the database row is the authority, and the filesystem record is brough
 | Deleting the filesystem record does not reset the accepted revision | **Protected** (restored from the anchor) |
 | A recomputed integrity tag does not help an attacker who only writes the filesystem | **Protected**: the anchor is the authority |
 | A different digest at the anchored revision is refused | **Protected** |
-| A failed activation does not advance the anchor | **Protected** (the anchor is written last; see section 4) |
+| A failed activation does not advance the anchor | **Protected** for failures before the commit point, including a listener bind failure (see section 4). A failure **at** the commit leaves the filesystem record ahead of the anchor; the next start rolls forward or refuses deterministically. |
 | Concurrent activations cannot move the anchor backwards | **Protected** (advisory lock per policy, plus the per-host filesystem lock) |
 | Database unavailable | **Fail closed**: startup refuses; nothing is written |
 | Staging or production started without a database URL | **Refused**: there is no path that silently drops the anchor |
