@@ -45,15 +45,15 @@ def test_staging_host_requires_an_exact_label(host, expected):
 def _live_args(**overrides):
     import argparse
 
-    base = dict(
-        base_url="",
-        api_key_env="GOVAI_STAGING_API_KEY",
-        target_kind="remote",
-        container="",
-        image="",
-        manifest="",
-        fixtures="",
-    )
+    base = {
+        "base_url": "",
+        "api_key_env": "GOVAI_STAGING_API_KEY",
+        "target_kind": "remote",
+        "container": "",
+        "image": "",
+        "manifest": "",
+        "fixtures": "",
+    }
     base.update(overrides)
     return argparse.Namespace(**base)
 
