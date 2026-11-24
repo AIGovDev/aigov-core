@@ -2,9 +2,9 @@
 
 use crate::audit_api_key::AuditApiKeyConfig;
 use crate::db;
+use crate::govai_api::AppState;
 use crate::ledger_storage;
 use crate::policy_config::{PolicySource, PolicySourceKind};
-use crate::govai_api::AppState;
 use serde_json::{json, Value};
 use std::path::{Component, Path};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -112,19 +112,12 @@ pub fn signing_trust_configured() -> bool {
     }
     serde_json::from_str::<Value>(trimmed)
         .ok()
-        .filter(|v| {
-            v.as_array()
-                .map(|a| !a.is_empty())
-                .unwrap_or(false)
-        })
+        .filter(|v| v.as_array().map(|a| !a.is_empty()).unwrap_or(false))
         .is_some()
 }
 
 pub fn api_key_allowlist_count(cfg: &AuditApiKeyConfig) -> u64 {
-    cfg.keys
-        .as_ref()
-        .map(|m| m.len() as u64)
-        .unwrap_or(0)
+    cfg.keys.as_ref().map(|m| m.len() as u64).unwrap_or(0)
 }
 
 pub fn api_key_tenant_map_count() -> u64 {
@@ -201,9 +194,9 @@ pub async fn readiness_components(st: &AppState) -> Value {
         }
     }
 
-    let ledger_writable = ledger_storage::validate_startup(st.deployment_env)
-        .map(|_| true)
-        .unwrap_or(false);
+    // Non-mutating: writability was proven at startup (validate_startup fails closed). Readiness only
+    // confirms the configured ledger directory is still present; it writes nothing.
+    let ledger_writable = ledger_storage::ledger_dir_present(st.deployment_env);
 
     let ledger_tenant_readable = ledger_storage::default_tenant_ledger_readable();
 
