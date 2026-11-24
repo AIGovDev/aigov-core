@@ -46,7 +46,39 @@ use std::path::{Path, PathBuf};
 
 pub const WATERMARK_FILE: &str = "policy_watermark.json";
 pub const LOCK_FILE: &str = "policy_watermark.lock";
-const SCHEMA: &str = "govai.policy_watermark.v1";
+const SCHEMA: &str = "govai.policy_watermark.v2";
+/// Legacy format written by earlier revisions. Read once, migrated on the next commit, never written again.
+const SCHEMA_V1: &str = "govai.policy_watermark.v1";
+
+/// On-disk v1 record: no integrity tag.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OnDiskV1 {
+    schema: String,
+    policies: BTreeMap<String, WatermarkEntry>,
+}
+
+/// On-disk v2 record. `record_sha256` is SHA-256 over the canonical JSON of `schema` and `policies`.
+/// It detects edits that do not recompute the tag. It is not authentication: anyone who can write the file
+/// can also recompute it. See the module documentation.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OnDiskV2 {
+    schema: String,
+    policies: BTreeMap<String, WatermarkEntry>,
+    record_sha256: String,
+}
+
+#[derive(Serialize)]
+struct TaggedBody<'a> {
+    schema: &'a str,
+    policies: &'a BTreeMap<String, WatermarkEntry>,
+}
+
+fn integrity_tag(schema: &str, policies: &BTreeMap<String, WatermarkEntry>) -> String {
+    let body = TaggedBody { schema, policies };
+    crate::canonical_json::sha256_hex_bytes(&crate::canonical_json::canonical_json_bytes(&body))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WatermarkEntry {
@@ -108,8 +140,39 @@ fn ledger_has_data(ledger_dir: &Path) -> bool {
     })
 }
 
-/// Read the record. A missing record is a first start only when the ledger holds no data.
-pub fn read_watermark(ledger_dir: &Path) -> Result<Watermark, String> {
+/// Open a record without following symlinks. On unix, `O_NOFOLLOW` makes a symlink an error.
+fn open_no_follow(path: &Path) -> Result<std::fs::File, String> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NOFOLLOW);
+    }
+    opts.open(path).map_err(|e| {
+        if std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            format!(
+                "policy watermark refused: {} is a symbolic link",
+                path.display()
+            )
+        } else {
+            format!("policy watermark unreadable at {}: {e}", path.display())
+        }
+    })
+}
+
+/// A loaded record. `legacy` means it was read from the v1 format and must be migrated on commit.
+#[derive(Debug, Clone)]
+pub struct Loaded {
+    pub wm: Watermark,
+    pub legacy: bool,
+}
+
+/// Read and verify the record. A missing record is a first start only when the ledger holds no data.
+pub fn read_loaded(ledger_dir: &Path) -> Result<Loaded, String> {
     if !ledger_dir.is_dir() {
         return Err(format!(
             "policy watermark: ledger directory {} is not present; rollback protection cannot be established",
@@ -117,26 +180,70 @@ pub fn read_watermark(ledger_dir: &Path) -> Result<Watermark, String> {
         ));
     }
     let path = watermark_path(ledger_dir);
-    if !path.exists() {
+    if std::fs::symlink_metadata(&path).is_err() {
         if ledger_has_data(ledger_dir) {
             return Err(format!(
                 "policy watermark is missing at {} but the ledger already holds data; refusing to assume a first start",
                 path.display()
             ));
         }
-        return Ok(Watermark::empty());
+        return Ok(Loaded {
+            wm: Watermark::empty(),
+            legacy: false,
+        });
     }
-    let raw = std::fs::read_to_string(&path)
+    let mut raw = String::new();
+    use std::io::Read;
+    open_no_follow(&path)?
+        .read_to_string(&mut raw)
         .map_err(|e| format!("policy watermark unreadable at {}: {e}", path.display()))?;
-    let wm: Watermark = serde_json::from_str(&raw)
+
+    let probe: serde_json::Value = serde_json::from_str(&raw)
         .map_err(|e| format!("policy watermark malformed at {}: {e}", path.display()))?;
-    if wm.schema != SCHEMA {
-        return Err(format!(
-            "policy watermark has unsupported schema {:?}",
-            wm.schema
-        ));
+    match probe.get("schema").and_then(|v| v.as_str()) {
+        Some(SCHEMA) => {
+            let rec: OnDiskV2 = serde_json::from_value(probe)
+                .map_err(|e| format!("policy watermark malformed at {}: {e}", path.display()))?;
+            if integrity_tag(&rec.schema, &rec.policies) != rec.record_sha256 {
+                return Err(format!(
+                    "policy watermark integrity check failed at {}: the record was modified outside the service",
+                    path.display()
+                ));
+            }
+            Ok(Loaded {
+                wm: Watermark {
+                    schema: SCHEMA.to_string(),
+                    policies: rec.policies,
+                },
+                legacy: false,
+            })
+        }
+        Some(SCHEMA_V1) => {
+            // Legacy record: no integrity tag. Accepted once, with an explicit log line, and migrated on commit.
+            let rec: OnDiskV1 = serde_json::from_value(probe)
+                .map_err(|e| format!("policy watermark malformed at {}: {e}", path.display()))?;
+            if rec.schema != SCHEMA_V1 {
+                return Err(format!("policy watermark has unsupported schema {:?}", rec.schema));
+            }
+            Ok(Loaded {
+                wm: Watermark {
+                    schema: SCHEMA.to_string(),
+                    policies: rec.policies,
+                },
+                legacy: true,
+            })
+        }
+        Some(other) => Err(format!("policy watermark has unsupported schema {other:?}")),
+        None => Err(format!(
+            "policy watermark malformed at {}: no schema",
+            path.display()
+        )),
     }
-    Ok(wm)
+}
+
+/// Read the record, discarding the legacy flag.
+pub fn read_watermark(ledger_dir: &Path) -> Result<Watermark, String> {
+    read_loaded(ledger_dir).map(|l| l.wm)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -169,21 +276,55 @@ fn decide(wm: &Watermark, policy_id: &str, version: u64, digest: &str) -> Result
 
 fn write_watermark_atomic(ledger_dir: &Path, wm: &Watermark) -> Result<(), String> {
     let path = watermark_path(ledger_dir);
-    let tmp = ledger_dir.join(format!("{WATERMARK_FILE}.tmp"));
-    let body = serde_json::to_vec_pretty(wm).map_err(|e| e.to_string())?;
+    if std::fs::symlink_metadata(&path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
     {
-        let mut f = std::fs::File::create(&tmp)
+        return Err(format!(
+            "policy watermark refused: {} is a symbolic link; refusing to replace it",
+            path.display()
+        ));
+    }
+    let on_disk = OnDiskV2 {
+        schema: SCHEMA.to_string(),
+        policies: wm.policies.clone(),
+        record_sha256: integrity_tag(SCHEMA, &wm.policies),
+    };
+    let body = serde_json::to_vec_pretty(&on_disk).map_err(|e| e.to_string())?;
+    // A unique name, created exclusively: a pre-placed file or symlink at this name makes creation fail.
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = ledger_dir.join(format!(
+        "{WATERMARK_FILE}.tmp.{}.{nonce}",
+        std::process::id()
+    ));
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let result = (|| -> Result<(), String> {
+        let mut f = opts
+            .open(&tmp)
             .map_err(|e| format!("policy watermark write failed: {e}"))?;
         f.write_all(&body)
             .and_then(|_| f.write_all(b"\n"))
             .and_then(|_| f.sync_all())
             .map_err(|e| format!("policy watermark write failed: {e}"))?;
+        std::fs::rename(&tmp, &path).map_err(|e| format!("policy watermark commit failed: {e}"))?;
+        if let Ok(dir) = std::fs::File::open(ledger_dir) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    std::fs::rename(&tmp, &path).map_err(|e| format!("policy watermark commit failed: {e}"))?;
-    if let Ok(dir) = std::fs::File::open(ledger_dir) {
-        let _ = dir.sync_all();
-    }
-    Ok(())
+    result
 }
 
 /// A verified bundle's revision, checked but not yet recorded. Dropping it records nothing.
@@ -221,18 +362,31 @@ impl Pending {
     /// Record the revision under an exclusive lock. Re-reads and re-decides, so a concurrent commit
     /// cannot move the record backwards.
     pub fn commit(self) -> Result<(), String> {
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(lock_path(&self.ledger_dir))
-            .map_err(|e| format!("policy watermark lock unavailable: {e}"))?;
+        let lock_p = lock_path(&self.ledger_dir);
+        let mut lock_opts = std::fs::OpenOptions::new();
+        lock_opts.create(true).truncate(false).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            lock_opts.custom_flags(libc::O_NOFOLLOW);
+        }
+        let lock = lock_opts.open(&lock_p).map_err(|e| {
+            format!("policy watermark lock unavailable (symbolic links are refused): {e}")
+        })?;
         lock_exclusive(&lock)?;
         // The lock is released when `lock` is dropped at the end of this function.
-        let mut wm = read_watermark(&self.ledger_dir)?;
+        let loaded = read_loaded(&self.ledger_dir)?;
+        let mut wm = loaded.wm;
         match decide(&wm, &self.policy_id, self.version, &self.digest_sha256)? {
-            Decision::Idempotent => Ok(()),
+            Decision::Idempotent if !loaded.legacy => Ok(()),
+            Decision::Idempotent => {
+                eprintln!("policy watermark: migrating a legacy v1 record to {SCHEMA}");
+                write_watermark_atomic(&self.ledger_dir, &wm)
+            }
             Decision::Advance => {
+                if loaded.legacy {
+                    eprintln!("policy watermark: migrating a legacy v1 record to {SCHEMA}");
+                }
                 wm.policies.insert(
                     self.policy_id.clone(),
                     WatermarkEntry {
@@ -458,6 +612,215 @@ mod tests {
         enforce(dir.path(), "b", "1", D2).unwrap();
         assert!(enforce(dir.path(), "a", "4", D1).is_err());
         assert!(enforce(dir.path(), "b", "1", D2).is_ok());
+    }
+
+    // ---- Integrity and substitution regression tests (threat model in docs/operations) ----
+
+    fn committed_v2(dir: &Path, version: &str, digest: &str) {
+        enforce(dir, "p", version, digest).unwrap();
+    }
+
+    #[test]
+    fn edited_revision_is_detected_as_tampering() {
+        // Attacker lowers the stored revision by editing the file, without a valid integrity tag.
+        let dir = tempfile::tempdir().unwrap();
+        committed_v2(dir.path(), "2", D2);
+        let path = watermark_path(dir.path());
+        let edited = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("\"version\": 2", "\"version\": 1");
+        assert_ne!(
+            edited,
+            std::fs::read_to_string(&path).unwrap(),
+            "test must change the record"
+        );
+        std::fs::write(&path, edited).unwrap();
+        let err = check(dir.path(), "p", "1", D1).unwrap_err();
+        assert!(
+            err.contains("integrity"),
+            "an edited revision must be refused: {err}"
+        );
+    }
+
+    #[test]
+    fn edited_digest_is_detected_as_tampering() {
+        let dir = tempfile::tempdir().unwrap();
+        committed_v2(dir.path(), "2", D1);
+        let path = watermark_path(dir.path());
+        let edited = std::fs::read_to_string(&path).unwrap().replace(D1, D2);
+        std::fs::write(&path, edited).unwrap();
+        let err = check(dir.path(), "p", "2", D2).unwrap_err();
+        assert!(
+            err.contains("integrity"),
+            "an edited digest must be refused: {err}"
+        );
+    }
+
+    #[test]
+    fn edited_policy_identifier_is_detected_as_tampering() {
+        let dir = tempfile::tempdir().unwrap();
+        committed_v2(dir.path(), "2", D1);
+        let path = watermark_path(dir.path());
+        let edited = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("\"p\"", "\"other\"");
+        std::fs::write(&path, edited).unwrap();
+        let err = check(dir.path(), "p", "2", D1).unwrap_err();
+        assert!(
+            err.contains("integrity") || err.contains("missing"),
+            "an edited identifier must be refused: {err}"
+        );
+    }
+
+    #[test]
+    fn invalid_integrity_tag_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        committed_v2(dir.path(), "2", D1);
+        let path = watermark_path(dir.path());
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let tampered = raw.replace("\"record_sha256\": \"", "\"record_sha256\": \"00");
+        assert_ne!(tampered, raw);
+        std::fs::write(&path, tampered).unwrap();
+        assert!(check(dir.path(), "p", "2", D1).is_err());
+    }
+
+    #[test]
+    fn symlinked_record_is_refused_and_not_followed() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("ledger");
+        std::fs::create_dir(&dir).unwrap();
+        // An older, stand-alone record that an attacker wants the service to read.
+        let older = root.path().join("older.json");
+        std::fs::write(&older, r#"{"schema":"govai.policy_watermark.v1","policies":{"p":{"version":1,"digest_sha256":"1111111111111111111111111111111111111111111111111111111111111111"}}}"#).unwrap();
+        std::os::unix::fs::symlink(&older, watermark_path(&dir)).unwrap();
+        std::fs::write(dir.join("audit_log__t.jsonl"), "{}\n").unwrap();
+        assert!(
+            check(&dir, "p", "2", D2).is_err(),
+            "a symlinked record must not be followed"
+        );
+    }
+
+    #[test]
+    fn symlinked_lock_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("ledger");
+        std::fs::create_dir(&dir).unwrap();
+        let target = root.path().join("elsewhere");
+        std::fs::write(&target, "").unwrap();
+        std::os::unix::fs::symlink(&target, lock_path(&dir)).unwrap();
+        let pending = check(&dir, "p", "1", D1).unwrap();
+        assert!(
+            pending.commit().is_err(),
+            "a symlinked lock file must be refused"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "",
+            "the symlink target must not be written"
+        );
+    }
+
+    #[test]
+    fn commit_does_not_write_through_a_symlink_at_the_record_path() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("ledger");
+        std::fs::create_dir(&dir).unwrap();
+        let target = root.path().join("victim.json");
+        std::fs::write(&target, "victim").unwrap();
+        std::os::unix::fs::symlink(&target, watermark_path(&dir)).unwrap();
+        let pending = check(&dir, "p", "1", D1);
+        // The symlink is refused at check time; if it were ever accepted, commit must not write through it.
+        if let Ok(p) = pending {
+            assert!(p.commit().is_err());
+        }
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "victim");
+    }
+
+    #[test]
+    fn torn_record_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        committed_v2(dir.path(), "2", D1);
+        let path = watermark_path(dir.path());
+        let raw = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, &raw[..raw.len() / 2]).unwrap();
+        assert!(check(dir.path(), "p", "2", D1).is_err());
+    }
+
+    #[test]
+    fn interrupted_write_leftover_does_not_change_the_record() {
+        let dir = tempfile::tempdir().unwrap();
+        committed_v2(dir.path(), "2", D1);
+        // A crash between the temporary write and the rename leaves a stray file; it must be ignored.
+        std::fs::write(
+            dir.path().join(format!("{WATERMARK_FILE}.tmp")),
+            "{ garbage",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("policy_watermark.json.tmp.999.1"),
+            "{ garbage",
+        )
+        .unwrap();
+        assert_eq!(record(dir.path()).policies["p"].version, 2);
+        assert!(check(dir.path(), "p", "2", D1).is_ok());
+    }
+
+    #[test]
+    fn legacy_v1_record_migrates_to_the_checksummed_format_on_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = r#"{"schema":"govai.policy_watermark.v1","policies":{"p":{"version":2,"digest_sha256":"2222222222222222222222222222222222222222222222222222222222222222"}}}"#;
+        std::fs::write(watermark_path(dir.path()), legacy).unwrap();
+        assert_eq!(
+            record(dir.path()).policies["p"].version,
+            2,
+            "a legacy record is read once"
+        );
+        enforce(dir.path(), "p", "3", D1).unwrap();
+        let migrated = std::fs::read_to_string(watermark_path(dir.path())).unwrap();
+        assert!(
+            migrated.contains("govai.policy_watermark.v2"),
+            "commit must write the current format: {migrated}"
+        );
+        assert!(
+            migrated.contains("record_sha256"),
+            "current format carries an integrity tag"
+        );
+        assert_eq!(record(dir.path()).policies["p"].version, 3);
+    }
+
+    #[test]
+    fn legacy_record_is_migrated_even_when_the_revision_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = r#"{"schema":"govai.policy_watermark.v1","policies":{"p":{"version":2,"digest_sha256":"2222222222222222222222222222222222222222222222222222222222222222"}}}"#;
+        std::fs::write(watermark_path(dir.path()), legacy).unwrap();
+        enforce(
+            dir.path(),
+            "p",
+            "2",
+            "2222222222222222222222222222222222222222222222222222222222222222",
+        )
+        .unwrap();
+        let migrated = std::fs::read_to_string(watermark_path(dir.path())).unwrap();
+        assert!(
+            migrated.contains("govai.policy_watermark.v2"),
+            "idempotent commit must still migrate: {migrated}"
+        );
+    }
+
+    #[test]
+    fn restored_older_checksummed_snapshot_is_a_documented_residual() {
+        // Restoring an older but authentic record (with its own valid tag) cannot be detected from the
+        // file alone. Only an independent anchor (for example, PostgreSQL) closes this. This test records
+        // the current behavior so that a future anchor is seen to change it.
+        let dir = tempfile::tempdir().unwrap();
+        committed_v2(dir.path(), "1", D1);
+        let older = std::fs::read(watermark_path(dir.path())).unwrap();
+        committed_v2(dir.path(), "2", D2);
+        std::fs::write(watermark_path(dir.path()), older).unwrap();
+        assert!(
+            check(dir.path(), "p", "1", D1).is_ok(),
+            "residual: an authentic older snapshot is accepted"
+        );
     }
 
     #[test]
