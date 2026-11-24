@@ -27,6 +27,7 @@ dependencies = [
  "hmac",
  "http-body-util",
  "jsonwebtoken",
+ "libc",
  "once_cell",
  "rand 0.10.4",
  "reqwest",

@@ -51,6 +51,8 @@ pub struct PolicyStore {
     policies: Arc<Vec<ResolvedPolicy>>,
     /// Legacy fallback compiled into a runtime policy (always present).
     legacy_fallback: Arc<ResolvedPolicy>,
+    /// Verified revisions waiting to be recorded. Recorded by `commit_revisions` after startup succeeds.
+    pending_revisions: Arc<std::sync::Mutex<Vec<crate::policy_watermark::Pending>>>,
 }
 
 impl PolicyStore {
@@ -69,6 +71,7 @@ impl PolicyStore {
             .filter(|s| !s.trim().is_empty());
 
         let mut loaded: Vec<ResolvedPolicy> = Vec::new();
+        let mut pending_revisions: Vec<crate::policy_watermark::Pending> = Vec::new();
 
         if let Some(p) = bundle_override {
             let p = PathBuf::from(p.trim());
@@ -82,7 +85,7 @@ impl PolicyStore {
                 }
                 policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
                 enforce_production_contract(deployment_env, &doc)?;
-                enforce_anti_rollback(deployment_env, &doc)?;
+                pending_revisions.extend(enforce_anti_rollback(deployment_env, &doc)?);
             }
             let rp =
                 load_bundle_doc(&doc).map_err(|e| format!("policy bundle load failed: {e}"))?;
@@ -115,7 +118,7 @@ impl PolicyStore {
                     }
                     policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
                     enforce_production_contract(deployment_env, &doc)?;
-                    enforce_anti_rollback(deployment_env, &doc)?;
+                    pending_revisions.extend(enforce_anti_rollback(deployment_env, &doc)?);
                 }
                 let rp = load_bundle_doc(&doc)
                     .map_err(|e| format!("policy bundle load failed {}: {e}", p.display()))?;
@@ -163,7 +166,25 @@ impl PolicyStore {
             deployment_env,
             policies: Arc::new(loaded),
             legacy_fallback: Arc::new(legacy_resolved),
+            pending_revisions: Arc::new(std::sync::Mutex::new(pending_revisions)),
         })
+    }
+
+    /// Record the verified revisions this store serves. Call once, after the service has started
+    /// successfully, so a failed startup never advances the accepted revision. Each commit is atomic and
+    /// re-checked under lock.
+    pub fn commit_revisions(&self) -> Result<(), String> {
+        let items = {
+            let mut guard = self
+                .pending_revisions
+                .lock()
+                .map_err(|_| "policy revision state is unavailable (lock poisoned)".to_string())?;
+            std::mem::take(&mut *guard)
+        };
+        for pending in items {
+            pending.commit()?;
+        }
+        Ok(())
     }
 
     pub fn resolve_for_request(&self, tenant_id: &str) -> &ResolvedPolicy {
@@ -189,14 +210,15 @@ impl PolicyStore {
     }
 }
 
-/// Anti-rollback for a verified bundle in staging and production. The accepted version is recorded in the
-/// ledger directory, and older versions are refused. See `policy_watermark`.
+/// Anti-rollback for a verified bundle in staging and production. Checks the revision now and returns it
+/// pending. The record advances only when `PolicyStore::commit_revisions` runs after a successful startup.
+/// See `policy_watermark`.
 fn enforce_anti_rollback(
     deployment_env: GovaiEnvironment,
     doc: &GovaiPolicyV1,
-) -> Result<(), String> {
+) -> Result<Vec<crate::policy_watermark::Pending>, String> {
     if matches!(deployment_env, GovaiEnvironment::Dev) {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let Some(ledger) = crate::ledger_storage::configured_ledger_dir() else {
         return Err(
@@ -205,7 +227,8 @@ fn enforce_anti_rollback(
         );
     };
     let digest = policy_signing::policy_payload_digest_sha256(doc);
-    crate::policy_watermark::enforce(&ledger, &doc.policy_id, &doc.version, &digest)
+    let pending = crate::policy_watermark::check(&ledger, &doc.policy_id, &doc.version, &digest)?;
+    Ok(vec![pending])
 }
 
 /// Production contract for a verified signed bundle. Refuses declared controls that this build does
@@ -728,6 +751,7 @@ mod tests {
             deployment_env: GovaiEnvironment::Prod,
             policies: Arc::new(vec![]),
             legacy_fallback: Arc::new(store),
+            pending_revisions: Arc::new(std::sync::Mutex::new(Vec::new())),
         };
         let err = s
             .enforce_ingest_for_request("tenant", &ev, &ledger)

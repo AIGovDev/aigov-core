@@ -636,6 +636,269 @@ def run_rollback_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
     )
 
 
+def run_revision_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
+    """Revision state across real restarts: activation, failure, tampering, rotation, and concurrency."""
+    ledger = work / "revision-ledger"
+    ledger.mkdir()
+    policy_dir = work / "revision-policy-dir"
+    policy_dir.mkdir()
+    watermark = ledger / "policy_watermark.json"
+
+    def bundle(
+        name: str,
+        version: str,
+        *,
+        seed: str | None = None,
+        allowlist: list[str] | None = None,
+    ) -> Path:
+        doc = synthetic_policy(policy_id="revision-policy", version=version)
+        if allowlist is not None:
+            doc["ingest_rules"]["event_types"]["human_approved"]["gates"][0][
+                "allowlist"
+            ] = allowlist
+        return write_signed_bundle(
+            work / f"{name}.bundle.json",
+            doc,
+            seed_b64=seed or keys.seed_b64,
+            expires=FUTURE,
+        )
+
+    def start(
+        cid: str,
+        desc: str,
+        *,
+        bundle_path: Path,
+        expect_start: bool,
+        needle: str,
+        trust_store: str = trust,
+        extra: dict[str, str] | None = None,
+        timeout_s: float = 15.0,
+    ) -> None:
+        port = _free_port()
+        env = base_env(
+            ledger=ledger,
+            policy_dir=policy_dir,
+            environment="staging",
+            trust=trust_store,
+            api_key=f"k-{cid}",
+            bind=f"127.0.0.1:{port}",
+        )
+        env["AIGOV_POLICY_BUNDLE_FILE"] = str(bundle_path)
+        env.update(extra or {})
+        server, err = start_server(env, work, timeout_s=timeout_s)
+        if server is not None:
+            server.stop()
+        if expect_start:
+            ok = server is not None
+            ev.record(
+                cid,
+                "local_simulation",
+                desc,
+                "server starts and reports healthy",
+                "started" if ok else f"refused: {last_error_line(err)}",
+                "passed" if ok else "failed",
+            )
+        else:
+            ok = server is None and needle in err
+            ev.record(
+                cid,
+                "local_simulation",
+                desc,
+                f"refused (message contains {needle!r})",
+                "started" if server is not None else "refused: " + last_error_line(err),
+                "passed" if ok else "failed",
+            )
+
+    def recorded_version() -> str:
+        if not watermark.exists():
+            return "none"
+        return str(
+            json.loads(watermark.read_text(encoding="utf-8"))["policies"][
+                "revision-policy"
+            ]["version"]
+        )
+
+    v1 = bundle("rev1", "1")
+    v2 = bundle("rev2", "2")
+    start(
+        "revision.1_accepted",
+        "revision 1 accepted on first start",
+        bundle_path=v1,
+        expect_start=True,
+        needle="",
+    )
+    start(
+        "revision.2_accepted",
+        "revision 2 accepted after 1",
+        bundle_path=v2,
+        expect_start=True,
+        needle="",
+    )
+    start(
+        "revision.2_reapply_idempotent",
+        "re-applying revision 2 with identical content is accepted",
+        bundle_path=v2,
+        expect_start=True,
+        needle="",
+    )
+    ev.record(
+        "revision.record_after_2",
+        "local_simulation",
+        "record holds revision 2 after the reapply",
+        "2",
+        recorded_version(),
+        "passed" if recorded_version() == "2" else "failed",
+    )
+
+    # Failed activation: the bundle verifies, but startup fails later (database unreachable).
+    v3 = bundle("rev3", "3")
+    start(
+        "revision.failed_activation_refused",
+        "revision 3 that fails at startup is refused",
+        bundle_path=v3,
+        expect_start=False,
+        needle="DB connect failed",
+        extra={"GOVAI_DATABASE_URL": "postgres://nobody:nothing@127.0.0.1:9/none"},
+        timeout_s=60.0,
+    )
+    ev.record(
+        "revision.failed_activation_no_advance",
+        "local_simulation",
+        "a failed activation does not advance the record",
+        "2",
+        recorded_version(),
+        "passed" if recorded_version() == "2" else "failed",
+    )
+
+    # Invalid signature: tampered content with the signature left in place.
+    tampered = json.loads(v3.read_text(encoding="utf-8"))
+    tampered["ingest_rules"]["event_types"]["human_approved"]["gates"][0][
+        "allowlist"
+    ] = ["alice", "mallory"]
+    tampered_path = work / "rev3-tampered.bundle.json"
+    tampered_path.write_text(json.dumps(tampered, indent=2), encoding="utf-8")
+    start(
+        "revision.invalid_signature_refused",
+        "a bundle with an invalid signature is refused",
+        bundle_path=tampered_path,
+        expect_start=False,
+        needle="payload_digest_sha256 mismatch",
+    )
+    ev.record(
+        "revision.invalid_signature_no_advance",
+        "local_simulation",
+        "an invalid signature does not advance the record",
+        "2",
+        recorded_version(),
+        "passed" if recorded_version() == "2" else "failed",
+    )
+
+    # Signing-key rotation: the same revision and content signed by a new key, which is trusted.
+    from nacl.signing import SigningKey
+
+    new_seed = base64.b64encode(bytes(SigningKey.generate())).decode("ascii")
+    new_pub = base64.b64encode(
+        bytes(SigningKey(base64.b64decode(new_seed)).verify_key)
+    ).decode("ascii")
+    both = json.dumps(
+        [
+            {"issuer_id": ISSUER, "pubkeys_base64": [keys.pub_b64, new_pub]},
+        ]
+    )
+    rotated = bundle("rev2-rotated", "2", seed=new_seed)
+    start(
+        "revision.key_rotation_same_revision",
+        "rotated signing key with the same revision and content is accepted",
+        bundle_path=rotated,
+        expect_start=True,
+        needle="",
+        trust_store=both,
+    )
+    start(
+        "revision.old_key_removed",
+        "after rotation, a bundle from the removed key is refused",
+        bundle_path=v2,
+        expect_start=False,
+        needle="verification failed for all trusted keys",
+        trust_store=trust_json(new_pub),
+    )
+
+    # Corrupted record: refused, and nothing is reset.
+    saved = watermark.read_text(encoding="utf-8")
+    watermark.write_text("{ corrupt", encoding="utf-8")
+    start(
+        "revision.corrupt_state_refused",
+        "a corrupted revision record refuses startup",
+        bundle_path=v2,
+        expect_start=False,
+        needle="malformed",
+    )
+    watermark.write_text(saved, encoding="utf-8")
+
+    # Missing record while ledger data exists: refused, and no record is created.
+    watermark.unlink()
+    (ledger / "audit_log__tenant-probe.jsonl").write_text("{}\n", encoding="utf-8")
+    start(
+        "revision.missing_state_with_data_refused",
+        "a missing record with ledger data refuses startup",
+        bundle_path=v2,
+        expect_start=False,
+        needle="refusing to assume a first start",
+    )
+    ev.record(
+        "revision.missing_state_not_recreated",
+        "local_simulation",
+        "no record is created over lost state",
+        "absent",
+        "absent" if not watermark.exists() else "present",
+        "passed" if not watermark.exists() else "failed",
+    )
+    (ledger / "audit_log__tenant-probe.jsonl").unlink()
+    watermark.write_text(saved, encoding="utf-8")
+
+    # Concurrent activation: two processes start at once with revisions 4 and 5.
+    v4 = bundle("rev4", "4")
+    v5 = bundle("rev5", "5")
+    procs = []
+    for name, bpath in (("rev4", v4), ("rev5", v5)):
+        port = _free_port()
+        env = base_env(
+            ledger=ledger,
+            policy_dir=policy_dir,
+            environment="staging",
+            trust=trust,
+            api_key=f"k-{name}",
+            bind=f"127.0.0.1:{port}",
+        )
+        env["AIGOV_POLICY_BUNDLE_FILE"] = str(bpath)
+        log = work / f"concurrent-{name}.log"
+        with open(log, "wb") as logfh:
+            proc = subprocess.Popen(
+                [str(BINARY)], env=env, stdout=logfh, stderr=subprocess.STDOUT
+            )
+        procs.append((name, proc, port))
+    time.sleep(8)
+    outcomes = {}
+    for name, proc, port in ((n, p, pt) for n, p, pt in procs):
+        alive = proc.poll() is None
+        outcomes[name] = "started" if alive else "refused"
+        if alive:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+    final = recorded_version()
+    ev.record(
+        "revision.concurrent_activation_monotonic",
+        "local_simulation",
+        "concurrent activations of revisions 4 and 5 never leave the record at 4",
+        "record is 5",
+        f"record {final}; outcomes {outcomes}",
+        "passed" if final == "5" else "failed",
+    )
+
+
 def run_local(ev: Evidence, work: Path) -> None:
     keys = Keys()
     trust = trust_json(keys.pub_b64)
@@ -867,6 +1130,7 @@ def run_local(ev: Evidence, work: Path) -> None:
     )
 
     run_rollback_e2e(ev, work, keys, trust)
+    run_revision_e2e(ev, work, keys, trust)
 
     # --- Development compatibility control: unsigned file still starts in dev.
     _startup_scenario(
