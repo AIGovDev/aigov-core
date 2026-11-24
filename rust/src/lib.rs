@@ -12,6 +12,7 @@ pub mod policy;
 pub mod policy_config;
 pub mod policy_engine;
 pub mod policy_signing;
+pub mod policy_watermark;
 pub mod policy_store;
 pub mod schema;
 pub mod decision_trace;

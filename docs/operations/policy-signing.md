@@ -119,19 +119,42 @@ equivalent has **no effect in production**, so an operator must not assume it st
 For a suspected compromise, remove the public key from the trust store first, then re-sign with a new
 key and deploy. Removing the key rejects all bundles signed with it at the next startup.
 
+## Anti-rollback
+
+In staging and production, each accepted bundle's version is recorded per `policy_id` in
+`<GOVAI_LEDGER_DIR>/policy_watermark.json`. The record is written only after a bundle passes signature
+verification and the production contract.
+
+- A bundle with a **lower** version than the record is refused (`rollback refused`).
+- A bundle with the **same** version and the **same** document digest is accepted. Re-signing the same
+  content to extend the expiry keeps the digest, so it is allowed.
+- A bundle with the **same** version and **different** content is refused. A content change needs a new version.
+- A **higher** version is accepted, and the record advances.
+- The version must be a plain non-negative integer (`1`, `2`, ...). Forms such as `1.0`, `v1`, or `01` are refused.
+- A missing record on first start is created. A record that is unreadable, malformed, or has unknown fields
+  refuses startup. Nothing is silently reset.
+
 ## Rollback
 
-Rollback never accepts an unsigned policy.
+Rolling back the content of a policy means publishing it again under a **new, higher version**. The
+service will not accept an older version number, even when the older bundle is still correctly signed.
 
-- To roll back, point `AIGOV_POLICY_BUNDLE_FILE` at a previously signed bundle that is still
-  unexpired and signed by a trusted key.
-- If that bundle has expired, re-sign its content with a new expiry. Do not extend the expiry of an
-  existing signature: the change invalidates it.
-- Setting `AIGOV_ALLOW_UNSIGNED_POLICY_FILE` or `AIGOV_POLICY_FILE` in production is refused at startup.
+1. Take the older content, set `version` to the next integer, and sign it with the production procedure.
+2. Deploy it. Verify startup and the approval, evidence, and verdict checks.
+3. Keep the previous bundles for audit. They cannot be redeployed.
 
-Known limit: the service does not reject an older, still-valid bundle in favor of a newer one. An
-operator who deploys an older bundle deliberately gets that policy. Monotonic version enforcement
-is not implemented.
+Limits:
+
+- The watermark lives on the ledger volume. Anyone who can write that volume can reset it, which is the
+  same trust boundary as the ledger itself. An operator who deletes the record is recording a decision, and
+  it must be logged.
+- A single volume serves one instance. Several replicas sharing a volume would need a lock, which is not
+  implemented.
+- Development is unchanged: no watermark is kept there.
+
+Verified by unit tests (`rust/src/policy_watermark.rs`) and by a cross-restart scenario in the local
+harness (`scripts/staging_policy_verify.py`, `rollback.*` checks), which starts the real binary several times
+against one ledger.
 
 ## Flags and settings that are invalid in production
 
@@ -146,7 +169,7 @@ is not implemented.
 
 ## Tests
 
-- Rust: `rust/tests/tb_*.rs` (startup and verdict path, one binary per scenario, each asserting the
+- Rust: `rust/src/policy_watermark.rs` (anti-rollback), `rust/tests/tb_*.rs` (startup and verdict path, one binary per scenario, each asserting the
   refusal reason), `rust/tests/tb_http_verdict.rs` (router-level verdict through a signed bundle),
   and `policy_signing` unit tests (cross-language digest vector).
 - Python: `python/tests/test_policy_bundle_v2.py` (tampering, expiry, legacy expiry, downgrade,

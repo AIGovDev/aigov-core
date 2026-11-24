@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import functools
 import hashlib
 import json
 import os
@@ -511,6 +512,130 @@ def _startup_scenario(
     return server
 
 
+def _start_once(
+    ev: Evidence,
+    cid: str,
+    desc: str,
+    *,
+    ledger: Path,
+    policy_dir: Path,
+    bundle: Path,
+    trust: str,
+    expect_start: bool,
+    expect_substring: str,
+) -> None:
+    """Start the binary once against a shared ledger. Each start is a separate process."""
+    port = _free_port()
+    env = base_env(
+        ledger=ledger,
+        policy_dir=policy_dir,
+        environment="staging",
+        trust=trust,
+        api_key=f"k-{cid}",
+        bind=f"127.0.0.1:{port}",
+    )
+    env["AIGOV_POLICY_BUNDLE_FILE"] = str(bundle)
+    server, err = start_server(env, ledger.parent)
+    if server is not None:
+        server.stop()
+    if expect_start:
+        ok = server is not None
+        ev.record(
+            cid,
+            "local_simulation",
+            desc,
+            "server starts and reports healthy",
+            "started" if ok else f"refused: {last_error_line(err)}",
+            "passed" if ok else "failed",
+        )
+    else:
+        matched = server is None and expect_substring in err
+        ev.record(
+            cid,
+            "local_simulation",
+            desc,
+            f"refused (message contains {expect_substring!r})",
+            "refused: " + last_error_line(err) if server is None else "started",
+            "passed" if matched else "failed",
+        )
+
+
+def run_rollback_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
+    """Anti-rollback across real restarts: one ledger, several separate processes."""
+    ledger = work / "rollback-ledger"
+    ledger.mkdir()
+    policy_dir = work / "rollback-policy-dir"
+    policy_dir.mkdir()
+
+    def bundle(name: str, version: str, *, allowlist: list[str] | None = None) -> Path:
+        doc = synthetic_policy(policy_id="rollback-policy", version=version)
+        if allowlist is not None:
+            doc["ingest_rules"]["event_types"]["human_approved"]["gates"][0][
+                "allowlist"
+            ] = allowlist
+        return write_signed_bundle(
+            work / f"{name}.bundle.json", doc, seed_b64=keys.seed_b64, expires=FUTURE
+        )
+
+    v2 = bundle("v2", "2")
+    v1 = bundle("v1", "1")
+    v2_changed = bundle("v2-changed", "2", allowlist=["alice", "mallory"])
+    v3 = bundle("v3", "3")
+    v1_point = bundle("v1-point", "1.0")
+
+    start = functools.partial(
+        _start_once, ledger=ledger, policy_dir=policy_dir, trust=trust
+    )
+    start(
+        ev,
+        "rollback.first_start_v2",
+        "first start with version 2 records the version",
+        bundle=v2,
+        expect_start=True,
+        expect_substring="",
+    )
+    start(
+        ev,
+        "rollback.older_v1_refused",
+        "redeploying version 1 after 2 is refused as a rollback",
+        bundle=v1,
+        expect_start=False,
+        expect_substring="rollback refused",
+    )
+    start(
+        ev,
+        "rollback.same_version_changed_refused",
+        "changing the content of version 2 without a new version is refused",
+        bundle=v2_changed,
+        expect_start=False,
+        expect_substring="same-version content change refused",
+    )
+    start(
+        ev,
+        "rollback.higher_v3_accepted",
+        "a higher version 3 is accepted and advances the record",
+        bundle=v3,
+        expect_start=True,
+        expect_substring="",
+    )
+    start(
+        ev,
+        "rollback.older_v2_after_v3_refused",
+        "redeploying version 2 after 3 is refused",
+        bundle=v2,
+        expect_start=False,
+        expect_substring="rollback refused",
+    )
+    start(
+        ev,
+        "rollback.non_integer_version_refused",
+        "a non-integer version is refused",
+        bundle=v1_point,
+        expect_start=False,
+        expect_substring="not a non-negative integer",
+    )
+
+
 def run_local(ev: Evidence, work: Path) -> None:
     keys = Keys()
     trust = trust_json(keys.pub_b64)
@@ -740,6 +865,8 @@ def run_local(ev: Evidence, work: Path) -> None:
         expect_start=False,
         expect_substring="requires a signed policy bundle",
     )
+
+    run_rollback_e2e(ev, work, keys, trust)
 
     # --- Development compatibility control: unsigned file still starts in dev.
     _startup_scenario(

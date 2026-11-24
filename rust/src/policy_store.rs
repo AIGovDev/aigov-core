@@ -82,6 +82,7 @@ impl PolicyStore {
                 }
                 policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
                 enforce_production_contract(deployment_env, &doc)?;
+                enforce_anti_rollback(deployment_env, &doc)?;
             }
             let rp =
                 load_bundle_doc(&doc).map_err(|e| format!("policy bundle load failed: {e}"))?;
@@ -114,6 +115,7 @@ impl PolicyStore {
                     }
                     policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
                     enforce_production_contract(deployment_env, &doc)?;
+                    enforce_anti_rollback(deployment_env, &doc)?;
                 }
                 let rp = load_bundle_doc(&doc)
                     .map_err(|e| format!("policy bundle load failed {}: {e}", p.display()))?;
@@ -185,6 +187,25 @@ impl PolicyStore {
     pub fn deployment_env(&self) -> GovaiEnvironment {
         self.deployment_env
     }
+}
+
+/// Anti-rollback for a verified bundle in staging and production. The accepted version is recorded in the
+/// ledger directory, and older versions are refused. See `policy_watermark`.
+fn enforce_anti_rollback(
+    deployment_env: GovaiEnvironment,
+    doc: &GovaiPolicyV1,
+) -> Result<(), String> {
+    if matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Ok(());
+    }
+    let Some(ledger) = crate::ledger_storage::configured_ledger_dir() else {
+        return Err(
+            "Invalid policy configuration: refusing to start — GOVAI_LEDGER_DIR is required for policy rollback protection"
+                .to_string(),
+        );
+    };
+    let digest = policy_signing::policy_payload_digest_sha256(doc);
+    crate::policy_watermark::enforce(&ledger, &doc.policy_id, &doc.version, &digest)
 }
 
 /// Production contract for a verified signed bundle. Refuses declared controls that this build does
