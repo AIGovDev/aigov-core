@@ -1,0 +1,186 @@
+name: staging-deploy
+
+# Deploys AIGov Core to the isolated staging environment only.
+#
+# Inert until configured: the deploy job runs only when the repository variable
+# STAGING_DEPLOY_ENABLED is "true", and it runs in the protected `staging` GitHub environment, whose
+# required reviewers must approve each run. It never targets production and never deploys `main`.
+#
+# Sequence:
+#   1. preflight: the requested commit must be on staging and every required check on it must be green.
+#   2. build:     build the runtime image from that exact commit (no cache), record its digest.
+#   3. publish:   push to GHCR under the commit SHA tag and record the immutable digest.
+#   4. deploy:    point the staging service at the image by digest (approval required).
+#   5. record:    write the commit and digest to the job summary and an artifact. No secrets are written.
+#
+# Concurrency: one staging deployment at a time. A newer run waits; it never cancels a deploy in progress.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full commit SHA on staging to deploy"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/aigovdev/aigov-core
+
+jobs:
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: staging
+          fetch-depth: 0
+
+      - name: Commit is on staging
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "${{ inputs.commit_sha }}" origin/staging \
+            || git merge-base --is-ancestor "${{ inputs.commit_sha }}" HEAD
+          echo "commit ${{ inputs.commit_sha }} is on staging"
+
+      - name: Required checks are green on the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="${{ inputs.commit_sha }}"
+          bad=$(gh api "repos/${{ github.repository }}/commits/${sha}/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.status != "completed" or (.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral"))] | length')
+          total=$(gh api "repos/${{ github.repository }}/commits/${sha}/check-runs?per_page=100" --jq '.total_count')
+          echo "check runs: ${total}, not green: ${bad}"
+          test "${total}" -gt 0
+          test "${bad}" = "0"
+
+  build:
+    name: build
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Build from the commit (no cache)
+        run: |
+          set -euo pipefail
+          docker build --no-cache -t aigov-core:deploy .
+          docker image inspect aigov-core:deploy --format 'built image id={{.Id}}'
+
+      - name: Container runtime tests against the commit's image
+        working-directory: python
+        env:
+          AIGOV_REQUIRE_CONTAINER_TESTS: "1"
+          AIGOV_TEST_IMAGE: aigov-core:deploy
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -U pip
+          pip install -e ".[dev]"
+          pytest -q tests/test_container_runtime.py -rs
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Build the same commit again for publishing
+        run: |
+          set -euo pipefail
+          docker build --no-cache -t "${IMAGE}:${{ inputs.commit_sha }}" .
+
+      - name: Log in to GHCR
+        run: |
+          set -euo pipefail
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push and record the digest
+        id: digest
+        run: |
+          set -euo pipefail
+          docker push "${IMAGE}:${{ inputs.commit_sha }}"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${{ inputs.commit_sha }}" | sed 's/.*@//')
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "published ${IMAGE}@${digest} from commit ${{ inputs.commit_sha }}"
+
+  deploy:
+    name: deploy-staging
+    needs: publish
+    if: vars.STAGING_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    concurrency:
+      group: staging-deploy-environment
+      cancel-in-progress: false
+    steps:
+      - name: Deploy the digest to the staging service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_STAGING_TOKEN }}
+          RAILWAY_STAGING_PROJECT_ID: ${{ vars.RAILWAY_STAGING_PROJECT_ID }}
+          RAILWAY_STAGING_ENVIRONMENT_ID: ${{ vars.RAILWAY_STAGING_ENVIRONMENT_ID }}
+          RAILWAY_STAGING_SERVICE_ID: ${{ vars.RAILWAY_STAGING_SERVICE_ID }}
+          IMAGE_DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test -n "${RAILWAY_TOKEN:-}" || { echo "RAILWAY_STAGING_TOKEN is not configured"; exit 1; }
+          # Staging only: refuse any identifier that is not the configured staging project.
+          test -n "${RAILWAY_STAGING_PROJECT_ID:-}"
+          echo "deploying ${IMAGE}@${IMAGE_DIGEST} to the staging environment"
+          # The Railway image-source update call is intentionally not automated here until the
+          # staging project's service is confirmed to build from an image. See the runbook.
+          echo "::error::deploy step is not yet bound to an image source; see docs/operations/remote-staging-runbook.md"
+          exit 1
+
+  record:
+    name: record
+    needs: [publish, deploy]
+    if: always() && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write the deployment record
+        run: |
+          set -euo pipefail
+          mkdir -p record
+          {
+            echo "commit=${{ inputs.commit_sha }}"
+            echo "image=${IMAGE}@${{ needs.publish.outputs.digest }}"
+            echo "deploy_result=${{ needs.deploy.result }}"
+            echo "run=${{ github.run_id }}"
+          } > record/deployment.txt
+          cat record/deployment.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-deployment-record
+          path: record/deployment.txt
