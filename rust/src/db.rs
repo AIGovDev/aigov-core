@@ -50,13 +50,12 @@ pub async fn verify_sqlx_migrations_complete(pool: &DbPool) -> Result<(), String
     Ok(())
 }
 
-/// Apply SQL migrations from `rust/migrations` using runtime discovery (PostgreSQL-only).
+/// Apply the SQL migrations embedded in this binary at compile time (PostgreSQL-only).
+///
+/// The migrations are compiled into the binary, so a runtime image does not need the source tree
+/// and does not depend on any build-time path.
 pub async fn run_sqlx_migrations(pool: &DbPool) -> Result<(), String> {
-    let migrations_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
-    let migrator = sqlx::migrate::Migrator::new(migrations_dir)
-        .await
-        .map_err(|e| format!("migration source error: {e}"))?;
-    migrator
+    sqlx::migrate!("./migrations")
         .run(pool)
         .await
         .map_err(|e| format!("migration failed: {e}"))
