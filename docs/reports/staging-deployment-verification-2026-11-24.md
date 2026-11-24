@@ -177,14 +177,14 @@ Dockerfile. All are free to pull.
 4. **Dockerfile fix affects every image built from it.** Reviewers should confirm the migrations path change
    before any production image is rebuilt.
 
-## 9. Evaluation gate
+## Evaluation gate
 
 Passes for the local container target: the deployed stack is running on the built image, the bundle hash
 matches the manifest, and all 28 deployed checks, including the five image refusals, pass on their specific
 messages. The Python suite, harness unit tests, `make gate`, and the Dockerfile check pass. The remote staging
 checks are blocked and are not counted. This gate passes for local evidence only.
 
-## 10. Human approval gate
+## Human approval gate
 
 Not approved for production by this report.
 
