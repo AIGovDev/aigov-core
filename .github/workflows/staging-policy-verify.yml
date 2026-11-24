@@ -36,6 +36,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # Throwaway PostgreSQL 18 for the revision anchor. The password exists only inside this ephemeral service.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: aigov_test
+          POSTGRES_PASSWORD: aigov_ci_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aigov_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AIGOV_HARNESS_PG_ADMIN_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/postgres
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -63,7 +82,7 @@ jobs:
           python -m venv .venv
           . .venv/bin/activate
           pip install -U pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,runs-postgres]"
 
       - name: Harness unit tests
         working-directory: python
