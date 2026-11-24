@@ -431,7 +431,11 @@ def test_readiness_does_not_write_to_the_ledger(stack):
         assert proc.returncode == 0, proc.stderr
         return proc.stdout
 
+    # Re-read the published port: an earlier test restarts the container, which can change it.
+    port_line = _docker("port", stack["app"], "8088/tcp").stdout.strip().splitlines()
+    assert port_line, "service port not published"
+    base = f"http://127.0.0.1:{port_line[0].rsplit(':', 1)[1]}"
     before = snapshot()
     for _ in range(5):
-        assert _wait(f"{stack['base']}/ready", timeout_s=10) == 200
+        assert _wait(f"{base}/ready", timeout_s=10) == 200
     assert snapshot() == before, "readiness changed the ledger directory"
