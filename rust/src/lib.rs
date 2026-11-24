@@ -1,38 +1,38 @@
 pub mod aigov_env;
+pub mod audit_export_bundle;
+pub mod audit_export_signing;
+pub mod audit_export_verification;
 pub mod audit_store;
 pub mod bundle;
 pub mod canonical_json;
-pub mod audit_export_signing;
-pub mod audit_export_bundle;
-pub mod audit_export_verification;
+pub mod decision_trace;
 pub mod govai_environment;
 pub mod immutable_store;
 pub mod ledger_storage;
 pub mod policy;
+pub mod policy_anchor;
 pub mod policy_config;
 pub mod policy_engine;
 pub mod policy_signing;
-pub mod policy_anchor;
-pub mod policy_watermark;
 pub mod policy_store;
-pub mod schema;
-pub mod decision_trace;
-pub mod verify_chain;
+pub mod policy_watermark;
 pub mod projection;
+pub mod schema;
+pub mod verify_chain;
 
-pub mod compliance_summary;
 pub mod audit_export;
-pub mod replay_validation;
-pub mod replay_projection;
-pub mod replay_engine;
+pub mod compliance_summary;
 pub mod epistemic_readiness;
-pub mod trace_verification_plan;
-pub mod lineage_projection;
-pub mod lineage_validation;
+pub mod govai_api;
 pub mod governance_graph;
 pub mod ledger_view;
+pub mod lineage_projection;
+pub mod lineage_validation;
 pub mod metering;
-pub mod govai_api;
+pub mod replay_engine;
+pub mod replay_projection;
+pub mod replay_validation;
+pub mod trace_verification_plan;
 
 pub mod ai_decision_audit;
 pub mod ai_decision_integrity;
@@ -47,8 +47,8 @@ pub mod ops_log;
 pub mod project;
 pub mod rate_limit;
 pub mod rbac;
-pub mod runtime_metrics;
 pub mod runtime_diagnostics;
+pub mod runtime_metrics;
 pub mod trace_context;
 
 pub mod api_usage;
@@ -60,10 +60,15 @@ pub use govai_api::{build_app_state, build_router};
 pub async fn run() -> Result<(), String> {
     let bind = std::env::var("AIGOV_BIND").unwrap_or_else(|_| "127.0.0.1:8088".to_string());
     let state = build_app_state().await?;
+    let pool = state.pool.clone();
+    let policy_store = state.policy_store.clone();
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
         .map_err(|e| format!("bind {bind}: {e}"))?;
+    // The activation commits only once the listener is bound. If the commit fails, the process exits before
+    // serving, and the anchor is not advanced by the failed activation.
+    policy_store.commit_revisions(&pool).await?;
     eprintln!("govai listening on http://{bind}");
     axum::serve(listener, app)
         .await

@@ -24,8 +24,8 @@ use crate::metering;
 use crate::ops_log;
 use crate::policy_config::{self, PolicyConfig, PolicySource};
 use crate::policy_store::PolicyStore;
-use crate::projection::derive_current_state_from_events_with_context;
 use crate::project;
+use crate::projection::derive_current_state_from_events_with_context;
 use crate::runtime_diagnostics::{self, ProcessStartedAt};
 use crate::runtime_metrics;
 use crate::schema::EvidenceEvent;
@@ -200,7 +200,8 @@ pub async fn build_app_state() -> Result<AppState, String> {
         resolved.clone(),
     )?);
     let _ = ledger_storage::validate_startup(deployment_env)?;
-    crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
+    crate::immutable_store::ImmutableStoreConfig::from_env()?
+        .validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
     let pool = pool_from_env().await?;
@@ -213,8 +214,8 @@ pub async fn build_app_state() -> Result<AppState, String> {
         .or_else(|_| std::env::var("AIGOV_BASE_URL"))
         .ok()
         .filter(|s| !s.trim().is_empty());
-    // Every fallible startup step has passed. Only now does a verified policy revision become accepted.
-    policy_store.commit_revisions(&pool).await?;
+    // The policy revision is committed by `crate::run` after the listener is bound, so a bind failure never
+    // advances the anchor. See `PolicyStore::commit_revisions`.
     Ok(AppState {
         deployment_env,
         policy_store,
@@ -246,7 +247,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/bundle-hash", get(get_bundle_hash_query))
         .route("/bundle-hash/{run_id}", get(get_bundle_hash_path))
         .route("/compliance-summary", get(get_compliance_summary_query))
-        .route("/compliance-summary/{run_id}", get(get_compliance_summary_path))
+        .route(
+            "/compliance-summary/{run_id}",
+            get(get_compliance_summary_path),
+        )
         .route("/api/export/{run_id}", get(get_api_export))
         .route("/verify", get(get_verify))
         .route("/verify/{run_id}", get(get_verify_run))
@@ -340,8 +344,7 @@ async fn get_ready(State(st): State<AppState>) -> impl IntoResponse {
         "ledger_tenant_readable": ledger_tenant_readable,
     });
 
-    let ready =
-        database_ping && migrations_complete && ledger_writable && ledger_tenant_readable;
+    let ready = database_ping && migrations_complete && ledger_writable && ledger_tenant_readable;
     if ready {
         return (
             StatusCode::OK,
@@ -392,18 +395,26 @@ async fn post_evidence(
         }
     };
 
-    if let Err(e) =
-        govai_environment::stamp_event_environment_for_ingest(&mut event, st.deployment_env, &existing)
-    {
+    if let Err(e) = govai_environment::stamp_event_environment_for_ingest(
+        &mut event,
+        st.deployment_env,
+        &existing,
+    ) {
         return policy_violation_response(&policy_version, &e);
     }
 
     if let Err(e) = crate::decision_trace::validate_trace_event(&event, &existing) {
-        return policy_violation_response(&policy_version, &format!("policy_violation: invalid_decision_trace {e}"));
+        return policy_violation_response(
+            &policy_version,
+            &format!("policy_violation: invalid_decision_trace {e}"),
+        );
     }
 
     let ledger_view = FileLedgerView::new(&log_path);
-    if let Err(v) = st.policy_store.enforce_ingest_for_request(&tenant_id, &event, &ledger_view) {
+    if let Err(v) = st
+        .policy_store
+        .enforce_ingest_for_request(&tenant_id, &event, &ledger_view)
+    {
         return policy_violation_response(&policy_version, &v.to_string());
     }
 
@@ -419,12 +430,9 @@ async fn post_evidence(
                 "environment": st.deployment_env.as_str(),
             });
             if metering::metering_enabled() {
-                if let Some(extra) = metering::ingest_success_extras(
-                    &tenant_id,
-                    &event.run_id,
-                    pre_count as u64,
-                )
-                .as_object()
+                if let Some(extra) =
+                    metering::ingest_success_extras(&tenant_id, &event.run_id, pre_count as u64)
+                        .as_object()
                 {
                     for (k, v) in extra {
                         body[k] = v.clone();
@@ -457,7 +465,12 @@ fn policy_violation_response(policy_version: &str, message: &str) -> axum::respo
         message
             .split(':')
             .nth(1)
-            .map(|s| s.trim().split_whitespace().next().unwrap_or("policy_violation"))
+            .map(|s| {
+                s.trim()
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("policy_violation")
+            })
             .unwrap_or("policy_violation")
     } else {
         "policy_violation"
