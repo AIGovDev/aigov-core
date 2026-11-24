@@ -24,3 +24,6 @@ artifacts/staging-verify/
 
 # Container test scratch (generated keys, bundles; not committed)
 artifacts/container-tests/
+
+# Remote staging probe records (sanitized; not committed)
+artifacts/remote-staging/
