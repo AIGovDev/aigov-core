@@ -94,7 +94,7 @@ pub struct Watermark {
 }
 
 impl Watermark {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Watermark {
             schema: SCHEMA.to_string(),
             policies: BTreeMap::new(),
@@ -116,8 +116,14 @@ pub fn parse_version(raw: &str) -> Result<u64, String> {
             "policy version {raw:?} has a leading zero; use a plain integer"
         ));
     }
-    t.parse::<u64>()
-        .map_err(|_| format!("policy version {raw:?} is out of range"))
+    let v = t
+        .parse::<u64>()
+        .map_err(|_| format!("policy version {raw:?} is out of range"))?;
+    // The durable anchor stores revisions as a signed 64-bit integer.
+    if v > i64::MAX as u64 {
+        return Err(format!("policy version {raw:?} exceeds the supported range"));
+    }
+    Ok(v)
 }
 
 pub fn watermark_path(ledger_dir: &Path) -> PathBuf {
@@ -129,7 +135,7 @@ fn lock_path(ledger_dir: &Path) -> PathBuf {
 }
 
 /// True when the ledger directory already holds evidence (tenant ledger files).
-fn ledger_has_data(ledger_dir: &Path) -> bool {
+pub(crate) fn ledger_has_data(ledger_dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(ledger_dir) else {
         return false;
     };
@@ -197,7 +203,11 @@ pub fn read_loaded(ledger_dir: &Path) -> Result<Loaded, String> {
     open_no_follow(&path)?
         .read_to_string(&mut raw)
         .map_err(|e| format!("policy watermark unreadable at {}: {e}", path.display()))?;
+    parse_loaded(&path, &raw)
+}
 
+fn parse_loaded(path: &Path, raw: &str) -> Result<Loaded, String> {
+    let path = path.to_path_buf();
     let probe: serde_json::Value = serde_json::from_str(&raw)
         .map_err(|e| format!("policy watermark malformed at {}: {e}", path.display()))?;
     match probe.get("schema").and_then(|v| v.as_str()) {
@@ -274,7 +284,7 @@ fn decide(wm: &Watermark, policy_id: &str, version: u64, digest: &str) -> Result
     }
 }
 
-fn write_watermark_atomic(ledger_dir: &Path, wm: &Watermark) -> Result<(), String> {
+pub(crate) fn write_watermark_atomic(ledger_dir: &Path, wm: &Watermark) -> Result<(), String> {
     let path = watermark_path(ledger_dir);
     if std::fs::symlink_metadata(&path)
         .map(|m| m.file_type().is_symlink())
@@ -431,6 +441,63 @@ pub fn enforce(
     digest_sha256: &str,
 ) -> Result<(), String> {
     check(ledger_dir, policy_id, version_raw, digest_sha256)?.commit()
+}
+
+
+/// Read the filesystem record if it exists. A missing record is `None`, not an error. Refusals for a
+/// present but invalid record are unchanged. Used by the anchor, which decides what a missing record means.
+pub fn read_optional(ledger_dir: &Path) -> Result<Option<Watermark>, String> {
+    if !ledger_dir.is_dir() {
+        return Err(format!(
+            "policy watermark: ledger directory {} is not present; rollback protection cannot be established",
+            ledger_dir.display()
+        ));
+    }
+    let path = watermark_path(ledger_dir);
+    if std::fs::symlink_metadata(&path).is_err() {
+        return Ok(None);
+    }
+    let mut raw = String::new();
+    use std::io::Read;
+    open_no_follow(&path)?
+        .read_to_string(&mut raw)
+        .map_err(|e| format!("policy watermark unreadable at {}: {e}", path.display()))?;
+    let loaded = parse_loaded(&path, &raw)?;
+    Ok(Some(loaded.wm))
+}
+
+/// Exclusive per-host lock over the filesystem record. Hold it for the whole read-decide-write sequence.
+/// Dropping it releases the lock. The ledger directory must already exist; it is never created here.
+pub struct FsLock {
+    _file: std::fs::File,
+}
+
+impl FsLock {
+    pub fn acquire(ledger_dir: &Path) -> Result<Self, String> {
+        if !ledger_dir.is_dir() {
+            return Err(format!(
+                "policy watermark: ledger directory {} is not present; rollback protection cannot be established",
+                ledger_dir.display()
+            ));
+        }
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).truncate(false).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(libc::O_NOFOLLOW);
+        }
+        let file = opts
+            .open(lock_path(ledger_dir))
+            .map_err(|e| format!("policy watermark lock unavailable (symbolic links are refused): {e}"))?;
+        lock_exclusive(&file)?;
+        Ok(FsLock { _file: file })
+    }
+}
+
+/// Write the whole record. Callers must hold an `FsLock` for the directory.
+pub fn write_record(ledger_dir: &Path, wm: &Watermark) -> Result<(), String> {
+    write_watermark_atomic(ledger_dir, wm)
 }
 
 #[cfg(test)]

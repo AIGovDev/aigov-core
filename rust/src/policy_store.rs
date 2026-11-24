@@ -52,7 +52,7 @@ pub struct PolicyStore {
     /// Legacy fallback compiled into a runtime policy (always present).
     legacy_fallback: Arc<ResolvedPolicy>,
     /// Verified revisions waiting to be recorded. Recorded by `commit_revisions` after startup succeeds.
-    pending_revisions: Arc<std::sync::Mutex<Vec<crate::policy_watermark::Pending>>>,
+    pending_revisions: Arc<std::sync::Mutex<Vec<crate::policy_anchor::PendingAnchor>>>,
 }
 
 impl PolicyStore {
@@ -71,7 +71,7 @@ impl PolicyStore {
             .filter(|s| !s.trim().is_empty());
 
         let mut loaded: Vec<ResolvedPolicy> = Vec::new();
-        let mut pending_revisions: Vec<crate::policy_watermark::Pending> = Vec::new();
+        let mut pending_revisions: Vec<crate::policy_anchor::PendingAnchor> = Vec::new();
 
         if let Some(p) = bundle_override {
             let p = PathBuf::from(p.trim());
@@ -170,10 +170,10 @@ impl PolicyStore {
         })
     }
 
-    /// Record the verified revisions this store serves. Call once, after the service has started
-    /// successfully, so a failed startup never advances the accepted revision. Each commit is atomic and
-    /// re-checked under lock.
-    pub fn commit_revisions(&self) -> Result<(), String> {
+    /// Reconcile and commit the verified revisions this store serves, against the durable PostgreSQL anchor.
+    /// Call once, as the last step of startup, after the database pool, migrations, and the ledger are ready.
+    /// Any error refuses startup.
+    pub async fn commit_revisions(&self, pool: &crate::db::DbPool) -> Result<(), String> {
         let items = {
             let mut guard = self
                 .pending_revisions
@@ -182,7 +182,7 @@ impl PolicyStore {
             std::mem::take(&mut *guard)
         };
         for pending in items {
-            pending.commit()?;
+            crate::policy_anchor::reconcile_and_commit(pool, &pending).await?;
         }
         Ok(())
     }
@@ -210,15 +210,21 @@ impl PolicyStore {
     }
 }
 
-/// Anti-rollback for a verified bundle in staging and production. Checks the revision now and returns it
-/// pending. The record advances only when `PolicyStore::commit_revisions` runs after a successful startup.
-/// See `policy_watermark`.
+/// Revision anchoring for a verified bundle in staging and production. Records what must be anchored. The
+/// decision and the writes happen in `commit_revisions`, under the filesystem lock and the database transaction.
+/// A configured database URL is required: without it the anchor would silently disappear (a downgrade).
 fn enforce_anti_rollback(
     deployment_env: GovaiEnvironment,
     doc: &GovaiPolicyV1,
-) -> Result<Vec<crate::policy_watermark::Pending>, String> {
+) -> Result<Vec<crate::policy_anchor::PendingAnchor>, String> {
     if matches!(deployment_env, GovaiEnvironment::Dev) {
         return Ok(Vec::new());
+    }
+    if crate::db::postgres_url_configured_nonempty().is_err() {
+        return Err(
+            "Invalid policy configuration: refusing to start — staging and production require a database URL (GOVAI_DATABASE_URL or DATABASE_URL) for the policy revision anchor"
+                .to_string(),
+        );
     }
     let Some(ledger) = crate::ledger_storage::configured_ledger_dir() else {
         return Err(
@@ -226,9 +232,14 @@ fn enforce_anti_rollback(
                 .to_string(),
         );
     };
-    let digest = policy_signing::policy_payload_digest_sha256(doc);
-    let pending = crate::policy_watermark::check(&ledger, &doc.policy_id, &doc.version, &digest)?;
-    Ok(vec![pending])
+    // Validate the revision shape now, so a malformed version is refused before any state is touched.
+    crate::policy_watermark::parse_version(&doc.version)?;
+    Ok(vec![crate::policy_anchor::PendingAnchor {
+        ledger_dir: ledger,
+        policy_id: doc.policy_id.clone(),
+        version_raw: doc.version.clone(),
+        digest_sha256: policy_signing::policy_payload_digest_sha256(doc),
+    }])
 }
 
 /// Production contract for a verified signed bundle. Refuses declared controls that this build does
