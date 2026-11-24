@@ -51,6 +51,8 @@ RUN apt-get update \
 COPY --from=builder /aigov_audit /app/aigov_audit
 RUN chown root:root /app/aigov_audit && chmod 0555 /app/aigov_audit
 
+# Runtime configuration is supplied at deploy time, never baked into the image:
+#   DATABASE_URL, GOVAI_API_KEYS, GOVAI_API_KEYS_JSON, AIGOV_POLICY_TRUST_ED25519_JSON, AIGOV_POLICY_BUNDLE_FILE
 ENV AIGOV_BIND=0.0.0.0:8088 \
     AIGOV_POLICY_DIR=/app/policies \
     AIGOV_ENVIRONMENT=prod \

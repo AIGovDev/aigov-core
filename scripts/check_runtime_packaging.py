@@ -57,7 +57,8 @@ FORBIDDEN_TERMS = (
 DOCKERFILE_REQUIRED = (
     ("ENTRYPOINT", re.compile(r'ENTRYPOINT\s+\["/app/aigov_audit"\]')),
     ("EXPOSE 8088", re.compile(r"EXPOSE\s+8088")),
-    ("USER", re.compile(r"^USER\s+govai\s*$", re.MULTILINE)),
+    # Non-root: the service user by name, or a numeric non-zero UID (lets Kubernetes verify runAsNonRoot).
+    ("USER", re.compile(r"^USER\s+(govai|[1-9][0-9]*)(:\S+)?\s*$", re.MULTILINE)),
     ("GOVAI_LEDGER_DIR", re.compile(r"GOVAI_LEDGER_DIR")),
     ("DATABASE_URL", re.compile(r"DATABASE_URL|#.*DATABASE")),
     ("AIGOV_BIND", re.compile(r"AIGOV_BIND")),
