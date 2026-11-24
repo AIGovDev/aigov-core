@@ -1,0 +1,104 @@
+name: container-runtime
+
+# Clean build of the runtime image from the repository, then container tests against it and a
+# vulnerability scan of the result. No cached layers: the build uses --no-cache on a fresh runner.
+#
+# Not a deploy workflow. It does not push images, does not read production secrets, and does not
+# change any branch. The container tests create and remove their own containers, networks, volumes,
+# and Postgres instance on the runner.
+
+on:
+  pull_request:
+    branches: [staging]
+    paths:
+      - "Dockerfile"
+      - "rust/src/**"
+      - "rust/migrations/**"
+      - "rust/Cargo.toml"
+      - "rust/Cargo.lock"
+      - "deployments/**"
+      - "scripts/staging_policy_verify.py"
+      - "python/tests/test_container_runtime.py"
+      - "python/aigov_py/policy_bundle_signing.py"
+      - ".github/workflows/container-runtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  container-runtime:
+    name: container-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Clean build of the runtime image (no cache)
+        run: |
+          set -euo pipefail
+          docker build --no-cache --pull=false -t aigov-core:hardened .
+          docker image inspect aigov-core:hardened --format 'image={{.Id}} user={{.Config.User}}'
+
+      - name: Dockerfile syntax check
+        run: |
+          set -euo pipefail
+          docker buildx build --check -f Dockerfile .
+
+      - name: Configuration scan (Dockerfile)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: config
+          scan-ref: Dockerfile
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+      - name: Configuration scan (deployment manifests)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: config
+          scan-ref: deployments
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python package
+        working-directory: python
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -U pip
+          pip install -e ".[dev]"
+
+      - name: Container runtime tests (required; skips are failures)
+        working-directory: python
+        env:
+          AIGOV_REQUIRE_CONTAINER_TESTS: "1"
+          AIGOV_TEST_IMAGE: aigov-core:hardened
+        run: |
+          set -euo pipefail
+          . .venv/bin/activate
+          pytest -q tests/test_container_runtime.py -rs
+
+      - name: Vulnerability scan of the runtime image
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: aigov-core:hardened
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-runtime-evidence
+          path: artifacts/container-tests/
+          if-no-files-found: ignore

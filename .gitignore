@@ -21,3 +21,6 @@ benchmark-runs/
 
 # Generated staging verification evidence (not committed)
 artifacts/staging-verify/
+
+# Container test scratch (generated keys, bundles; not committed)
+artifacts/container-tests/
