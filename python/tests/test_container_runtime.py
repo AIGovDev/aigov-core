@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 IMAGE = os.environ.get("AIGOV_TEST_IMAGE", "aigov-core:hardened")
 REQUIRE = os.environ.get("AIGOV_REQUIRE_CONTAINER_TESTS") == "1"
 MOUNT_BASE = REPO_ROOT / "artifacts" / "container-tests"
+PG_IMAGE = os.environ.get("AIGOV_TEST_PG_IMAGE", "postgres:16-alpine")
 
 
 def _skip(reason: str) -> None:
@@ -278,7 +279,7 @@ def stack(fixtures: Path):
                 "POSTGRES_USER=govai",
                 "-e",
                 f"POSTGRES_PASSWORD={pw}",
-                "postgres:16-alpine",
+                PG_IMAGE,
             ).returncode
             == 0
         )
@@ -412,3 +413,25 @@ def test_restart_keeps_migrations_and_readiness(stack):
     assert int(proc.stdout.strip()) == len(
         [p for p in (REPO_ROOT / "rust" / "migrations").iterdir() if p.suffix == ".sql"]
     )
+
+
+def test_readiness_does_not_write_to_the_ledger(stack):
+    """Regression: /ready must not create or delete ledger files (it previously wrote a probe file)."""
+    listing = [
+        "docker",
+        "exec",
+        stack["app"],
+        "sh",
+        "-c",
+        "ls -la /var/lib/govai/ledger | sort",
+    ]
+
+    def snapshot() -> str:
+        proc = _docker(*listing[1:])
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout
+
+    before = snapshot()
+    for _ in range(5):
+        assert _wait(f"{stack['base']}/ready", timeout_s=10) == 200
+    assert snapshot() == before, "readiness changed the ledger directory"
