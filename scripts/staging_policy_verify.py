@@ -899,6 +899,98 @@ def run_revision_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
     )
 
 
+def run_integrity_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
+    """Watermark integrity against the real binary: edits and symlinks are refused, and nothing is reset."""
+    ledger = work / "integrity-ledger"
+    ledger.mkdir()
+    policy_dir = work / "integrity-policy-dir"
+    policy_dir.mkdir()
+    record = ledger / "policy_watermark.json"
+    v2 = write_signed_bundle(
+        work / "integrity-v2.bundle.json",
+        synthetic_policy(policy_id="integrity-policy", version="2"),
+        seed_b64=keys.seed_b64,
+        expires=FUTURE,
+    )
+    v1 = write_signed_bundle(
+        work / "integrity-v1.bundle.json",
+        synthetic_policy(policy_id="integrity-policy", version="1"),
+        seed_b64=keys.seed_b64,
+        expires=FUTURE,
+    )
+
+    _start_once(
+        ev,
+        "integrity.first_start_v2",
+        "revision 2 records the revision",
+        ledger=ledger,
+        policy_dir=policy_dir,
+        trust=trust,
+        bundle=v2,
+        expect_start=True,
+        expect_substring="",
+    )
+    ev.record(
+        "integrity.record_is_checksummed",
+        "local_simulation",
+        "the record carries an integrity tag",
+        "present",
+        "present"
+        if "record_sha256" in record.read_text(encoding="utf-8")
+        else "absent",
+        "passed" if "record_sha256" in record.read_text(encoding="utf-8") else "failed",
+    )
+
+    # Edit the revision down to 1 without recomputing the tag: an attempt to re-open a rollback.
+    original = record.read_text(encoding="utf-8")
+    record.write_text(
+        original.replace('"version": 2', '"version": 1'), encoding="utf-8"
+    )
+    _start_once(
+        ev,
+        "integrity.edited_record_refused",
+        "an edited record is refused, and rollback is not granted",
+        ledger=ledger,
+        policy_dir=policy_dir,
+        trust=trust,
+        bundle=v1,
+        expect_start=False,
+        expect_substring="integrity check failed",
+    )
+    record.write_text(original, encoding="utf-8")
+
+    # Symbolic link in place of the record: the service must not follow it.
+    decoy = work / "integrity-decoy.json"
+    decoy.write_text(original, encoding="utf-8")
+    record.unlink()
+    record.symlink_to(decoy)
+    _start_once(
+        ev,
+        "integrity.symlinked_record_refused",
+        "a symbolic link in place of the record is refused",
+        ledger=ledger,
+        policy_dir=policy_dir,
+        trust=trust,
+        bundle=v2,
+        expect_start=False,
+        expect_substring="symbolic link",
+    )
+    record.unlink()
+    record.write_text(original, encoding="utf-8")
+
+    _start_once(
+        ev,
+        "integrity.restored_record_accepted",
+        "the restored record is accepted again",
+        ledger=ledger,
+        policy_dir=policy_dir,
+        trust=trust,
+        bundle=v2,
+        expect_start=True,
+        expect_substring="",
+    )
+
+
 def run_local(ev: Evidence, work: Path) -> None:
     keys = Keys()
     trust = trust_json(keys.pub_b64)
@@ -1131,6 +1223,7 @@ def run_local(ev: Evidence, work: Path) -> None:
 
     run_rollback_e2e(ev, work, keys, trust)
     run_revision_e2e(ev, work, keys, trust)
+    run_integrity_e2e(ev, work, keys, trust)
 
     # --- Development compatibility control: unsigned file still starts in dev.
     _startup_scenario(
