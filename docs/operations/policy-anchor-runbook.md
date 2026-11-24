@@ -50,28 +50,39 @@ so it is idempotent (signing-key rotation does not reset the anchor).
 
 ## 4. Activation protocol and crash consistency
 
-PostgreSQL and the filesystem cannot be committed together, so the order is fixed and every failure point has a defined
-outcome:
+There is **no atomicity across PostgreSQL and the filesystem**. The protocol fixes the order of the writes so that each
+failure point has a defined outcome. It does not make the two stores commit together.
 
-1. Take the per-host filesystem lock (`flock` on `policy_watermark.lock`). Read `F`.
-2. Open a database transaction and take `pg_advisory_xact_lock(hashtextextended(policy_id))`. Read `A`.
-3. Decide (table above). A refusal ends the transaction with nothing written.
-4. **Write `F` first**, atomically under the lock.
-5. **Commit the database change** (`A` advances, or the row is inserted).
+The sequence, with its transaction boundaries, is in `reconcile_all_and_commit` (`rust/src/policy_anchor.rs`):
 
-| Crash or failure point | State afterwards | Next start |
-|------------------------|------------------|------------|
-| before step 4 | nothing changed | normal |
-| step 4 fails (filesystem write) | transaction rolled back; anchor unchanged | normal: the activation did not happen |
-| after step 4, before step 5 (crash or commit failure) | `F` ahead of `A` | the same bundle rolls the anchor forward; any older bundle is refused |
-| after step 5 | both at `C` | normal |
+1. Startup loads and verifies every bundle, and collects the pending revisions. Only accepted bundles become pending
+   (the directory-mode count check runs first). Nothing is written at this point.
+2. `build_app_state` finishes, and the service has not yet bound its listener. Nothing is written.
+3. `run` binds the listener. A bind failure ends the process here, before any write.
+4. `run` commits the activation, in this order: take the per-host filesystem lock; open **one** database transaction;
+   take an advisory lock per policy, in identifier order, and decide every policy; apply the database writes inside the
+   transaction; write the filesystem record **once** for all policies; commit the transaction.
+5. Only after step 4 does the service serve requests.
 
-The window "after step 4, before step 5" is the only state where the filesystem leads the anchor. It is resolved
-deterministically, and no silent acceptance is possible: an older bundle is refused. The anchor never advances unless
-the filesystem write has succeeded first.
+| Failure point | Result |
+|---------------|--------|
+| Before step 4 (load, verification, count check, bind failure) | Nothing written. The anchor is not advanced. |
+| A refusal during the decisions in step 4 | Nothing written, for any policy. The transaction rolls back. |
+| A database write fails in step 4 | The transaction rolls back. The filesystem record is not written. |
+| The filesystem write fails in step 4 | The transaction rolls back. The anchor is not advanced. |
+| The commit fails in step 4 (after the filesystem write) | The record is ahead of the anchor. For an **update**, the next start rolls the anchor forward when the bundle matches the record, and refuses any older bundle. For a **first start**, the record exists and no anchor row exists: the next start refuses until the bootstrap procedure is run. This is the one state that needs an operator, and it is tested. |
+| The process fails after step 4 (serving) | The activation has committed. A later runtime failure does not undo it. |
 
-Startup is not complete until `commit_revisions` succeeds, and it runs after migrations, the database pool, and the
-ledger check. A failure anywhere before it leaves the anchor where it was.
+Two properties follow from the order:
+
+- A bind failure never advances the anchor, because the commit runs only after the listener is bound. (Reproduced
+  against the previous binary, which advanced the anchor to 5 on a bind failure. Fixed.)
+- A first start whose database insert fails writes no filesystem record, because the database writes come before the
+  filesystem write. (Reproduced against the previous binary, which left a record behind. Fixed.)
+
+Multiple policies in one activation commit together or not at all. Before this change they were committed one after
+another. The current startup path refuses two bundles in the policy directory, so the sequential commit was not
+reachable from a successful startup; it was fixed anyway, because a future change could reach it.
 
 ## 5. Migration
 

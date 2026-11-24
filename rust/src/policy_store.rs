@@ -72,6 +72,8 @@ impl PolicyStore {
 
         let mut loaded: Vec<ResolvedPolicy> = Vec::new();
         let mut pending_revisions: Vec<crate::policy_anchor::PendingAnchor> = Vec::new();
+        // Verified documents to anchor. Only accepted bundles are anchored; see the count check below.
+        let mut to_anchor: Vec<GovaiPolicyV1> = Vec::new();
 
         if let Some(p) = bundle_override {
             let p = PathBuf::from(p.trim());
@@ -85,7 +87,7 @@ impl PolicyStore {
                 }
                 policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
                 enforce_production_contract(deployment_env, &doc)?;
-                pending_revisions.extend(enforce_anti_rollback(deployment_env, &doc)?);
+                to_anchor.push(doc.clone());
             }
             let rp =
                 load_bundle_doc(&doc).map_err(|e| format!("policy bundle load failed: {e}"))?;
@@ -118,7 +120,7 @@ impl PolicyStore {
                     }
                     policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
                     enforce_production_contract(deployment_env, &doc)?;
-                    pending_revisions.extend(enforce_anti_rollback(deployment_env, &doc)?);
+                    to_anchor.push(doc.clone());
                 }
                 let rp = load_bundle_doc(&doc)
                     .map_err(|e| format!("policy bundle load failed {}: {e}", p.display()))?;
@@ -161,6 +163,10 @@ impl PolicyStore {
                 loaded.len()
             ));
         }
+        // Anchor only after the bundle set is accepted, so a refused startup never creates a pending revision.
+        for doc in &to_anchor {
+            pending_revisions.extend(enforce_anti_rollback(deployment_env, doc)?);
+        }
 
         Ok(Self {
             deployment_env,
@@ -181,10 +187,7 @@ impl PolicyStore {
                 .map_err(|_| "policy revision state is unavailable (lock poisoned)".to_string())?;
             std::mem::take(&mut *guard)
         };
-        for pending in items {
-            crate::policy_anchor::reconcile_and_commit(pool, &pending).await?;
-        }
-        Ok(())
+        crate::policy_anchor::reconcile_all_and_commit(pool, &items).await
     }
 
     pub fn resolve_for_request(&self, tenant_id: &str) -> &ResolvedPolicy {

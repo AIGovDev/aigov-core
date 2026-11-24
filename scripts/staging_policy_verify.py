@@ -1059,6 +1059,43 @@ def _authentic_record_text(policy_id: str, version: int, digest: str) -> str:
     )
 
 
+def _start_on_port(
+    ev: Evidence,
+    cid: str,
+    desc: str,
+    *,
+    ledger: Path,
+    policy_dir: Path,
+    bundle: Path,
+    trust: str,
+    port: int,
+    expect_start: bool,
+    expect_substring: str,
+) -> None:
+    """Start the binary on a fixed port (which may already be in use)."""
+    env = base_env(
+        ledger=ledger,
+        policy_dir=policy_dir,
+        environment="staging",
+        trust=trust,
+        api_key=f"k-{cid}",
+        bind=f"127.0.0.1:{port}",
+    )
+    env["AIGOV_POLICY_BUNDLE_FILE"] = str(bundle)
+    server, err = start_server(env, ledger.parent, timeout_s=30.0)
+    if server is not None:
+        server.stop()
+    ok = server is None and expect_substring in err
+    ev.record(
+        cid,
+        "local_simulation",
+        desc,
+        f"refused (message contains {expect_substring!r})",
+        "started" if server is not None else "refused: " + last_error_line(err),
+        "passed" if ok else "failed",
+    )
+
+
 def run_anchor_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
     """Durable anchor against the real binary and a PostgreSQL 18 database."""
     pid = "staging-verify-policy"
@@ -1178,6 +1215,152 @@ def run_anchor_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
         bundle=bundle("c2", "2"),
         expect_start=False,
         expect_substring="refusing to assume a first start",
+    )
+
+    # E. A listener that cannot bind must not advance the anchor: the service never served.
+    import socket as _socket
+
+    ledger_e = work / "anchor-ledger-e"
+    ledger_e.mkdir()
+    blocker = _socket.socket()
+    blocker.bind(("127.0.0.1", 0))
+    blocker.listen(1)
+    busy_port = blocker.getsockname()[1]
+    start_e = functools.partial(
+        _start_once, ledger=ledger_e, policy_dir=policy_dir, trust=trust
+    )
+    start_e_bind = functools.partial(
+        _start_on_port,
+        ledger=ledger_e,
+        policy_dir=policy_dir,
+        trust=trust,
+        port=busy_port,
+    )
+    start_e_bind(
+        ev,
+        "anchor.bind_failure_leaves_anchor_unchanged",
+        "a listener that cannot bind does not advance the anchor",
+        bundle=bundle("e5", "5"),
+        expect_start=False,
+        expect_substring="Address already in use",
+    )
+    blocker.close()
+    url_e = _database_url_for(ledger_e)
+    anchor_e = None
+    if url_e is not None:
+        import psycopg as _psycopg
+
+        with _psycopg.connect(url_e, autocommit=True) as conn:
+            table = conn.execute(
+                "select to_regclass('policy_revision_anchor')"
+            ).fetchone()
+            if table is not None and table[0] is not None:
+                row = conn.execute(
+                    "select revision from policy_revision_anchor where policy_id = %s",
+                    ("staging-verify-policy",),
+                ).fetchone()
+                anchor_e = None if row is None else row[0]
+    ev.record(
+        "anchor.bind_failure_anchor_state",
+        "local_simulation",
+        "after a bind failure no anchor row exists for the policy",
+        "absent",
+        str(anchor_e),
+        "passed" if anchor_e is None else "failed",
+    )
+    del start_e
+
+    # F. A first start whose database insert fails must not leave a filesystem record behind.
+    ledger_f = work / "anchor-ledger-f"
+    ledger_f.mkdir()
+    long_bundle = write_signed_bundle(
+        work / "anchor-f-long.bundle.json",
+        synthetic_policy(policy_id="x" * 300, version="1"),
+        seed_b64=keys.seed_b64,
+        expires=FUTURE,
+    )
+    start_f = functools.partial(
+        _start_once, ledger=ledger_f, policy_dir=policy_dir, trust=trust
+    )
+    start_f(
+        ev,
+        "anchor.insert_failure_is_refused",
+        "an anchor insert that fails refuses startup",
+        bundle=long_bundle,
+        expect_start=False,
+        expect_substring="anchor unavailable",
+    )
+    no_record = not (ledger_f / "policy_watermark.json").exists()
+    ev.record(
+        "anchor.insert_failure_writes_no_record",
+        "local_simulation",
+        "a failed first-start insert leaves no filesystem record",
+        "absent",
+        "absent" if no_record else "present",
+        "passed" if no_record else "failed",
+    )
+
+    # G. Two bundles in the policy directory: refused before any anchor work, and no anchor row is created.
+    ledger_g = work / "anchor-ledger-g"
+    ledger_g.mkdir()
+    dir_g = work / "anchor-dir-g"
+    dir_g.mkdir()
+    write_signed_bundle(
+        dir_g / "policy.bundle.staging.json",
+        synthetic_policy(policy_id="policy-a", version="2"),
+        seed_b64=keys.seed_b64,
+        expires=FUTURE,
+    )
+    write_signed_bundle(
+        dir_g / "policy.bundle.json",
+        synthetic_policy(policy_id="policy-b", version="1"),
+        seed_b64=keys.seed_b64,
+        expires=FUTURE,
+    )
+    # Directory mode: no bundle file variable, so the policy directory is the only source.
+    port_g = _free_port()
+    env_g = base_env(
+        ledger=ledger_g,
+        policy_dir=dir_g,
+        environment="staging",
+        trust=trust,
+        api_key="k-anchor-g",
+        bind=f"127.0.0.1:{port_g}",
+    )
+    server_g, err_g = start_server(env_g, work)
+    if server_g is not None:
+        server_g.stop()
+    ev.record(
+        "anchor.two_bundles_refused",
+        "local_simulation",
+        "two bundles in the policy directory are refused before any anchor work",
+        "refused (message contains 'multiple policy bundles')",
+        "started" if server_g is not None else "refused: " + last_error_line(err_g),
+        "passed"
+        if server_g is None and "multiple policy bundles" in err_g
+        else "failed",
+    )
+    url_g = _database_url_for(ledger_g)
+    g_rows: int | None = None
+    if url_g is not None:
+        import psycopg as _psycopg_g
+
+        with _psycopg_g.connect(url_g, autocommit=True) as conn_g:
+            table_g = conn_g.execute(
+                "select to_regclass('policy_revision_anchor')"
+            ).fetchone()
+            if table_g is not None and table_g[0] is not None:
+                count_row = conn_g.execute(
+                    "select count(*) from policy_revision_anchor"
+                ).fetchone()
+                g_rows = int(count_row[0]) if count_row is not None else 0
+    ev.record(
+        "anchor.two_bundles_no_anchor_rows",
+        "local_simulation",
+        "a refused two-bundle start writes no anchor row",
+        "no table or 0 rows",
+        "no table" if g_rows is None else str(g_rows),
+        "passed" if g_rows in (None, 0) else "failed",
     )
 
     # D. Staging without any database URL: refused, so the anchor cannot silently disappear.
