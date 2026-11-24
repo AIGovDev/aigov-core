@@ -11,7 +11,8 @@ what requires a real deployment.
 | Scope | What it proves | What it does not prove |
 |-------|----------------|------------------------|
 | `local_simulation` | The release binary, started by the harness with disposable keys and synthetic policies, refuses or admits startup and requests as specified. | Anything about a deployed environment, its trust store, its bundle, its database, or its network. |
-| `live_staging` | A deployed staging service responds with the expected health, authentication, and authorization behavior. | Which policy bundle the service is running. The harness cannot see that, and reports nothing about it. |
+| `local_container` | A container of the built image, running on this machine with the staging overlay, has the expected identity and bundle hash, responds with the expected behavior, and refuses invalid bundles. | Any remote environment, network path, TLS, DNS, or secret management of a remote host. |
+| `live_staging` | A remotely deployed staging service responds with the expected health and authentication behavior. Bundle-dependent checks run only when the deployed bundle hash is verified, which a remote host cannot be from this machine. | Which bundle a remote service runs, unless an operator confirms it out of band. |
 
 Evidence records the scope on every check. A `live_staging` check reported as `blocked` means the
 deployed service was not checked. It is never counted as passed.
@@ -129,3 +130,52 @@ Refusals are matched on the specific gate or startup message, not on any refusal
   service needs an operator to confirm the bundle hash out of band.
 - Replay of a valid, unexpired bundle, and rollback to an older valid bundle, are not prevented.
 - Key custody is file-based. KMS-backed signing is not implemented.
+
+## Local staging deployment (container on this machine)
+
+This is the only staging target that can be deployed from this repository without external
+infrastructure. It runs the real image with Postgres under docker compose, bound to loopback.
+
+```sh
+PYTHON=python/.venv/bin/python scripts/staging_local_deploy.sh up      # build if missing, prepare, start
+PYTHON=python/.venv/bin/python scripts/staging_local_deploy.sh verify  # live checks against the container
+scripts/staging_local_deploy.sh status
+scripts/staging_local_deploy.sh down                                    # keeps data volumes
+```
+
+`PYTHON` must point at an interpreter where `aigov_py` is installed (`pip install -e python[dev]`),
+because `prepare` uses its signer.
+
+What the deploy does:
+
+- Writes secrets to `~/.config/aigov-staging/staging.env` (mode 0600), outside the repository. The
+  API key and database password are generated locally and never printed.
+- Runs `prepare` to create a synthetic Ed25519 v2 bundle, a public-key trust store, negative
+  fixtures, and `expected-manifest.json` in `~/.config/aigov-staging/bundle` (mode 0700). The signing
+  seed is held in memory during `prepare` and is never written; `prepare` checks this before it
+  returns.
+- Mounts only the live bundle, read-only, at `/app/policies`. Compose refuses to start if a required
+  secret or the bundle location is unset.
+- Binds the API to `127.0.0.1:8088`. Postgres publishes no port.
+
+What `verify` checks, all recorded with scope `local_container`:
+
+- the container is running, and it runs the image that was built;
+- the SHA-256 of the mounted bundle equals `expected-manifest.json`;
+- the infrastructure behavior (health, readiness, authentication) and the bundle-dependent HTTP
+  behavior (evaluation, approvals, verdict), which run only after the bundle hash matches;
+- the same image refuses to start with a tampered, expired, untrusted-key, or unsigned bundle, and
+  refuses an unsigned policy file override while a bundle is configured. Each refusal is matched on
+  its specific message.
+
+Evidence is written to `artifacts/staging-verify/deployed-evidence.json`. It is git-ignored and is
+not committed. It records the commit (with a `-dirty` marker if the tree differs from HEAD), the host
+release binary hash, and the check results. The image itself is identified by its ID in the
+`deployment.*` checks.
+
+## Known limitations of the local target
+
+- It is a container on one machine, not a remote environment. It has no TLS and no external DNS.
+- The container's root filesystem is writable. Read-only root with tmpfs is a recommended hardening step.
+- The API does not expose the loaded bundle's identity. The hash check reads the mounted file, so it
+  verifies what the container was given, not what the process has loaded.
