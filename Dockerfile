@@ -40,6 +40,8 @@ WORKDIR /app
 
 COPY --from=builder --chown=govai:govai /build/target/release/aigov_audit /app/aigov_audit
 COPY --from=builder --chown=govai:govai /build/policy.json /build/policy.dev.json /build/policy.staging.json /build/policy.prod.json /app/policies/
+# Migrations are resolved at compile time from CARGO_MANIFEST_DIR (/build/migrations); provide the same path.
+COPY --from=builder --chown=govai:govai /build/migrations /build/migrations
 
 # Runtime configuration (set at deploy time): DATABASE_URL, GOVAI_API_KEYS, GOVAI_API_KEYS_JSON
 ENV AIGOV_BIND=0.0.0.0:8088 \

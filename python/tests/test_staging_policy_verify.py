@@ -42,21 +42,38 @@ def test_staging_host_requires_an_exact_label(host, expected):
     assert svf._host_is_staging(host) is expected
 
 
+def _live_args(**overrides):
+    import argparse
+
+    base = dict(
+        base_url="",
+        api_key_env="GOVAI_STAGING_API_KEY",
+        target_kind="remote",
+        container="",
+        image="",
+        manifest="",
+        fixtures="",
+    )
+    base.update(overrides)
+    return argparse.Namespace(**base)
+
+
 def test_live_checks_are_blocked_not_passed_without_configuration(monkeypatch):
     monkeypatch.delenv("GOVAI_STAGING_BASE_URL", raising=False)
     monkeypatch.delenv("GOVAI_STAGING_API_KEY", raising=False)
     ev = svf.Evidence(mode="live")
-    svf.run_live(ev, allow_local=False)
+    svf.run_live_target(ev, _live_args())
     assert ev.checks, "live checks must be recorded even when not configured"
     assert {c["status"] for c in ev.checks} == {"blocked"}
     assert {c["scope"] for c in ev.checks} == {"live_staging"}
 
 
-def test_live_refuses_a_non_staging_host(monkeypatch):
-    monkeypatch.setenv("GOVAI_STAGING_BASE_URL", "https://api.example.com")
+def test_remote_target_refuses_a_non_staging_host(monkeypatch):
     monkeypatch.setenv("GOVAI_STAGING_API_KEY", "not-a-real-key")
     ev = svf.Evidence(mode="live")
-    svf.run_live(ev, allow_local=False)
+    svf.run_live_target(
+        ev, _live_args(base_url="https://api.example.com", target_kind="remote")
+    )
     target = next(c for c in ev.checks if c["id"] == "live.target")
     assert target["status"] == "failed"
     assert "refused host api.example.com" in target["observed"]
@@ -65,12 +82,40 @@ def test_live_refuses_a_non_staging_host(monkeypatch):
     )
 
 
-def test_live_refuses_localhost_unless_self_test_is_requested(monkeypatch):
-    monkeypatch.setenv("GOVAI_STAGING_BASE_URL", "http://127.0.0.1:9")
+def test_remote_target_refuses_loopback(monkeypatch):
     monkeypatch.setenv("GOVAI_STAGING_API_KEY", "not-a-real-key")
     ev = svf.Evidence(mode="live")
-    svf.run_live(ev, allow_local=False)
+    svf.run_live_target(
+        ev, _live_args(base_url="http://127.0.0.1:9", target_kind="remote")
+    )
     assert next(c for c in ev.checks if c["id"] == "live.target")["status"] == "failed"
+
+
+def test_container_target_refuses_a_non_loopback_host(monkeypatch):
+    monkeypatch.setenv("GOVAI_STAGING_API_KEY", "not-a-real-key")
+    ev = svf.Evidence(mode="live")
+    svf.run_live_target(
+        ev,
+        _live_args(
+            base_url="https://api.staging.example.com", target_kind="local_container"
+        ),
+    )
+    target = next(c for c in ev.checks if c["id"] == "live.target")
+    assert target["status"] == "failed"
+    assert target["scope"] == "local_container"
+
+
+def test_unverified_bundle_blocks_bundle_dependent_checks(monkeypatch):
+    """Without a verified deployed bundle, bundle-dependent behavior must not be reported as passed."""
+    monkeypatch.setenv("GOVAI_STAGING_API_KEY", "not-a-real-key")
+    ev = svf.Evidence(mode="live")
+    # Port 9 is closed, so infrastructure checks fail; the bundle gate must still block the rest.
+    svf.run_live_target(
+        ev, _live_args(base_url="http://127.0.0.1:9", target_kind="local_container")
+    )
+    dep = next(c for c in ev.checks if c["id"] == "live.bundle_dependent_checks")
+    assert dep["status"] == "blocked"
+    assert not any(c["id"] == "http.evidence.unauthenticated" for c in ev.checks)
 
 
 def test_require_live_exits_2_when_blocked(monkeypatch, tmp_path):
@@ -103,6 +148,26 @@ def test_evidence_document_schema_and_summary_are_consistent():
         "blocked": 0,
     }
     assert doc["summary"]["live_staging"] == {"passed": 0, "failed": 0, "blocked": 1}
+    assert set(doc["summary"]) >= {"local_container"}
+
+
+def test_prepare_never_writes_the_signing_seed(tmp_path):
+    manifest = svf.prepare(tmp_path / "bundle", expires_days=1)
+    files = [p for p in (tmp_path / "bundle").rglob("*") if p.is_file()]
+    assert files, "prepare must write the bundle, trust store, fixtures, and manifest"
+    names = {p.name for p in files}
+    assert {
+        "policy.bundle.staging.json",
+        "trust.json",
+        "expected-manifest.json",
+    } <= names
+    assert {"expired.json", "untrusted.json", "tampered.json", "unsigned.json"} <= names
+    for p in files:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        assert "private" not in text.lower()
+    assert manifest["bundle_sha256"] == svf._sha256_file(
+        tmp_path / "bundle" / "policy.bundle.staging.json"
+    )
 
 
 def test_record_rejects_unknown_status_or_scope():

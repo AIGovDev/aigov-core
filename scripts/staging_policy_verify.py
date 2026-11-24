@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -50,6 +51,7 @@ CREATED = "2026-11-23T00:00:00Z"
 FUTURE = "2999-01-01T00:00:00Z"
 PAST = "2020-01-01T00:00:00Z"
 STAGING_LABELS = {"staging", "stg", "test"}
+SCOPES = ("local_simulation", "local_container", "live_staging")
 
 # --------------------------------------------------------------------------------------------------
 # Evidence
@@ -73,7 +75,7 @@ class Evidence:
         detail: str = "",
     ) -> None:
         assert status in {"passed", "failed", "blocked"}, status
-        assert scope in {"local_simulation", "live_staging"}, scope
+        assert scope in SCOPES, scope
         self.checks.append(
             {
                 "id": check_id,
@@ -90,7 +92,7 @@ class Evidence:
         out: dict[str, Any] = {"total": len(self.checks)}
         for s in ("passed", "failed", "blocked"):
             out[s] = sum(1 for c in self.checks if c["status"] == s)
-        for scope in ("local_simulation", "live_staging"):
+        for scope in SCOPES:
             subset = [c for c in self.checks if c["scope"] == scope]
             out[scope] = {
                 s: sum(1 for c in subset if c["status"] == s)
@@ -112,16 +114,31 @@ class Evidence:
 
 
 def _git_sha() -> str | None:
+    """HEAD commit, with `-dirty` and the tree hash appended when the working tree differs from HEAD.
+
+    Evidence must not name a commit that the tested artifact does not match.
+    """
     try:
-        return subprocess.run(
+        head = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             check=True,
         ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
     except (OSError, subprocess.CalledProcessError):
         return None
+    if not status.strip():
+        return head
+    tree = hashlib.sha256(status.encode("utf-8")).hexdigest()[:12]
+    return f"{head}-dirty-{tree}"
 
 
 def _sha256_file(p: Path) -> str:
@@ -740,16 +757,23 @@ def run_local(ev: Evidence, work: Path) -> None:
     )
 
 
-def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
+def run_http_scenarios(
+    ev: Evidence,
+    srv: Any,
+    keys: Any = None,
+    *,
+    scope: str = "local_simulation",
+    run: str | None = None,
+) -> None:
     """Verdict, evaluation, and approval behavior against the running staging-mode server."""
     key = srv.api_key
     base = srv.base_url
-    run = "staging-verify-run-1"
+    run = run or "staging-verify-run-1"
 
     status, body = http("GET", f"{base}/health")
     ev.record(
         "http.health",
-        "local_simulation",
+        scope,
         "health endpoint is reachable",
         "200",
         str(status),
@@ -763,7 +787,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     )
     ev.record(
         "http.evidence.unauthenticated",
-        "local_simulation",
+        scope,
         "evidence ingest without an API key is rejected",
         "401",
         str(status),
@@ -773,7 +797,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     status, body = http("GET", f"{base}/compliance-summary?run_id={run}", api_key=key)
     ev.record(
         "http.verdict.unknown_run",
-        "local_simulation",
+        scope,
         "verdict summary for a run with no evidence is not invented",
         "404 run_not_found",
         f"{status} {body.get('code', '')}".strip(),
@@ -783,7 +807,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     status, body = http("GET", f"{base}/compliance-summary?run_id={run}")
     ev.record(
         "http.verdict.unauthenticated_read",
-        "local_simulation",
+        scope,
         "verdict summary without an API key is rejected",
         "401",
         str(status),
@@ -798,7 +822,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     )
     ev.record(
         "ingest.allowed_event",
-        "local_simulation",
+        scope,
         "allowed event type with valid payload is admitted",
         "200",
         str(status),
@@ -815,7 +839,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     msg = _refusal_message(body)
     ev.record(
         "evaluation.promotion_without_evaluation",
-        "local_simulation",
+        scope,
         "promotion without any evaluation is refused",
         "refused: requires a passed evaluation",
         f"{status} {msg}".strip(),
@@ -832,7 +856,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     )
     ev.record(
         "evaluation.failed_evaluation_recorded",
-        "local_simulation",
+        scope,
         "failed evaluation is recorded but does not satisfy the requirement",
         "200",
         str(status),
@@ -848,7 +872,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     msg = _refusal_message(body)
     ev.record(
         "evaluation.promotion_after_failed_evaluation",
-        "local_simulation",
+        scope,
         "promotion after only a failed evaluation is refused",
         "refused: requires a passed evaluation",
         f"{status} {msg}".strip(),
@@ -865,7 +889,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     )
     ev.record(
         "evaluation.passed_evaluation_recorded",
-        "local_simulation",
+        scope,
         "passed evaluation is recorded",
         "200",
         str(status),
@@ -880,7 +904,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     )
     ev.record(
         "evaluation.promotion_after_passed_evaluation",
-        "local_simulation",
+        scope,
         "promotion after a passed evaluation is admitted",
         "200",
         str(status),
@@ -902,7 +926,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     msg = _refusal_message(body)
     ev.record(
         "approval.unauthorized_approver",
-        "local_simulation",
+        scope,
         "approval by an approver outside the signed allowlist is refused",
         "refused: approver not allowlisted",
         f"{status} {msg}".strip(),
@@ -924,7 +948,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     )
     ev.record(
         "approval.authorized_approver",
-        "local_simulation",
+        scope,
         "approval by an allowlisted approver is admitted",
         "200",
         str(status),
@@ -934,7 +958,7 @@ def run_http_scenarios(ev: Evidence, srv: Server, keys: Keys) -> None:
     status, body = http("GET", f"{base}/compliance-summary?run_id={run}", api_key=key)
     ev.record(
         "verdict.summary_after_flow",
-        "local_simulation",
+        scope,
         "verdict summary is available after the full flow",
         "200",
         str(status),
@@ -959,83 +983,52 @@ def _host_is_staging(host: str) -> bool:
     return bool(tokens & STAGING_LABELS)
 
 
-def run_live(ev: Evidence, *, allow_local: bool) -> None:
-    base = os.environ.get("GOVAI_STAGING_BASE_URL", "").strip().rstrip("/")
-    key = os.environ.get("GOVAI_STAGING_API_KEY", "").strip()
-    if not base or not key:
-        for cid, desc in [
-            ("live.health", "deployed staging service answers /health"),
-            (
-                "live.auth.unauthenticated_rejected",
-                "deployed staging rejects requests without a key",
-            ),
-            (
-                "live.auth.invalid_key_rejected",
-                "deployed staging rejects an invalid key",
-            ),
-            (
-                "live.verdict.authenticated_read",
-                "deployed staging serves a verdict summary with a valid key",
-            ),
-        ]:
-            ev.record(
-                cid,
-                "live_staging",
-                desc,
-                "checked against a configured staging URL",
-                "not run",
-                "blocked",
-                detail="GOVAI_STAGING_BASE_URL and GOVAI_STAGING_API_KEY are not configured",
-            )
-        return
+class Target:
+    """A running service under test: base URL and an API key read from the environment."""
 
+    def __init__(self, base_url: str, api_key: str) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+
+
+def _host_of(base: str) -> str:
     from urllib.parse import urlparse
 
-    parsed = urlparse(base)
-    host = parsed.hostname or ""
-    is_local = host in {"localhost", "127.0.0.1", "::1"}
-    if is_local and not allow_local:
-        ev.record(
-            "live.target",
-            "live_staging",
-            "live target is a deployed staging host",
-            "non-local host with a staging label",
-            f"refused local host {host}",
-            "failed",
-            detail="use --allow-local-for-self-test only to test this code path",
-        )
-        return
-    if not is_local and not _host_is_staging(host):
-        ev.record(
-            "live.target",
-            "live_staging",
-            "live target is a deployed staging host",
-            "host carries a staging, stg, or test label",
-            f"refused host {host}",
-            "failed",
-        )
-        return
-    scope_note = (
-        "self-test against localhost (not staging evidence)"
-        if is_local
-        else "deployed staging"
-    )
-    ev.record(
-        "live.target",
-        "live_staging",
-        "live target identified",
-        scope_note,
-        host,
-        "passed",
-    )
+    return urlparse(base).hostname or ""
+
+
+def _is_loopback(host: str) -> bool:
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _run_id() -> str:
+    # Unique per execution: the ledger persists across runs, so a fixed run id would make the
+    # evaluation and unknown-run checks depend on earlier runs.
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"staging-verify-{stamp}-{secrets.token_hex(3)}"
+
+
+def run_infra_checks(ev: Evidence, target: Target, scope: str) -> None:
+    """Behavior that does not depend on which bundle the service runs."""
+    base, key = target.base_url, target.api_key
 
     status, _ = http("GET", f"{base}/health")
     ev.record(
         "live.health",
-        "live_staging",
-        "deployed staging service answers /health",
+        scope,
+        "service answers /health",
         "200",
         str(status),
+        "passed" if status == 200 else "failed",
+    )
+
+    status, body = http("GET", f"{base}/ready")
+    ev.record(
+        "live.ready",
+        scope,
+        "service reports ready (database, migrations, ledger writable)",
+        "200",
+        f"{status} {body.get('ready', '')}".strip(),
         "passed" if status == 200 else "failed",
     )
 
@@ -1048,8 +1041,8 @@ def run_live(ev: Evidence, *, allow_local: bool) -> None:
     )
     ev.record(
         "live.auth.unauthenticated_rejected",
-        "live_staging",
-        "deployed staging rejects requests without a key",
+        scope,
+        "requests without a key are rejected",
         "401",
         str(status),
         "passed" if status == 401 else "failed",
@@ -1062,34 +1055,445 @@ def run_live(ev: Evidence, *, allow_local: bool) -> None:
     )
     ev.record(
         "live.auth.invalid_key_rejected",
-        "live_staging",
-        "deployed staging rejects an invalid key",
+        scope,
+        "an invalid key is rejected",
         "401",
         str(status),
         "passed" if status == 401 else "failed",
     )
 
     # A valid key must be authorized. The probe run has no evidence, so 404 run_not_found is the
-    # correct, authorized answer; 401 or 403 would mean the key was not accepted.
+    # authorized answer; 401 or 403 would mean the key was not accepted.
     status, body = http(
         "GET", f"{base}/compliance-summary?run_id=live-probe", api_key=key
     )
     ev.record(
-        "live.verdict.authenticated_read",
-        "live_staging",
-        "deployed staging accepts a valid key for verdict reads (200, or 404 run_not_found for the probe run)",
-        "200 or 404 run_not_found",
+        "live.auth.valid_key_accepted",
+        scope,
+        "a valid key is authorized for verdict reads (200, or 404 run_not_found for the probe run)",
+        "200 or 404",
         f"{status} {body.get('code', '')}".strip(),
         "passed" if status in (200, 404) else "failed",
     )
 
 
-# --------------------------------------------------------------------------------------------------
-# Entry point
-# --------------------------------------------------------------------------------------------------
+def _docker(*args: str, timeout: int = 60) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["docker", *args], capture_output=True, text=True, timeout=timeout, check=False
+    )
+
+
+def check_deployed_container(
+    ev: Evidence, container: str, image: str | None, manifest: dict[str, Any] | None
+) -> bool:
+    """Verify the running container's identity and the hash of the bundle it mounts.
+
+    Returns True only when the deployed bundle hash equals the manifest produced at signing time.
+    """
+    scope = "local_container"
+    try:
+        insp = _docker(
+            "inspect",
+            "--format",
+            "{{.State.Status}}|{{.Image}}|{{.Created}}",
+            container,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        ev.record(
+            "deployment.container",
+            scope,
+            "container is inspectable",
+            "running",
+            f"docker error: {e}",
+            "failed",
+        )
+        return False
+    if insp.returncode != 0:
+        ev.record(
+            "deployment.container",
+            scope,
+            "container is inspectable",
+            "running",
+            insp.stderr.strip()[:200],
+            "failed",
+        )
+        return False
+    status, image_id, created = insp.stdout.strip().split("|", 2)
+    ev.record(
+        "deployment.container_running",
+        scope,
+        "container is running",
+        "running",
+        status,
+        "passed" if status == "running" else "failed",
+    )
+    ev.record(
+        "deployment.container_identity",
+        scope,
+        "container identity (image id and creation time)",
+        "recorded",
+        f"{image_id} created {created}",
+        "passed",
+    )
+
+    if image:
+        ref = _docker("image", "inspect", "--format", "{{.Id}}", image)
+        expected_id = ref.stdout.strip()
+        ev.record(
+            "deployment.image_matches_container",
+            scope,
+            "container runs the image that was built and tested",
+            expected_id or "image not found",
+            image_id,
+            "passed" if ref.returncode == 0 and expected_id == image_id else "failed",
+        )
+
+    bundle_path = "/app/policies/policy.bundle.staging.json"
+    if manifest is None:
+        ev.record(
+            "deployment.bundle_hash_matches_manifest",
+            scope,
+            "deployed bundle hash equals the expected artifact",
+            "manifest provided",
+            "no manifest",
+            "blocked",
+            detail="pass --manifest from `prepare` to verify the deployed bundle",
+        )
+        return False
+    sha = _docker("exec", container, "sha256sum", bundle_path)
+    if sha.returncode != 0:
+        ev.record(
+            "deployment.bundle_hash_matches_manifest",
+            scope,
+            "deployed bundle hash equals the expected artifact",
+            manifest["bundle_sha256"],
+            sha.stderr.strip()[:200],
+            "failed",
+        )
+        return False
+    observed = sha.stdout.split()[0] if sha.stdout.split() else ""
+    ok = observed == manifest["bundle_sha256"]
+    ev.record(
+        "deployment.bundle_hash_matches_manifest",
+        scope,
+        "deployed bundle hash equals the expected artifact",
+        manifest["bundle_sha256"],
+        observed,
+        "passed" if ok else "failed",
+        detail=f"path={bundle_path}",
+    )
+    return ok
+
+
+def _mount_dir(prefix: str) -> Path:
+    """A directory for `docker run -v`. Docker Desktop shares only some host paths, so mounts are created
+    under the repository's git-ignored artifacts directory rather than the system temporary directory."""
+    base = REPO_ROOT / "artifacts" / "staging-verify" / "mounts"
+    base.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=base))
+
+
+def check_image_refusals(
+    ev: Evidence, image: str, fixtures: Path, manifest: dict[str, Any]
+) -> None:
+    """Start the same image with each invalid bundle. Each start must be refused for its stated reason."""
+    scope = "local_container"
+    trust = (fixtures / "trust.json").read_text(encoding="utf-8").strip()
+    cases = [
+        (
+            "tampered",
+            "payload_digest_sha256 mismatch",
+            "tampered bundle is refused by the deployed image",
+        ),
+        ("expired", "expired", "expired bundle is refused by the deployed image"),
+        (
+            "untrusted",
+            "verification failed for all trusted keys",
+            "bundle signed by an untrusted key is refused by the deployed image",
+        ),
+        (
+            "unsigned",
+            "policy is unsigned",
+            "unsigned bundle is refused by the deployed image",
+        ),
+    ]
+    for name, needle, desc in cases:
+        work = Path(_mount_dir("refusal-"))
+        try:
+            shutil.copy(
+                fixtures / "negative" / f"{name}.json",
+                work / "policy.bundle.staging.json",
+            )
+            proc = _docker(
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "-v",
+                f"{work}:/app/policies:ro",
+                "-e",
+                "AIGOV_ENVIRONMENT=staging",
+                "-e",
+                "AIGOV_POLICY_DIR=/app/policies",
+                "-e",
+                "AIGOV_POLICY_BUNDLE_FILE=/app/policies/policy.bundle.staging.json",
+                "-e",
+                f"AIGOV_POLICY_TRUST_ED25519_JSON={trust}",
+                "-e",
+                "GOVAI_API_KEYS=refusal-probe",
+                "-e",
+                'GOVAI_API_KEYS_JSON={"refusal-probe":"tenant-probe"}',
+                image,
+                timeout=120,
+            )
+            text = proc.stdout + proc.stderr
+            refused = proc.returncode != 0 and needle in text
+            ev.record(
+                f"image.refuses_{name}",
+                scope,
+                desc,
+                f"non-zero exit containing {needle!r}",
+                f"exit {proc.returncode}: {last_error_line(text)}",
+                "passed" if refused else "failed",
+            )
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    # Valid bundle plus an unsigned file override: the file must not participate.
+    work = Path(_mount_dir("override-"))
+    try:
+        shutil.copy(fixtures / "valid.json", work / "policy.bundle.staging.json")
+        proc = _docker(
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "-v",
+            f"{work}:/app/policies:ro",
+            "-e",
+            "AIGOV_ENVIRONMENT=staging",
+            "-e",
+            "AIGOV_POLICY_DIR=/app/policies",
+            "-e",
+            "AIGOV_POLICY_BUNDLE_FILE=/app/policies/policy.bundle.staging.json",
+            "-e",
+            f"AIGOV_POLICY_TRUST_ED25519_JSON={trust}",
+            "-e",
+            "AIGOV_POLICY_FILE=/app/policy.staging.json",
+            "-e",
+            "GOVAI_API_KEYS=refusal-probe",
+            "-e",
+            'GOVAI_API_KEYS_JSON={"refusal-probe":"tenant-probe"}',
+            image,
+            timeout=120,
+        )
+        text = proc.stdout + proc.stderr
+        needle = "AIGOV_POLICY_FILE is not permitted in staging"
+        ev.record(
+            "image.refuses_policy_file_override",
+            scope,
+            "unsigned policy file override is refused by the deployed image when a bundle is configured",
+            f"non-zero exit containing {needle!r}",
+            f"exit {proc.returncode}: {last_error_line(text)}",
+            "passed" if proc.returncode != 0 and needle in text else "failed",
+        )
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def run_live_target(ev: Evidence, args: argparse.Namespace) -> None:
+    base = (args.base_url or os.environ.get("GOVAI_STAGING_BASE_URL", "")).strip()
+    key = os.environ.get(args.api_key_env, "").strip()
+    if not base or not key:
+        for cid, desc in [
+            ("live.health", "service answers /health"),
+            ("live.ready", "service reports ready"),
+            (
+                "live.auth.unauthenticated_rejected",
+                "requests without a key are rejected",
+            ),
+            ("live.auth.invalid_key_rejected", "an invalid key is rejected"),
+            ("live.auth.valid_key_accepted", "a valid key is authorized"),
+        ]:
+            ev.record(
+                cid,
+                "live_staging",
+                desc,
+                "checked against a configured service",
+                "not run",
+                "blocked",
+                detail=f"base URL and the {args.api_key_env} variable are required",
+            )
+        return
+
+    host = _host_of(base)
+    if args.target_kind == "local_container":
+        scope = "local_container"
+        if not _is_loopback(host):
+            ev.record(
+                "live.target",
+                scope,
+                "target is the local container",
+                "loopback host",
+                f"refused host {host}",
+                "failed",
+            )
+            return
+    else:
+        scope = "live_staging"
+        if _is_loopback(host) or not _host_is_staging(host):
+            ev.record(
+                "live.target",
+                scope,
+                "target is a deployed staging host",
+                "non-loopback host with a staging, stg, or test label",
+                f"refused host {host}",
+                "failed",
+            )
+            return
+    ev.record(
+        "live.target",
+        scope,
+        "live target",
+        args.target_kind,
+        f"{args.target_kind} {host}",
+        "passed",
+    )
+
+    target = Target(base, key)
+    run_infra_checks(ev, target, scope)
+
+    manifest = None
+    if args.manifest:
+        manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    bundle_ok = False
+    if args.container:
+        bundle_ok = check_deployed_container(ev, args.container, args.image, manifest)
+    elif args.target_kind == "remote":
+        ev.record(
+            "deployment.bundle_hash_matches_manifest",
+            scope,
+            "deployed bundle hash equals the expected artifact",
+            "manifest provided",
+            "not accessible",
+            "blocked",
+            detail="a remote service's mounted bundle cannot be hashed from this machine",
+        )
+
+    if bundle_ok:
+        run_http_scenarios(ev, target, None, scope=scope, run=_run_id())
+    else:
+        ev.record(
+            "live.bundle_dependent_checks",
+            scope,
+            "verdict, evaluation, and approval behavior for the expected bundle",
+            "deployed bundle verified",
+            "not run",
+            "blocked",
+            detail="bundle identity must be verified before bundle-dependent behavior is checked",
+        )
+
+    if args.image and args.fixtures:
+        if args.target_kind == "local_container":
+            check_image_refusals(ev, args.image, Path(args.fixtures), manifest or {})
+    elif args.image or args.fixtures:
+        ev.record(
+            "image.refusals",
+            "local_container",
+            "deployed image refuses invalid bundles",
+            "image and fixtures provided",
+            "incomplete",
+            "blocked",
+            detail="both --image and --fixtures are required",
+        )
+
+
+def prepare(out_dir: Path, expires_days: int) -> dict[str, Any]:
+    """Create the staging bundle, trust store, negative fixtures, and manifest. Never writes a private key.
+
+    The signing seed exists only in this process's memory. It is not written to disk, returned, or
+    printed, and the function checks that the seed does not appear in any file it writes.
+    """
+    from nacl.signing import SigningKey
+
+    out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    neg = out_dir / "negative"
+    neg.mkdir(exist_ok=True, mode=0o700)
+
+    signing = SigningKey.generate()
+    seed_b64 = base64.b64encode(bytes(signing)).decode("ascii")
+    pub_b64 = base64.b64encode(bytes(signing.verify_key)).decode("ascii")
+    other_seed_b64 = base64.b64encode(bytes(SigningKey.generate())).decode("ascii")
+
+    expires = (dt.datetime.now(dt.UTC) + dt.timedelta(days=expires_days)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    past = "2020-01-01T00:00:00Z"
+    doc = synthetic_policy(policy_id="staging-synthetic-policy", version="1")
+
+    valid = write_signed_bundle(
+        out_dir / "policy.bundle.staging.json", doc, seed_b64=seed_b64, expires=expires
+    )
+    write_signed_bundle(out_dir / "valid.json", doc, seed_b64=seed_b64, expires=expires)
+    write_signed_bundle(neg / "expired.json", doc, seed_b64=seed_b64, expires=past)
+    write_signed_bundle(
+        neg / "untrusted.json", doc, seed_b64=other_seed_b64, expires=expires
+    )
+    tampered = json.loads(valid.read_text(encoding="utf-8"))
+    tampered["ingest_rules"]["event_types"]["human_approved"]["gates"][0][
+        "allowlist"
+    ] = ["alice", "mallory"]
+    (neg / "tampered.json").write_text(json.dumps(tampered, indent=2), encoding="utf-8")
+    (neg / "unsigned.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    trust = trust_json(pub_b64)
+    (out_dir / "trust.json").write_text(trust + "\n", encoding="utf-8")
+
+    manifest: dict[str, Any] = {
+        "schema": "govai.staging_bundle_manifest.v1",
+        "prepared_at_utc": dt.datetime.now(dt.UTC).isoformat(),
+        "git_sha": _git_sha(),
+        "issuer_id": ISSUER,
+        "signer": "staging-verify-ci",
+        "policy_id": doc["policy_id"],
+        "policy_version": doc["version"],
+        "policy_digest_sha256": _doc_digest(doc),
+        "bundle_sha256": _sha256_file(valid),
+        "bundle_expires_at_utc": expires,
+        "key_fingerprint_sha256": hashlib.sha256(bytes(signing.verify_key)).hexdigest()[
+            :16
+        ],
+        "fixtures": {
+            name: _sha256_file(neg / f"{name}.json")
+            for name in ("expired", "untrusted", "tampered", "unsigned")
+        },
+    }
+    (out_dir / "expected-manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    # Guard: the seed must not be present in anything written.
+    for path in out_dir.rglob("*"):
+        if path.is_file():
+            assert seed_b64 not in path.read_text(encoding="utf-8", errors="ignore"), (
+                path
+            )
+    return manifest
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "prepare":
+        ap = argparse.ArgumentParser(prog="staging_policy_verify.py prepare")
+        ap.add_argument("--out-dir", type=Path, required=True)
+        ap.add_argument("--expires-days", type=int, default=30)
+        pa = ap.parse_args(argv[1:])
+        manifest = prepare(pa.out_dir, pa.expires_days)
+        print(f"prepared: {pa.out_dir}")
+        print(f"bundle_sha256: {manifest['bundle_sha256']}")
+        print(f"key_fingerprint_sha256: {manifest['key_fingerprint_sha256']}")
+        return 0
+
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1099,14 +1503,39 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-live", action="store_true", help="run only local simulation"
     )
     ap.add_argument(
-        "--allow-local-for-self-test",
-        action="store_true",
-        help="allow GOVAI_STAGING_BASE_URL to point at localhost; recorded as a self-test",
+        "--target-kind",
+        choices=["local_container", "remote"],
+        default="remote",
+        help="local_container: a container on this machine; remote: a deployed staging host",
     )
     ap.add_argument(
-        "--require-live",
-        action="store_true",
-        help="exit 2 if live staging checks are blocked",
+        "--base-url",
+        default="",
+        help="service base URL (default: $GOVAI_STAGING_BASE_URL)",
+    )
+    ap.add_argument(
+        "--api-key-env",
+        default="GOVAI_STAGING_API_KEY",
+        help="name of the environment variable holding the API key (never passed on the command line)",
+    )
+    ap.add_argument(
+        "--container", default="", help="container name to verify (local_container)"
+    )
+    ap.add_argument(
+        "--image",
+        default="",
+        help="image reference the container runs (and to test refusals against)",
+    )
+    ap.add_argument(
+        "--manifest", default="", help="expected-manifest.json from `prepare`"
+    )
+    ap.add_argument(
+        "--fixtures",
+        default="",
+        help="directory from `prepare` containing trust.json and negative/",
+    )
+    ap.add_argument(
+        "--require-live", action="store_true", help="exit 2 if live checks are blocked"
     )
     args = ap.parse_args(argv)
 
@@ -1117,19 +1546,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    local = not args.skip_local
+    live = not args.skip_live
     ev = Evidence(
-        mode="local+live"
-        if not (args.skip_local or args.skip_live)
-        else ("live" if args.skip_local else "local")
+        mode="local+live" if (local and live) else ("local" if local else "live")
     )
-    if not args.skip_local:
+    if local:
         work = Path(tempfile.mkdtemp(prefix="staging-verify-"))
         try:
             run_local(ev, work)
         finally:
             shutil.rmtree(work, ignore_errors=True)
-    if not args.skip_live:
-        run_live(ev, allow_local=args.allow_local_for_self_test)
+    if live:
+        run_live_target(ev, args)
 
     doc = ev.document()
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -1138,12 +1567,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     s = doc["summary"]
     print(f"evidence: {args.out}")
-    print(f"local_simulation: {s['local_simulation']}")
-    print(f"live_staging:     {s['live_staging']}")
+    for scope in SCOPES:
+        print(f"{scope}: {s[scope]}")
 
     if s["failed"]:
         return 1
-    if args.require_live and s["live_staging"]["blocked"]:
+    if (
+        args.require_live
+        and s["live_staging"]["blocked"] + s["local_container"]["blocked"]
+    ):
         return 2
     return 0
 
