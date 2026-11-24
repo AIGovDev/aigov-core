@@ -314,6 +314,55 @@ class Server:
             return ""
 
 
+PG_ADMIN_ENV = "AIGOV_HARNESS_PG_ADMIN_URL"
+_created_databases: list[str] = []
+
+
+def _pg_admin_url() -> str | None:
+    return os.environ.get(PG_ADMIN_ENV, "").strip() or None
+
+
+def _database_url_for(ledger: Path) -> str | None:
+    """One PostgreSQL 18 database per ledger, so each scenario's durable anchor is isolated.
+
+    Requires AIGOV_HARNESS_PG_ADMIN_URL: an admin URL on a throwaway PostgreSQL 18 server. The databases are
+    created for this run and dropped at the end of it.
+    """
+    admin = _pg_admin_url()
+    if admin is None:
+        return None
+    import psycopg
+    from psycopg import sql
+
+    name = "govai_h_" + hashlib.sha256(str(ledger).encode("utf-8")).hexdigest()[:16]
+    with psycopg.connect(admin, autocommit=True) as conn:
+        exists = conn.execute(
+            "select 1 from pg_database where datname = %s", (name,)
+        ).fetchone()
+        if exists is None:
+            conn.execute(sql.SQL("create database {}").format(sql.Identifier(name)))
+            _created_databases.append(name)
+    base, _, _ = admin.rpartition("/")
+    return f"{base}/{name}"
+
+
+def _drop_created_databases() -> None:
+    admin = _pg_admin_url()
+    if admin is None or not _created_databases:
+        return
+    import psycopg
+    from psycopg import sql
+
+    with psycopg.connect(admin, autocommit=True) as conn:
+        for name in _created_databases:
+            conn.execute(
+                sql.SQL("drop database if exists {} with (force)").format(
+                    sql.Identifier(name)
+                )
+            )
+    _created_databases.clear()
+
+
 def base_env(
     *,
     ledger: Path,
@@ -341,6 +390,10 @@ def base_env(
             "AIGOV_POLICY_TRUST_ED25519_JSON": trust,
         }
     )
+    db = _database_url_for(ledger)
+    if db is not None:
+        env["GOVAI_DATABASE_URL"] = db
+        env["GOVAI_AUTO_MIGRATE"] = "true"
     return env
 
 
@@ -608,7 +661,7 @@ def run_rollback_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
         "changing the content of version 2 without a new version is refused",
         bundle=v2_changed,
         expect_start=False,
-        expect_substring="same-version content change refused",
+        expect_substring="content change refused",
     )
     start(
         ev,
@@ -835,25 +888,26 @@ def run_revision_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
     )
     watermark.write_text(saved, encoding="utf-8")
 
-    # Missing record while ledger data exists: refused, and no record is created.
+    # Deleted filesystem record while the database anchor holds revision 2: restored from the anchor, not reset.
     watermark.unlink()
-    (ledger / "audit_log__tenant-probe.jsonl").write_text("{}\n", encoding="utf-8")
     start(
-        "revision.missing_state_with_data_refused",
-        "a missing record with ledger data refuses startup",
+        "revision.deleted_record_restored_from_anchor",
+        "a deleted record is restored from the database anchor; the accepted revision is not reset",
         bundle_path=v2,
-        expect_start=False,
-        needle="refusing to assume a first start",
+        expect_start=True,
+        needle="",
+    )
+    restored = watermark.exists() and '"version": 2' in watermark.read_text(
+        encoding="utf-8"
     )
     ev.record(
-        "revision.missing_state_not_recreated",
+        "revision.deleted_record_restored_to_anchor_revision",
         "local_simulation",
-        "no record is created over lost state",
-        "absent",
-        "absent" if not watermark.exists() else "present",
-        "passed" if not watermark.exists() else "failed",
+        "the restored record holds the anchored revision",
+        "revision 2 present",
+        "present" if restored else "absent",
+        "passed" if restored else "failed",
     )
-    (ledger / "audit_log__tenant-probe.jsonl").unlink()
     watermark.write_text(saved, encoding="utf-8")
 
     # Concurrent activation: two processes start at once with revisions 4 and 5.
@@ -988,6 +1042,168 @@ def run_integrity_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
         bundle=v2,
         expect_start=True,
         expect_substring="",
+    )
+
+
+def _authentic_record_text(policy_id: str, version: int, digest: str) -> str:
+    """A watermark record whose integrity tag is recomputed: authentic in form, but not authenticated."""
+    from aigov_py.canonical_json import canonical_bytes
+
+    schema = "govai.policy_watermark.v2"
+    policies = {policy_id: {"version": version, "digest_sha256": digest}}
+    tag = hashlib.sha256(
+        canonical_bytes({"schema": schema, "policies": policies})
+    ).hexdigest()
+    return json.dumps(
+        {"schema": schema, "policies": policies, "record_sha256": tag}, indent=2
+    )
+
+
+def run_anchor_e2e(ev: Evidence, work: Path, keys: Keys, trust: str) -> None:
+    """Durable anchor against the real binary and a PostgreSQL 18 database."""
+    pid = "staging-verify-policy"
+
+    def bundle(name: str, version: str) -> Path:
+        return write_signed_bundle(
+            work / f"anchor-{name}.bundle.json",
+            synthetic_policy(version=version),
+            seed_b64=keys.seed_b64,
+            expires=FUTURE,
+        )
+
+    def record_version(ledger: Path) -> str:
+        path = ledger / "policy_watermark.json"
+        if not path.exists():
+            return "absent"
+        return str(
+            json.loads(path.read_text(encoding="utf-8"))["policies"][pid]["version"]
+        )
+
+    digest_v1 = _doc_digest(synthetic_policy(version="1"))
+    digest_v2 = _doc_digest(synthetic_policy(version="2"))
+    policy_dir = work / "anchor-policy-dir"
+    policy_dir.mkdir()
+
+    # A. Anchored ledger: a malicious older record with a recomputed tag is refused; nothing is reset.
+    ledger_a = work / "anchor-ledger-a"
+    ledger_a.mkdir()
+    start_a = functools.partial(
+        _start_once, ledger=ledger_a, policy_dir=policy_dir, trust=trust
+    )
+    start_a(
+        ev,
+        "anchor.accepts_revision_3",
+        "revision 3 is accepted and anchored",
+        bundle=bundle("a3", "3"),
+        expect_start=True,
+        expect_substring="",
+    )
+    (ledger_a / "policy_watermark.json").write_text(
+        _authentic_record_text(pid, 1, digest_v1), encoding="utf-8"
+    )
+    start_a(
+        ev,
+        "anchor.recomputed_tag_older_record_refused",
+        "a malicious older record with a recomputed tag is refused against the database anchor",
+        bundle=bundle("a2", "2"),
+        expect_start=False,
+        expect_substring="rollback refused",
+    )
+    start_a(
+        ev,
+        "anchor.restored_from_anchor_on_valid_start",
+        "after the refusal, a valid start restores the record to the anchored revision",
+        bundle=bundle("a3b", "3"),
+        expect_start=True,
+        expect_substring="",
+    )
+    restored = record_version(ledger_a)
+    ev.record(
+        "anchor.record_restored_to_anchor",
+        "local_simulation",
+        "the filesystem record holds revision 3",
+        "3",
+        restored,
+        "passed" if restored == "3" else "failed",
+    )
+
+    # B. Bootstrap: a filesystem record with no anchor row is refused until an operator inserts a checked row.
+    ledger_b = work / "anchor-ledger-b"
+    ledger_b.mkdir()
+    (ledger_b / "policy_watermark.json").write_text(
+        _authentic_record_text(pid, 2, digest_v2), encoding="utf-8"
+    )
+    start_b = functools.partial(
+        _start_once, ledger=ledger_b, policy_dir=policy_dir, trust=trust
+    )
+    start_b(
+        ev,
+        "anchor.missing_anchor_refused",
+        "a filesystem record without an anchor row is refused",
+        bundle=bundle("b2", "2"),
+        expect_start=False,
+        expect_substring="bootstrap",
+    )
+    import psycopg
+
+    url_b = _database_url_for(ledger_b)
+    assert url_b is not None, (
+        "the local simulation needs a database for the bootstrap scenario"
+    )
+    with psycopg.connect(url_b, autocommit=True) as conn:
+        conn.execute(
+            "insert into policy_revision_anchor (policy_id, revision, digest_sha256) values (%s, 2, %s)",
+            (pid, digest_v2),
+        )
+    start_b(
+        ev,
+        "anchor.bootstrapped_row_accepted",
+        "after a checked bootstrap row, the same start is accepted",
+        bundle=bundle("b2b", "2"),
+        expect_start=True,
+        expect_substring="",
+    )
+
+    # C. Fresh database and ledger data with no record: refused as a first start.
+    ledger_c = work / "anchor-ledger-c"
+    ledger_c.mkdir()
+    (ledger_c / "audit_log__tenant-c.jsonl").write_text("{}\n", encoding="utf-8")
+    start_c = functools.partial(
+        _start_once, ledger=ledger_c, policy_dir=policy_dir, trust=trust
+    )
+    start_c(
+        ev,
+        "anchor.fresh_database_with_data_refused",
+        "ledger data with no record and no anchor is refused as a first start",
+        bundle=bundle("c2", "2"),
+        expect_start=False,
+        expect_substring="refusing to assume a first start",
+    )
+
+    # D. Staging without any database URL: refused, so the anchor cannot silently disappear.
+    port = _free_port()
+    env = base_env(
+        ledger=work / "anchor-ledger-d",
+        policy_dir=policy_dir,
+        environment="staging",
+        trust=trust,
+        api_key="k-anchor-d",
+        bind=f"127.0.0.1:{port}",
+    )
+    (work / "anchor-ledger-d").mkdir(exist_ok=True)
+    env["AIGOV_POLICY_BUNDLE_FILE"] = str(bundle("d2", "2"))
+    env["GOVAI_DATABASE_URL"] = ""
+    env["DATABASE_URL"] = ""
+    server, err = start_server(env, work)
+    if server is not None:
+        server.stop()
+    ev.record(
+        "anchor.no_database_url_refused",
+        "local_simulation",
+        "staging with a bundle and no database URL is refused",
+        "refused (message contains 'require a database URL')",
+        "started" if server is not None else "refused: " + last_error_line(err),
+        "passed" if server is None and "require a database URL" in err else "failed",
     )
 
 
@@ -1224,6 +1440,7 @@ def run_local(ev: Evidence, work: Path) -> None:
     run_rollback_e2e(ev, work, keys, trust)
     run_revision_e2e(ev, work, keys, trust)
     run_integrity_e2e(ev, work, keys, trust)
+    run_anchor_e2e(ev, work, keys, trust)
 
     # --- Development compatibility control: unsigned file still starts in dev.
     _startup_scenario(
@@ -2023,6 +2240,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
+    if not args.skip_local and _pg_admin_url() is None:
+        print(
+            f"local simulation needs {PG_ADMIN_ENV}: an admin URL on a throwaway PostgreSQL 18 server "
+            "(staging and production require a database for the revision anchor)",
+            file=sys.stderr,
+        )
+        return 1
     if not args.skip_local and not BINARY.exists():
         print(
             f"release binary not found: {BINARY}; run `cargo build --release --locked` in rust/",
@@ -2041,6 +2265,7 @@ def main(argv: list[str] | None = None) -> int:
             run_local(ev, work)
         finally:
             shutil.rmtree(work, ignore_errors=True)
+            _drop_created_databases()
     if live:
         run_live_target(ev, args)
 

@@ -214,7 +214,7 @@ pub async fn build_app_state() -> Result<AppState, String> {
         .ok()
         .filter(|s| !s.trim().is_empty());
     // Every fallible startup step has passed. Only now does a verified policy revision become accepted.
-    policy_store.commit_revisions()?;
+    policy_store.commit_revisions(&pool).await?;
     Ok(AppState {
         deployment_env,
         policy_store,

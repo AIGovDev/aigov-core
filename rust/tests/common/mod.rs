@@ -175,3 +175,39 @@ pub fn future() -> &'static str {
 pub fn past() -> &'static str {
     "2020-01-01T00:00:00Z"
 }
+
+/// A fresh, empty PostgreSQL database for one test, created on the server named by `AIGOV_TEST_PG_ADMIN_URL`.
+/// Returns `None` when the variable is unset, so PostgreSQL-backed tests are ignored rather than passed.
+/// Used only with throwaway test servers. Never point it at a shared or production server.
+pub async fn fresh_database_url() -> Option<String> {
+    let admin = std::env::var("AIGOV_TEST_PG_ADMIN_URL").ok()?;
+    let name = format!("aigov_anchor_{}", secrets_hex());
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&admin)
+        .await
+        .ok()?;
+    // `name` is built from hex digits only, so the statement is safe to assemble.
+    sqlx::query(sqlx::AssertSqlSafe(format!("create database \"{name}\"")))
+        .execute(&pool)
+        .await
+        .ok()?;
+    pool.close().await;
+    Some(replace_database(&admin, &name))
+}
+
+fn secrets_hex() -> String {
+    // Unique within and across test processes: a counter, the process id, and a timestamp.
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    format!("{:x}{:x}{:x}", std::process::id(), n, nanos)
+}
+
+fn replace_database(url: &str, name: &str) -> String {
+    let (base, _) = url.rsplit_once('/').unwrap_or((url, ""));
+    format!("{base}/{name}")
+}
