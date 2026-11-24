@@ -121,7 +121,9 @@ pub fn parse_version(raw: &str) -> Result<u64, String> {
         .map_err(|_| format!("policy version {raw:?} is out of range"))?;
     // The durable anchor stores revisions as a signed 64-bit integer.
     if v > i64::MAX as u64 {
-        return Err(format!("policy version {raw:?} exceeds the supported range"));
+        return Err(format!(
+            "policy version {raw:?} exceeds the supported range"
+        ));
     }
     Ok(v)
 }
@@ -208,7 +210,7 @@ pub fn read_loaded(ledger_dir: &Path) -> Result<Loaded, String> {
 
 fn parse_loaded(path: &Path, raw: &str) -> Result<Loaded, String> {
     let path = path.to_path_buf();
-    let probe: serde_json::Value = serde_json::from_str(&raw)
+    let probe: serde_json::Value = serde_json::from_str(raw)
         .map_err(|e| format!("policy watermark malformed at {}: {e}", path.display()))?;
     match probe.get("schema").and_then(|v| v.as_str()) {
         Some(SCHEMA) => {
@@ -233,7 +235,10 @@ fn parse_loaded(path: &Path, raw: &str) -> Result<Loaded, String> {
             let rec: OnDiskV1 = serde_json::from_value(probe)
                 .map_err(|e| format!("policy watermark malformed at {}: {e}", path.display()))?;
             if rec.schema != SCHEMA_V1 {
-                return Err(format!("policy watermark has unsupported schema {:?}", rec.schema));
+                return Err(format!(
+                    "policy watermark has unsupported schema {:?}",
+                    rec.schema
+                ));
             }
             Ok(Loaded {
                 wm: Watermark {
@@ -443,7 +448,6 @@ pub fn enforce(
     check(ledger_dir, policy_id, version_raw, digest_sha256)?.commit()
 }
 
-
 /// Read the filesystem record if it exists. A missing record is `None`, not an error. Refusals for a
 /// present but invalid record are unchanged. Used by the anchor, which decides what a missing record means.
 pub fn read_optional(ledger_dir: &Path) -> Result<Option<Watermark>, String> {
@@ -487,9 +491,9 @@ impl FsLock {
             use std::os::unix::fs::OpenOptionsExt;
             opts.custom_flags(libc::O_NOFOLLOW);
         }
-        let file = opts
-            .open(lock_path(ledger_dir))
-            .map_err(|e| format!("policy watermark lock unavailable (symbolic links are refused): {e}"))?;
+        let file = opts.open(lock_path(ledger_dir)).map_err(|e| {
+            format!("policy watermark lock unavailable (symbolic links are refused): {e}")
+        })?;
         lock_exclusive(&file)?;
         Ok(FsLock { _file: file })
     }

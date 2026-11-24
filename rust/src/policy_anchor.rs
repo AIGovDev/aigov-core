@@ -101,7 +101,8 @@ pub fn decide(
             if let Some((fr, fd)) = fs {
                 if fr == ar && fd != ad {
                     return Err(
-                        "filesystem record conflicts with the anchor at the same revision".to_string(),
+                        "filesystem record conflicts with the anchor at the same revision"
+                            .to_string(),
                     );
                 }
                 if fr > ar && cr < fr {
@@ -148,7 +149,9 @@ pub fn decide(
 }
 
 fn is_hex_digest(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn db_err(e: sqlx::Error) -> String {
@@ -163,7 +166,9 @@ fn db_err(e: sqlx::Error) -> String {
 /// Reconcile the filesystem record with the database anchor, and commit the revision. Fail closed on any error.
 pub async fn reconcile_and_commit(pool: &DbPool, p: &PendingAnchor) -> Result<(), String> {
     if !is_hex_digest(&p.digest_sha256) {
-        return Err("policy revision anchor: digest is not a lowercase SHA-256 hex string".to_string());
+        return Err(
+            "policy revision anchor: digest is not a lowercase SHA-256 hex string".to_string(),
+        );
     }
     let candidate_rev = policy_watermark::parse_version(&p.version_raw)?;
 
@@ -274,7 +279,10 @@ mod tests {
     fn first_start_inserts_the_anchor() {
         assert_eq!(
             d(None, None, (1, A), false).unwrap(),
-            Plan { fs_target: Some((1, A.into())), db: DbAction::Insert }
+            Plan {
+                fs_target: Some((1, A.into())),
+                db: DbAction::Insert
+            }
         );
     }
 
@@ -294,7 +302,10 @@ mod tests {
     fn revision_1_to_2_advances_and_2_to_1_is_refused() {
         assert_eq!(
             d(Some((1, A)), Some((1, A)), (2, B), false).unwrap(),
-            Plan { fs_target: Some((2, B.into())), db: DbAction::Advance }
+            Plan {
+                fs_target: Some((2, B.into())),
+                db: DbAction::Advance
+            }
         );
         let err = d(Some((2, B)), Some((2, B)), (1, A), false).unwrap_err();
         assert!(err.contains("rollback refused"), "{err}");
@@ -304,14 +315,20 @@ mod tests {
     fn same_revision_same_digest_is_idempotent() {
         assert_eq!(
             d(Some((2, A)), Some((2, A)), (2, A), false).unwrap(),
-            Plan { fs_target: None, db: DbAction::None }
+            Plan {
+                fs_target: None,
+                db: DbAction::None
+            }
         );
     }
 
     #[test]
     fn same_revision_different_digest_is_refused() {
         let err = d(Some((2, A)), Some((2, A)), (2, B), false).unwrap_err();
-        assert!(err.contains("same-revision content change refused"), "{err}");
+        assert!(
+            err.contains("same-revision content change refused"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -319,7 +336,10 @@ mod tests {
         // Restored older ledger volume: the record is at 1, the anchor is at 2, the bundle is 2.
         assert_eq!(
             d(Some((2, B)), Some((1, A)), (2, B), false).unwrap(),
-            Plan { fs_target: Some((2, B.into())), db: DbAction::None }
+            Plan {
+                fs_target: Some((2, B.into())),
+                db: DbAction::None
+            }
         );
     }
 
@@ -327,7 +347,10 @@ mod tests {
     fn deleted_filesystem_record_is_restored_from_the_anchor() {
         assert_eq!(
             d(Some((2, B)), None, (2, B), true).unwrap(),
-            Plan { fs_target: Some((2, B.into())), db: DbAction::None }
+            Plan {
+                fs_target: Some((2, B.into())),
+                db: DbAction::None
+            }
         );
     }
 
@@ -343,7 +366,10 @@ mod tests {
         // Crash after a filesystem write at revision 3, before the anchor commit.
         assert_eq!(
             d(Some((2, A)), Some((3, B)), (3, B), false).unwrap(),
-            Plan { fs_target: Some((3, B.into())), db: DbAction::Advance }
+            Plan {
+                fs_target: Some((3, B.into())),
+                db: DbAction::Advance
+            }
         );
     }
 
@@ -370,14 +396,17 @@ mod tests {
         // Re-signing the same content with a new key leaves the document digest unchanged.
         assert_eq!(
             d(Some((2, A)), Some((2, A)), (2, A), false).unwrap(),
-            Plan { fs_target: None, db: DbAction::None }
+            Plan {
+                fs_target: None,
+                db: DbAction::None
+            }
         );
     }
 
     #[test]
     fn digest_must_be_lowercase_hex() {
         assert!(is_hex_digest(A));
-        assert!(!is_hex_digest(&A.to_uppercase().replace('A', "A")));
+        assert!(!is_hex_digest(&A.to_uppercase()));
         assert!(!is_hex_digest("abc"));
         assert!(!is_hex_digest(&"g".repeat(64)));
     }
