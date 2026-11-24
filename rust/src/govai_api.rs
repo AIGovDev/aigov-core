@@ -213,6 +213,8 @@ pub async fn build_app_state() -> Result<AppState, String> {
         .or_else(|_| std::env::var("AIGOV_BASE_URL"))
         .ok()
         .filter(|s| !s.trim().is_empty());
+    // Every fallible startup step has passed. Only now does a verified policy revision become accepted.
+    policy_store.commit_revisions()?;
     Ok(AppState {
         deployment_env,
         policy_store,
