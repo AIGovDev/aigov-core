@@ -96,6 +96,100 @@ pub fn default_tenant_ledger_readable() -> bool {
     std::fs::File::open(p).is_ok()
 }
 
+/// Non-mutating readiness check for the ledger directory.
+///
+/// Readiness must not write to the ledger. Writability is proven once at startup by `validate_startup`,
+/// which fails closed. This check only confirms that the configured directory is still present. It never
+/// creates the directory and never writes a probe file.
+pub fn ledger_dir_present_for(configured: Option<&Path>, deployment_env: GovaiEnvironment) -> bool {
+    match configured {
+        Some(dir) => dir.is_dir(),
+        None => matches!(deployment_env, GovaiEnvironment::Dev),
+    }
+}
+
+/// Readiness form of `ledger_dir_present_for` using `GOVAI_LEDGER_DIR`.
+pub fn ledger_dir_present(deployment_env: GovaiEnvironment) -> bool {
+    let configured = env_ledger_dir_raw().map(PathBuf::from);
+    ledger_dir_present_for(configured.as_deref(), deployment_env)
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+
+    fn listing(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn readiness_check_does_not_write_to_a_present_ledger_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("audit_log.jsonl"), "{}\n").unwrap();
+        let before = listing(dir.path());
+        for _ in 0..5 {
+            assert!(ledger_dir_present_for(
+                Some(dir.path()),
+                GovaiEnvironment::Staging
+            ));
+        }
+        assert_eq!(
+            listing(dir.path()),
+            before,
+            "readiness must not create or delete files"
+        );
+    }
+
+    #[test]
+    fn readiness_does_not_depend_on_write_permission() {
+        // The write probe at startup needs write access. Readiness must only read, so a directory that
+        // is present but not writable (for example a read-only volume after startup) stays ready.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let ready = ledger_dir_present_for(Some(dir.path()), GovaiEnvironment::Staging);
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(ready, "readiness must not require write access");
+    }
+
+    #[test]
+    fn readiness_check_never_creates_a_missing_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("not-yet");
+        assert!(!ledger_dir_present_for(
+            Some(&missing),
+            GovaiEnvironment::Staging
+        ));
+        assert!(
+            !missing.exists(),
+            "readiness must not create the ledger directory"
+        );
+    }
+
+    #[test]
+    fn a_file_in_place_of_the_directory_is_not_ready() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("ledger");
+        std::fs::write(&file, "x").unwrap();
+        assert!(!ledger_dir_present_for(
+            Some(&file),
+            GovaiEnvironment::Staging
+        ));
+    }
+
+    #[test]
+    fn unset_directory_is_ready_only_in_dev() {
+        assert!(ledger_dir_present_for(None, GovaiEnvironment::Dev));
+        assert!(!ledger_dir_present_for(None, GovaiEnvironment::Staging));
+        assert!(!ledger_dir_present_for(None, GovaiEnvironment::Prod));
+    }
+}
+
 /// Startup validation:
 /// - **staging/prod**: `GOVAI_LEDGER_DIR` is required and must be a writable directory
 /// - **dev**: missing `GOVAI_LEDGER_DIR` is allowed but warns about ephemeral storage risk
