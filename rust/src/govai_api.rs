@@ -7,7 +7,7 @@ use crate::audit_api_key::{
     AuditKeyGateState, ResolvedLedgerTenant,
 };
 use crate::audit_export::build_audit_export_v1;
-use crate::audit_store::{append_record_atomic_with_run_count, verify_chain};
+use crate::audit_store::verify_chain;
 use crate::bundle::{
     bundle_document_value, bundle_sha256, collect_events_for_run, find_model_artifact_path,
     portable_evidence_digest_v1,
@@ -407,7 +407,28 @@ async fn post_evidence(
         return policy_violation_response(&policy_version, &v.to_string());
     }
 
-    let append_result = append_record_atomic_with_run_count(&log_path, event.clone());
+    // Events gated on an approval are checked again under the ledger lock, so a single approval cannot be
+    // consumed twice by concurrent requests. Other events keep the existing path.
+    let needs_locked_check = st
+        .policy_store
+        .event_type_requires_unconsumed_approval(&tenant_id, &event.event_type);
+    let locked_check = |path: &str| -> Result<(), String> {
+        if !needs_locked_check {
+            return Ok(());
+        }
+        let view = FileLedgerView::new(path);
+        st.policy_store
+            .enforce_ingest_for_request(&tenant_id, &event, &view)
+            .map_err(|v| v.to_string())
+    };
+    let append_result =
+        match crate::audit_store::append_record_checked(&log_path, event.clone(), &locked_check) {
+            Ok(v) => Ok(v),
+            Err(crate::audit_store::CheckedAppendError::Rejected(msg)) => {
+                return policy_violation_response(&policy_version, &msg);
+            }
+            Err(crate::audit_store::CheckedAppendError::Store(msg)) => Err(msg),
+        };
     match append_result {
         Ok((rec, pre_count)) => {
             runtime_metrics::inc_evidence_ingest("appended");

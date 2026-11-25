@@ -500,8 +500,40 @@ pub fn append_record_atomic_with_run_count(
     log_path: &str,
     event: EvidenceEvent,
 ) -> Result<(StoredRecord, usize), String> {
+    append_record_checked(log_path, event, &|_| Ok(())).map_err(|e| match e {
+        CheckedAppendError::Rejected(msg) | CheckedAppendError::Store(msg) => msg,
+    })
+}
+
+/// Why a checked append did not write.
+#[derive(Debug)]
+pub enum CheckedAppendError {
+    /// The check rejected the event (a policy decision). Nothing was written.
+    Rejected(String),
+    /// The ledger could not be read or written. Nothing was written.
+    Store(String),
+}
+
+impl From<String> for CheckedAppendError {
+    fn from(msg: String) -> Self {
+        CheckedAppendError::Store(msg)
+    }
+}
+
+/// Append an event, running `check` under the ledger lock after duplicate detection and before the write.
+///
+/// `check` receives the ledger path and reads the ledger as it stands at that moment. Because the lock is
+/// held, two checked appends that depend on the same prior state cannot both pass. This is what makes
+/// single-use approvals safe under concurrency. The lock is per ledger file, not per run.
+pub fn append_record_checked(
+    log_path: &str,
+    event: EvidenceEvent,
+    check: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(StoredRecord, usize), CheckedAppendError> {
     if append_fail_test_hook_active() {
-        return Err("test_simulated_append_failure".to_string());
+        return Err(CheckedAppendError::Store(
+            "test_simulated_append_failure".to_string(),
+        ));
     }
 
     // Ensure the ledger directory exists *before* we canonicalize for locking or open the file.
@@ -547,12 +579,14 @@ pub fn append_record_atomic_with_run_count(
     );
     let seen = load_or_rebuild_run_index(log_path, &event.run_id)?;
     if seen.contains(&event.event_id) {
-        return Err(format!(
+        return Err(CheckedAppendError::Store(format!(
             "duplicate event_id for run_id: event_id={} run_id={}",
             event.event_id, event.run_id
-        ));
+        )));
     }
     let pre_count: usize = seen.len();
+
+    check(log_path).map_err(CheckedAppendError::Rejected)?;
 
     eprintln!(
         "audit_append phase=before_repair log_path={} elapsed_ms={}",

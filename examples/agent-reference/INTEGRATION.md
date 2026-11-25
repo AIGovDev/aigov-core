@@ -1,91 +1,106 @@
-# Integrating AIGov enforcement with your agent
+# Integrating AIGov Core with your agent
 
-This guide is for wiring your own tools and approval process to the gate in
-`aigov_agent_reference`. Read the README first, which covers the decision order, the
-trust boundary, and the limits. The steps below assume your agent framework lets you pass
-custom tools. The example uses smolagents. The same approach works with other frameworks
-if you can route each tool call through one function.
+This guide is for connecting your own tools and approval process to AIGov Core. The integration this
+guide describes is the service-backed path: Core makes every authorization decision, and your agent
+process only submits evidence and runs a call once Core accepts it. Read the README first, for the
+decision table, the policy, and the open gaps. Read section 4 before you deploy anything.
+
+The reference code is in `aigov_agent_reference/core_gate.py` and `core_runner.py`. Copy those two
+modules and adapt the tool wrappers. The example uses smolagents, but any framework works if each tool
+call can be routed through one function.
 
 ## 1. Decide what needs a human
 
-Write down which actions are consequential: writes, admin changes, deployments, payments,
-anything that is hard to undo. Put their action types in
-`approval_required_action_types`. Everything else is decided by policy alone.
+List the consequential actions: writes, admin changes, deployments, payments, anything hard to
+undo. In your policy, put their tools on the write allowlist. Those are the only tools that need an
+approval. Everything else is a read, and Core decides it from the read allowlist alone.
 
 ## 2. Write the policy
 
-Start from `policies/example_policy.json`:
+Start from `policies/core_policy.unsigned.json`. Then change, in one reviewed file:
 
-- `agent.principal`: the identity your agent acts as.
-- `agent.allowed_tools`: the only tools the gate will run for that agent. Anything else is
-  refused, even if your framework exposes it.
-- `grants`: who may approve or read, and for which action types. The policy is signed when
-  it is loaded. Grants are the only way a human approver is authorized.
+- `tool_call.gates` (`requires_decision_enum`): the read tools.
+- `consequential_tool_call.gates`: the write tools (`requires_decision_enum`), and the approval gate
+  (`requires_unconsumed_approval`). Set `max_age_seconds` to your approval window. Minutes is typical;
+  the reference uses 5 seconds for the demo.
+- `human_approved.gates`: the approver allowlist (`requires_approver_allowlist`), and the freshness
+  check (`requires_timestamp_near_server_time`).
 
-Keep the policy in version control, and review changes like code.
+Sign the bundle with your own managed key, not the reference's generated key. Core verifies the
+signature at startup. Keep the unsigned policy in version control and review changes like code. A test
+in the reference shows the pattern: the committed file must equal what the code produces.
 
-## 3. Route every tool through the gate
+## 3. Route every tool call through Core
 
-Each tool your agent can call should look like `build_governed_tools` in `agent.py`: it
-takes the agent's arguments, builds a `ToolCall`, calls `gate.request`, and returns a string
-the model can read. Do not give the agent any other handle to the sandbox, the token
-authority, or the approval store.
+Each tool wrapper should:
 
-Do not expose a code-executing tool unless it runs in its own sandbox with no access to
-your tool objects. See "Controlled execution and bypass paths" in the README.
+1. Submit the call to Core as an evidence event: `tool_call` for reads, `consequential_tool_call` for
+   writes (with the approval event id and an argument binding hash). `CoreRunner` does this.
+2. Read Core's answer. Only `ALLOW` (a `200` with a `record_hash`) allows the call.
+3. Run the operation only after `ALLOW`. Record the Core `record_hash` next to your operation's result.
+4. On a refusal, let the model see the reason, and do not run anything.
 
-## 4. Provide a real approval channel
+Do not expose any other handle to your systems to the agent: no raw API client, no credentials, no
+direct database access. Those are the paths around the gate.
 
-`ApprovalStore.decide` records the decision and the approver's identity. Your deployment
-must call it only from an authenticated human channel (for example a reviewer's web UI
-behind your identity provider), and the agent must have no path to that channel. Then:
+For writes with no approval yet, the reference records an approval request in Core and reports
+`REQUIRE_APPROVAL`. Show that request to the approver, along with the exact arguments, because the
+approval is bound to them.
 
-- Show the reviewer the exact call: tool, arguments, and repository. The approval is
-  bound to the argument hash, so a changed call needs a new approval.
-- Set the approval lifetime (`ttl_seconds`) for your risk tolerance. Expired approvals are
-  denied.
-- Revoke an approval through `RevocationList` when a reviewer withdraws it. The gate checks
-  revocation again immediately before execution.
+## 4. Fix the approver identity before you deploy (open gap)
 
-## 5. Replace the in-process keys before production
+This is the most important item. Core checks that the approver's name is on the allowlist. It does not
+check who submitted the approval. Today, anything that can post `human_approved` with your tenant's API
+key can approve on a person's behalf. In the reference, the simulated human uses the agent's key, so
+the agent could approve its own writes.
 
-The reference generates its execution-token key and its policy key in the process. Both
-must be managed keys in production, held where the agent cannot read them. The benchmark's
-`kms_key_provider.py` and `sql_key_provider.py` show the interfaces. Also replace the
-SQLite replay store with the PostgreSQL store (`SqlNonceStore("postgresql", dsn=...)`) if
-more than one host runs the agent.
+Before production:
 
-## 6. Keep the decision log and approval store protected
+- Give approvals their own credential, separate from the agent's. Only the approval interface holds it.
+- Have Core map that credential to a named approver, and check the approver field against the
+  authenticated identity. This is a small Core change. It is not implemented in this example.
+- Keep the approval interface on an authenticated human channel (for example, your identity provider
+  behind a reviewer UI). The agent must have no path to it.
 
-The decision log detects edits and deletions. It is not signed. The approval store is a
-SQLite file. Both need file permissions that the agent process cannot write, and the log
-should be copied to storage you control. Verify it with `verify_evidence` after each run,
-and alert on any failure.
+Until this is done, treat a Core approval as the approver's name as typed, and do not rely on it for
+consequential actions.
 
-## 7. Test your wiring before you rely on it
+## 5. Keep the sandbox and the record connected
 
-Copy the regression tests in `python/tests/test_agent_reference_integration.py` and point
-them at your tools. At minimum, check:
+The reference runner issues the sandbox token after Core accepts the call, in the same process. The
+sandbox checks the token, not Core's record. For production, bind the token to Core's `record_hash`, or
+put the sandbox behind a service that verifies the record. Otherwise a process that holds the sandbox
+can run calls Core never saw.
 
-- A call with no approval is held (`REQUIRE_APPROVAL`) and does not run.
-- A call that the policy does not allow is denied and does not run.
-- A replayed, expired, revoked, or altered-argument approval is denied.
-- Making the approval store unavailable stops execution (`INDETERMINATE`).
-- The sandbox or your system of record has no change after a denied call.
+## 6. Operate on the evidence
 
-## 8. Operate it
+- Verify each run with `GET /verify/{run_id}` (Core's chain check) and read the export with
+  `GET /api/export/{run_id}`. The export's `evidence_hashes.log_chain` gives each event's record hash.
+- Check that every executed call's `record_hash` matches the export. The reference's benchmark does this
+  for every case.
+- Alert on `INDETERMINATE` (Core unreachable). Fix the dependency first; do not retry blindly.
+- Watch the refusal reasons. A spike in `tool_not_permitted` can mean prompt injection or a
+  misconfigured agent.
 
-- Watch the denial reasons. A spike in `tool_not_permitted_for_agent` can mean a
-  prompt-injection attempt or a misconfigured agent.
-- Treat `INDETERMINATE` as an outage, not a refusal. Fix the dependency first.
-- Review policy changes and approver grants on the same cadence as other access reviews.
+## 7. Limits to plan around
 
-## What this does not cover
+- **Single host.** The ledger lock serializes writes within one Core process. Do not run two Core
+  processes on one ledger.
+- **No revocation.** Core has no event for withdrawing an approval. Until one exists, an approval is
+  good until it expires or is used.
+- **Expiry is server-clock based.** An approval's age is measured from its (freshness-checked)
+  timestamp. Clock skew between the approval interface and Core is bounded by the freshness check.
+- **The agent cannot be trusted with approvals.** See section 4.
+- **Not prompt-injection immunity.** Core limits what an injected instruction can do. It does not stop
+  a model from being manipulated.
 
-- It does not make the model resist prompt injection. It limits what an injected
-  instruction can do.
-- It does not authenticate your approvers. That is your identity provider's job.
-- It does not replace the AIGov Core service. The example keeps its evidence locally.
-  Connecting a deployment to the service is separate work.
-- It does not restrict the agent's network access or other process-level access. Do that
-  in your deployment.
+## 8. Test your wiring
+
+Copy `python/tests/test_agent_reference_core.py` and point it at your tools and policy. At minimum:
+
+- A write with no approval is held and does not run.
+- A read-only call for an allowed tool runs.
+- A tool not on the allowlist is refused.
+- A replayed, expired, or changed-argument approval is refused.
+- Core unreachable means nothing runs, and the same call succeeds once Core returns.
+- Core's chain verifies, and every executed call's record hash matches Core's export.
