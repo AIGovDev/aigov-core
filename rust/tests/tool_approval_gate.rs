@@ -11,8 +11,8 @@ use aigov_audit::audit_store::{
 };
 use aigov_audit::ledger_view::FileLedgerView;
 use aigov_audit::policy_engine::{
-    enforce_ingest_at, EventTypeRule, FieldType, Gate, LedgerView, PayloadSchema, RuntimePolicy,
-    UnknownEventTypeBehavior,
+    enforce_ingest_at, EventTypeRule, FieldType, Gate, LedgerView, PayloadSchema,
+    PrincipalRelation, RuntimePolicy, UnknownEventTypeBehavior,
 };
 use aigov_audit::schema::EvidenceEvent;
 use chrono::{DateTime, Utc};
@@ -314,4 +314,323 @@ fn concurrent_calls_cannot_both_consume_one_approval() {
     }
     assert_eq!(accepted, 1, "exactly one call may consume the approval");
     assert_eq!(rejected, threads - 1);
+}
+
+// ---- Trusted execution: authenticated approvers, self-approval, revocation, and receipts ----
+
+fn trusted_policy() -> RuntimePolicy {
+    let mut event_rules = BTreeMap::new();
+    event_rules.insert(
+        "tool_approval_requested".to_string(),
+        rule(
+            &[],
+            &["tool_name", "tool_call_id", "args_binding_hash"],
+            vec![],
+        ),
+    );
+    event_rules.insert(
+        "human_approved".to_string(),
+        rule(
+            &[],
+            &[
+                "approver",
+                "decision",
+                "scope",
+                "tool_call_id",
+                "args_binding_hash",
+                "tool_name",
+                "policy_revision",
+                "request_event_id",
+            ],
+            vec![
+                Gate::RequiresFieldMatchesField {
+                    field: "approver".into(),
+                    other_field: "authenticated_identity".into(),
+                    code: "approver_identity_mismatch".into(),
+                    message: "policy_violation: approver does not match the authenticated identity"
+                        .into(),
+                },
+                Gate::RequiresPrincipalRelation {
+                    reference_field: "request_event_id".into(),
+                    relation: PrincipalRelation::Distinct,
+                    code: "self_approval_refused".into(),
+                    message: "policy_violation: an approver may not approve their own request"
+                        .into(),
+                },
+            ],
+        ),
+    );
+    event_rules.insert(
+        "human_approval_revoked".to_string(),
+        rule(
+            &[],
+            &["approval_event_id", "reason"],
+            vec![Gate::RequiresPrincipalRelation {
+                reference_field: "approval_event_id".into(),
+                relation: PrincipalRelation::Same,
+                code: "revocation_not_by_approver".into(),
+                message: "policy_violation: only the approver who gave the approval may revoke it"
+                    .into(),
+            }],
+        ),
+    );
+    event_rules.insert(
+        "consequential_tool_call".to_string(),
+        rule(
+            &[],
+            &[
+                "tool_name",
+                "approval_event_id",
+                "tool_call_id",
+                "args_binding_hash",
+                "policy_revision",
+            ],
+            vec![Gate::RequiresUnconsumedApproval {
+                approval_field: "approval_event_id".into(),
+                scope: "tool_execution".into(),
+                max_age_seconds: 300,
+                linkage_keys: vec![
+                    "tool_name".into(),
+                    "tool_call_id".into(),
+                    "args_binding_hash".into(),
+                    "policy_revision".into(),
+                ],
+                code: "approval_required".into(),
+                message: "policy_violation: a human approval is required".into(),
+            }],
+        ),
+    );
+    event_rules.insert(
+        "execution_receipt".to_string(),
+        rule(
+            &[],
+            &[
+                "execution_authorization_id",
+                "tool_name",
+                "args_binding_hash",
+                "outcome",
+                "result_digest",
+            ],
+            vec![Gate::RequiresIssuedAuthorization {
+                authorization_field: "execution_authorization_id".into(),
+                code: "authorization_not_issued".into(),
+                message: "policy_violation: no issued authorization matches this receipt".into(),
+            }],
+        ),
+    );
+    RuntimePolicy {
+        policy_id: "trusted-test".into(),
+        version: "1".into(),
+        unknown_event_types: UnknownEventTypeBehavior::Reject,
+        event_rules,
+    }
+}
+
+fn check_trusted(ledger: &[EvidenceEvent], event: &EvidenceEvent) -> Result<(), String> {
+    enforce_ingest_at(
+        &trusted_policy(),
+        event,
+        &Ledger(ledger.to_vec()),
+        now_at("2026-11-25T10:01:00Z"),
+    )
+    .map_err(|v| v.message)
+}
+
+/// A human_approved event carrying the authenticated fields Core stamps server-side.
+fn approval_by(
+    event_id: &str,
+    approver_identity: &str,
+    principal: &str,
+    claimed: &str,
+    request_id: &str,
+) -> EvidenceEvent {
+    ev(
+        event_id,
+        "human_approved",
+        "2026-11-25T10:00:00Z",
+        json!({
+            "approver": claimed,
+            "decision": "approve",
+            "scope": "tool_execution",
+            "tool_name": "create_file",
+            "tool_call_id": "call-1",
+            "args_binding_hash": "h1",
+            "policy_revision": "1",
+            "request_event_id": request_id,
+            "authenticated_identity": approver_identity,
+            "authenticated_principal": principal,
+        }),
+    )
+}
+
+fn request_by(event_id: &str, principal: &str) -> EvidenceEvent {
+    ev(
+        event_id,
+        "tool_approval_requested",
+        "2026-11-25T09:59:00Z",
+        json!({"tool_name": "create_file", "tool_call_id": "call-1", "args_binding_hash": "h1",
+               "authenticated_principal": principal, "policy_revision": "1"}),
+    )
+}
+
+fn write_call(event_id: &str, approval_id: &str) -> EvidenceEvent {
+    ev(
+        event_id,
+        "consequential_tool_call",
+        "2026-11-25T10:01:00Z",
+        json!({"tool_name": "create_file", "tool_call_id": "call-1", "args_binding_hash": "h1",
+               "approval_event_id": approval_id, "policy_revision": "1"}),
+    )
+}
+
+#[test]
+fn approver_naming_someone_else_is_refused() {
+    let req = request_by("req-1", "agent:bot");
+    let appr = approval_by(
+        "apr-1",
+        "maintainer@acme-corp.example",
+        "approver:maintainer",
+        "lead@acme-corp.example",
+        "req-1",
+    );
+    let err = check_trusted(&[req], &appr).unwrap_err();
+    assert!(err.contains("reason=approver_identity_mismatch"), "{err}");
+}
+
+#[test]
+fn approval_of_your_own_request_is_refused() {
+    let req = request_by("req-1", "approver:maintainer");
+    let appr = approval_by(
+        "apr-1",
+        "maintainer@acme-corp.example",
+        "approver:maintainer",
+        "maintainer@acme-corp.example",
+        "req-1",
+    );
+    let err = check_trusted(&[req], &appr).unwrap_err();
+    assert!(err.contains("reason=self_approval_refused"), "{err}");
+}
+
+#[test]
+fn approval_by_a_different_approver_is_accepted() {
+    let req = request_by("req-1", "agent:bot");
+    let appr = approval_by(
+        "apr-1",
+        "maintainer@acme-corp.example",
+        "approver:maintainer",
+        "maintainer@acme-corp.example",
+        "req-1",
+    );
+    assert!(check_trusted(&[req], &appr).is_ok());
+}
+
+#[test]
+fn only_the_approver_may_revoke() {
+    let req = request_by("req-1", "agent:bot");
+    let appr = approval_by(
+        "apr-1",
+        "maintainer@acme-corp.example",
+        "approver:maintainer",
+        "maintainer@acme-corp.example",
+        "req-1",
+    );
+    let by_other = ev(
+        "rev-1",
+        "human_approval_revoked",
+        "2026-11-25T10:00:30Z",
+        json!({"approval_event_id": "apr-1", "reason": "x", "authenticated_principal": "approver:lead"}),
+    );
+    let err = check_trusted(&[req.clone(), appr.clone()], &by_other).unwrap_err();
+    assert!(err.contains("reason=revocation_not_by_approver"), "{err}");
+    let by_same = ev(
+        "rev-2",
+        "human_approval_revoked",
+        "2026-11-25T10:00:30Z",
+        json!({"approval_event_id": "apr-1", "reason": "x", "authenticated_principal": "approver:maintainer"}),
+    );
+    assert!(check_trusted(&[req, appr], &by_same).is_ok());
+}
+
+#[test]
+fn revoked_approval_is_refused_and_revocation_is_not_a_consumption() {
+    let req = request_by("req-1", "agent:bot");
+    let appr = approval_by(
+        "apr-1",
+        "maintainer@acme-corp.example",
+        "approver:maintainer",
+        "maintainer@acme-corp.example",
+        "req-1",
+    );
+    let revoked = ev(
+        "rev-1",
+        "human_approval_revoked",
+        "2026-11-25T10:00:30Z",
+        json!({"approval_event_id": "apr-1", "reason": "withdrawn", "authenticated_principal": "approver:maintainer"}),
+    );
+    let call = write_call("call-ev-1", "apr-1");
+    let err = check_trusted(&[req, appr, revoked], &call).unwrap_err();
+    assert!(err.contains("reason=approval_revoked"), "{err}");
+    assert!(
+        !err.contains("already_consumed"),
+        "a revocation must not count as a consumption: {err}"
+    );
+}
+
+#[test]
+fn receipt_needs_the_matching_issued_authorization_and_is_recorded_once() {
+    let issued = ev(
+        "call-ev-1",
+        "consequential_tool_call",
+        "2026-11-25T10:01:00Z",
+        json!({"tool_name": "create_file", "args_binding_hash": "h1", "approval_event_id": "apr-1",
+               "execution_authorization_id": "auth_1"}),
+    );
+    let receipt = |id: &str, digest: &str| {
+        ev(
+            id,
+            "execution_receipt",
+            "2026-11-25T10:02:00Z",
+            json!({"execution_authorization_id": "auth_1", "tool_name": "create_file", "args_binding_hash": digest,
+               "outcome": "success", "result_digest": "r"}),
+        )
+    };
+
+    assert!(check_trusted(&[issued.clone()], &receipt("rcpt-1", "h1")).is_ok());
+
+    let err = check_trusted(&[issued.clone()], &receipt("rcpt-2", "OTHER")).unwrap_err();
+    assert!(err.contains("reason=authorization_not_issued"), "{err}");
+
+    let first = receipt("rcpt-1", "h1");
+    let err = check_trusted(&[issued.clone(), first], &receipt("rcpt-3", "h1")).unwrap_err();
+    assert!(
+        err.contains("reason=authorization_not_issued"),
+        "a second receipt must be refused: {err}"
+    );
+
+    let unknown = ev(
+        "rcpt-4",
+        "execution_receipt",
+        "2026-11-25T10:02:00Z",
+        json!({"execution_authorization_id": "auth_none", "tool_name": "create_file", "args_binding_hash": "h1",
+               "outcome": "success", "result_digest": "r"}),
+    );
+    assert!(check_trusted(&[issued], &unknown).is_err());
+}
+
+#[test]
+fn read_authorization_can_be_receipted() {
+    let read = ev(
+        "read-1",
+        "tool_call",
+        "2026-11-25T10:01:00Z",
+        json!({"tool_name": "read_repo_metadata", "args_binding_hash": "rh", "execution_authorization_id": "auth_r"}),
+    );
+    let receipt = ev(
+        "rcpt-r",
+        "execution_receipt",
+        "2026-11-25T10:02:00Z",
+        json!({"execution_authorization_id": "auth_r", "tool_name": "read_repo_metadata", "args_binding_hash": "rh",
+               "outcome": "success", "result_digest": "r"}),
+    );
+    assert!(check_trusted(&[read], &receipt).is_ok());
 }

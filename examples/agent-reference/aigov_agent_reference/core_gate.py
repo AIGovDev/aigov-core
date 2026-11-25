@@ -1,22 +1,18 @@
-"""Service-backed tool gate: every decision is made by AIGov Core over HTTP.
+"""HTTP client for AIGov Core, with the decision mapping used by the reference.
 
-The agent process never decides authorization. For each tool call it submits an evidence event
-to Core's ``POST /evidence``. Core evaluates the signed policy and either accepts the event
-(``200``, with a ``record_hash``) or refuses it (``400 policy_violation``). Only an accepted event
-allows the sandbox to run the call.
+Each client holds one API key, which is one principal. The agent, the approver, and the executor each use their
+own client and their own key, so Core knows which principal made each call.
 
-Decision mapping from Core's answer:
+Decision mapping from Core's answer to one submission:
 
-- accepted (200)                              -> ALLOW, with Core's record_hash
-- refused, reason ``approval_not_found``      -> REQUIRE_APPROVAL (no human decision recorded yet)
-- refused, any other policy reason            -> DENY, with Core's reason
-- Core unreachable, timeout, or 5xx           -> INDETERMINATE (fail closed; nothing runs)
+- accepted (``200``, with a ``record_hash``)          -> ALLOW. For a consequential call, the answer also carries
+  Core's signed execution authorization.
+- refused, reason ``approval_not_found``              -> REQUIRE_APPROVAL (no human decision recorded yet)
+- refused by policy (``400``), or by role or tenant
+  (``401``/``403``)                                    -> DENY, with Core's reason
+- Core unreachable, timeout, or 5xx                   -> INDETERMINATE (fail closed; nothing runs)
 
-The reason is taken from Core's message (``... reason=<code>``). The reference does not invent it.
-
-Core's answer is written to the ledger before the sandbox runs, so the write-ahead record lives in
-Core. A refusal is also recorded as ``tool_call_blocked``, with Core's reason copied from its
-response. That record is the reference's note of Core's refusal. Core's ``400`` is the decision.
+The reason is read from Core's own message (``... reason=<code>``) or error code. The reference does not decide it.
 """
 
 from __future__ import annotations
@@ -57,26 +53,31 @@ class CoreDecision:
     record_hash: str | None
     http_status: int | None
     latency_ms: float
+    policy_revision: str | None = None
+    authorization: dict[str, Any] | None = None
 
 
-def _error_message(body: Any) -> str:
+def _error(body: Any) -> tuple[str, str]:
+    """Return (error_code, message) from a Core error body."""
     if isinstance(body, dict):
         err = body.get("error")
         if isinstance(err, dict):
-            return str(err.get("message", ""))
-        return str(body.get("message", ""))
-    return str(body)
+            return str(err.get("code", "")), str(err.get("message", ""))
+        return str(body.get("code", "")), str(body.get("message", ""))
+    return "", str(body)
 
 
-def _reason_from_refusal(message: str) -> str:
+def _reason_from_refusal(message: str, code: str) -> str:
     match = REASON_RE.search(message)
     if match:
         return match.group(1)
+    if code and code != "policy_violation":
+        return code.lower()
     return "policy_violation"
 
 
 class CoreClient:
-    """Thin wrapper over the SDK runtime client, plus the read-only verification calls."""
+    """One principal's view of Core. Use one client per API key."""
 
     def __init__(
         self, base_url: str, api_key: str, *, timeout_sec: float = 10.0
@@ -87,23 +88,37 @@ class CoreClient:
             self._base, api_key=api_key, timeout_sec=timeout_sec
         )
         self._timeout = timeout_sec
+        # (event_type, latency_ms) for every evidence submission made through this client.
+        self.samples: list[tuple[str, float]] = []
 
     def submit(self, event: EvidenceEvent) -> CoreDecision:
+        decision = self._submit(event)
+        self.samples.append((event.event_type, decision.latency_ms))
+        return decision
+
+    def _submit(self, event: EvidenceEvent) -> CoreDecision:
         started = time.perf_counter()
         try:
             result = self._sdk.submit_evidence(event)
         except ServiceHTTPError as exc:
             latency = (time.perf_counter() - started) * 1000.0
+            code, message = _error(exc.body)
             if exc.status_code == 400:
-                message = _error_message(exc.body)
-                reason = _reason_from_refusal(message)
+                reason = _reason_from_refusal(message, code)
                 decision = (
                     Decision.REQUIRE_APPROVAL
                     if reason in REQUIRE_APPROVAL_REASONS
                     else Decision.DENY
                 )
+                return CoreDecision(decision, reason, None, None, 400, latency)
+            if exc.status_code in (401, 403):
                 return CoreDecision(
-                    decision, reason, None, None, exc.status_code, latency
+                    Decision.DENY,
+                    code.lower() or f"http_{exc.status_code}",
+                    None,
+                    None,
+                    exc.status_code,
+                    latency,
                 )
             return CoreDecision(
                 Decision.INDETERMINATE,
@@ -124,8 +139,16 @@ class CoreClient:
                 latency,
             )
         latency = (time.perf_counter() - started) * 1000.0
+        raw = result.raw if isinstance(result.raw, dict) else {}
         return CoreDecision(
-            Decision.ALLOW, "accepted", event.event_id, result.record_hash, 200, latency
+            Decision.ALLOW,
+            "accepted",
+            event.event_id,
+            result.record_hash,
+            200,
+            latency,
+            policy_revision=str(raw.get("policy_version", "")) or None,
+            authorization=raw.get("execution_authorization"),
         )
 
     def _get(self, path: str) -> tuple[int, Any]:
@@ -146,6 +169,18 @@ class CoreClient:
             except json.JSONDecodeError:
                 body = None
             return exc.code, body
+
+    def status(self, run_id: str, authorization_id: str) -> tuple[int, Any]:
+        """Executor status check (``GET /execution-authorizations/{run}/{id}/status``). Raises on no answer."""
+        return self._get(
+            f"/execution-authorizations/{run_id}/{authorization_id}/status"
+        )
+
+    def health(self) -> bool:
+        try:
+            return self._get("/health")[0] == 200
+        except OSError:
+            return False
 
     def verify_run(self, run_id: str) -> tuple[bool, str]:
         """Core's own chain verification for one run (``GET /verify/{run_id}``)."""

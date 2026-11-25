@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Start a local AIGov Core container with PostgreSQL and a signed policy, for the reference demo.
+"""Start a local AIGov Core container with PostgreSQL and the trusted-execution reference configuration.
 
-Everything runs on this machine: a private Docker network, a PostgreSQL 18 container, and the Core
-image built from this repository. Credentials are generated per run and written only to a state
-directory outside the repository. Nothing is deployed and no external service is contacted.
+Everything runs on this machine: a private Docker network, a PostgreSQL 18 container, and the Core image built
+from this repository. Identities, API keys, the policy signing key, and the authorization signing key are generated
+per run (see ``trust_setup.py``) and written only to a state directory outside the repository, with owner-only
+permissions. Nothing is deployed, and no external service is contacted.
 
 Usage (from the repository root):
     python examples/agent-reference/service/start_local_core.py start
     python examples/agent-reference/service/start_local_core.py stop
 
-``start`` prints the environment to export for the demo. ``stop`` removes the containers, the
-network, and the ledger volume.
+``start`` prints the state-file path and the Core URL. The demo and the tests read the identities from the state
+file. ``stop`` removes the containers, the network, the ledger volume, and the state file.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ import argparse
 import json
 import os
 import secrets
-import shutil
 import subprocess
 import sys
 import time
@@ -28,7 +28,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(REPO_ROOT / "examples" / "agent-reference"))
+
+from trust_setup import build
 
 IMAGE = os.environ.get("GOVAI_REF_IMAGE", "aigov-core:agent-reference")
 PG_IMAGE = "postgres:18-alpine"
@@ -40,21 +43,22 @@ HOST_PORT = 18088
 STATE_DIR = Path.home() / ".cache" / "aigov-agent-reference"
 DB_NAME = "govai"
 DB_USER = "govai"
+CONTAINER_POLICY_DIR = "/app/policies"
 
 
-def docker(
-    *args: str, check: bool = True, capture: bool = True
-) -> subprocess.CompletedProcess[str]:
+def docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["docker", *args], check=check, capture_output=capture, text=True
+        ["docker", *args], check=check, capture_output=True, text=True
     )
 
 
 def docker_ok(*args: str) -> bool:
-    result = subprocess.run(
-        ["docker", *args], capture_output=True, text=True, check=False
+    return (
+        subprocess.run(
+            ["docker", *args], capture_output=True, text=True, check=False
+        ).returncode
+        == 0
     )
-    return result.returncode == 0
 
 
 def wait_until(predicate, timeout_s: float, what: str) -> None:
@@ -70,21 +74,6 @@ def wait_until(predicate, timeout_s: float, what: str) -> None:
     raise SystemExit(f"timed out waiting for {what}: {last_error}")
 
 
-def build_policy(state: Path) -> tuple[str, str]:
-    from aigov_agent_reference.core_policy import (
-        signing_keys,
-        trust_store_json,
-        write_signed_policy,
-    )
-
-    seed, pub = signing_keys()
-    bundle_dir = state / "policies"
-    if bundle_dir.exists():
-        shutil.rmtree(bundle_dir)
-    write_signed_policy(bundle_dir, seed)
-    return str(bundle_dir), trust_store_json(pub)
-
-
 def start() -> None:
     if not docker_ok("info"):
         raise SystemExit("Docker is not running. Start Docker, then run this again.")
@@ -97,9 +86,15 @@ def start() -> None:
         print(f"building {IMAGE} from {REPO_ROOT} ...", flush=True)
         subprocess.run(["docker", "build", "-t", IMAGE, str(REPO_ROOT)], check=True)
 
+    built = build(STATE_DIR)
+    env = dict(built["env"])
+    # Inside the container the policy lives at a fixed mount point.
+    env["AIGOV_POLICY_DIR"] = CONTAINER_POLICY_DIR
+    env["AIGOV_POLICY_BUNDLE_FILE"] = (
+        f"{CONTAINER_POLICY_DIR}/policy.bundle.staging.json"
+    )
     pg_password = secrets.token_urlsafe(24)
-    api_key = "aigov-ref-" + secrets.token_urlsafe(24)
-    bundle_dir, trust_json = build_policy(STATE_DIR)
+    bundle_dir = STATE_DIR / "policies"
 
     docker("network", "create", NETWORK, check=False)
     docker("volume", "create", LEDGER_VOLUME, check=False)
@@ -124,9 +119,8 @@ def start() -> None:
         "PostgreSQL",
     )
 
-    database_url = f"postgres://{DB_USER}:{pg_password}@{PG_NAME}:5432/{DB_NAME}"
-    api_keys_json = json.dumps({api_key: "ref-tenant"})
-    docker(
+    env["DATABASE_URL"] = f"postgres://{DB_USER}:{pg_password}@{PG_NAME}:5432/{DB_NAME}"
+    run_args = [
         "run",
         "-d",
         "--name",
@@ -136,25 +130,15 @@ def start() -> None:
         "-p",
         f"127.0.0.1:{HOST_PORT}:8088",
         "-v",
-        f"{bundle_dir}:/app/policies:ro",
+        f"{bundle_dir}:{CONTAINER_POLICY_DIR}:ro",
         "-v",
         f"{LEDGER_VOLUME}:/var/lib/govai/ledger",
-        "-e",
-        "AIGOV_ENVIRONMENT=staging",
-        "-e",
-        "AIGOV_POLICY_BUNDLE_FILE=/app/policies/policy.bundle.staging.json",
-        "-e",
-        f"AIGOV_POLICY_TRUST_ED25519_JSON={trust_json}",
-        "-e",
-        f"GOVAI_API_KEYS={api_key}",
-        "-e",
-        f"GOVAI_API_KEYS_JSON={api_keys_json}",
-        "-e",
-        f"DATABASE_URL={database_url}",
-        "-e",
-        "GOVAI_AUTO_MIGRATE=true",
-        IMAGE,
-    )
+    ]
+    for key, value in env.items():
+        run_args += ["-e", f"{key}={value}"]
+    run_args.append(IMAGE)
+    docker(*run_args)
+
     url = f"http://127.0.0.1:{HOST_PORT}"
     wait_until(
         lambda: urllib.request.urlopen(url + "/health", timeout=3).status == 200,
@@ -162,11 +146,11 @@ def start() -> None:
         "Core /health",
     )
 
-    state_file.write_text(json.dumps({"core_url": url, "api_key": api_key}, indent=2))
+    state_file.write_text(json.dumps({**built["state"], "core_url": url}, indent=2))
     state_file.chmod(0o600)
     print("Core is up.")
-    print(f"  export GOVAI_CORE_URL={url}")
-    print(f"  export GOVAI_CORE_API_KEY={api_key}")
+    print(f"  Identities and keys: {state_file} (owner-only). Not printed.")
+    print(f"  Core URL: {url}")
     print("Then run: python examples/agent-reference/run_core_demo.py")
 
 
@@ -178,7 +162,7 @@ def stop() -> None:
     state_file = STATE_DIR / "state.json"
     if state_file.exists():
         state_file.unlink()
-    print("Stopped. Containers, network, and ledger volume removed.")
+    print("Stopped. Containers, network, ledger volume, and state file removed.")
 
 
 def main() -> int:
@@ -187,10 +171,7 @@ def main() -> int:
     )
     parser.add_argument("command", choices=["start", "stop"])
     args = parser.parse_args()
-    if args.command == "start":
-        start()
-    else:
-        stop()
+    start() if args.command == "start" else stop()
     return 0
 
 

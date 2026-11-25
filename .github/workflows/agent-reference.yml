@@ -1,6 +1,7 @@
 # AIGov agent reference integration. Two jobs, both required to run (no skip counts as a pass):
 #   - in-process: the deterministic regression tests (no Core, no database).
-#   - core-service: every decision made by a release AIGov Core built in this job, with a PostgreSQL 18 service.
+#   - core-service: trusted execution against a release AIGov Core built in this job (separate agent, approver, and
+#     executor identities; Core-issued authorizations; executor verification), with a PostgreSQL 18 service.
 #
 # Both jobs fail if a test is skipped or missing: the JUnit counts are checked against the expected numbers.
 
@@ -108,7 +109,7 @@ jobs:
             --port 18088 \
             --state-dir "${RUNNER_TEMP}/aigov-ref-core"
 
-      - name: Run the 12 service-backed tests against the live Core
+      - name: Run the 27 service-backed tests against the live trusted Core
         env:
           AIGOV_REF_REQUIRE_CORE: "1"
         run: |
@@ -125,16 +126,16 @@ jobs:
           root = ET.parse(sys.argv[1]).getroot()
           suite = root if root.tag == "testsuite" else root[0]
           counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
-          expected = {"tests": 12, "failures": 0, "errors": 0, "skipped": 0}
+          expected = {"tests": 27, "failures": 0, "errors": 0, "skipped": 0}
           if counts != expected:
               sys.exit(f"service-backed reference tests: expected {expected}, got {counts}")
-          print("service-backed reference tests: all 12 executed and passed")
+          print("service-backed reference tests: all 27 executed and passed")
           PY
 
-      - name: Service-backed demonstration and benchmark (small)
+      - name: Trusted-execution demonstration and benchmark (small)
         run: |
           set -euo pipefail
-          python examples/agent-reference/run_core_demo.py --cases 2 --results-dir "${RUNNER_TEMP}/core-results"
+          python examples/agent-reference/run_core_demo.py --cases 2 --results-dir "${RUNNER_TEMP}/core-results" --workdir "${RUNNER_TEMP}/trusted-workdir"
 
       - name: Upload the service-backed results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

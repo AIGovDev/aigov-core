@@ -163,6 +163,41 @@ pub enum Gate {
         code: String,
         message: String,
     },
+
+    /// Require two payload fields to hold the same non-empty string. Used to check that an approver
+    /// named in the payload is the authenticated identity of the request.
+    RequiresFieldMatchesField {
+        field: String,
+        other_field: String,
+        code: String,
+        message: String,
+    },
+
+    /// Require a relation between this event's authenticated principal and the authenticated principal of the
+    /// event named by `reference_field` (an `event_id` in the same run). `same` forbids self-approval for
+    /// revocation (the approver who revokes must be the one who approved). `distinct` forbids an approver from
+    /// approving their own request.
+    RequiresPrincipalRelation {
+        reference_field: String,
+        relation: PrincipalRelation,
+        code: String,
+        message: String,
+    },
+
+    /// Require that the authorization named in `authorization_field` was issued for a consequential call in this
+    /// run, with the same tool and argument digest, and that no execution receipt already exists for it.
+    RequiresIssuedAuthorization {
+        authorization_field: String,
+        code: String,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrincipalRelation {
+    Same,
+    Distinct,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -377,12 +412,22 @@ fn enforce_gate(
                 return Err(fail("approval_missing"));
             }
             let events: Vec<EvidenceEvent> = ledger.iter_events_for_run(&event.run_id).collect();
+            // Only calls consume an approval. A revocation names the approval too, but it does not use it.
             let consumed = events.iter().any(|e| {
                 e.event_id != event.event_id
+                    && e.event_type != "human_approval_revoked"
                     && e.payload.get(approval_field).and_then(|v| v.as_str()) == Some(want.as_str())
             });
             if consumed {
                 return Err(fail("approval_already_consumed"));
+            }
+            let revoked = events.iter().any(|e| {
+                e.event_type == "human_approval_revoked"
+                    && e.payload.get("approval_event_id").and_then(|v| v.as_str())
+                        == Some(want.as_str())
+            });
+            if revoked {
+                return Err(fail("approval_revoked"));
             }
             let Some(approval) = events
                 .iter()
@@ -423,6 +468,127 @@ fn enforce_gate(
             }
             if age > *max_age_seconds {
                 return Err(fail("approval_expired"));
+            }
+            Ok(())
+        }
+        Gate::RequiresFieldMatchesField {
+            field,
+            other_field,
+            code,
+            message,
+        } => {
+            let a = event
+                .payload
+                .get(field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            let b = event
+                .payload
+                .get(other_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if !a.is_empty() && a == b {
+                Ok(())
+            } else {
+                Err(PolicyViolation {
+                    code: code.clone(),
+                    message: message.clone(),
+                })
+            }
+        }
+        Gate::RequiresPrincipalRelation {
+            reference_field,
+            relation,
+            code,
+            message,
+        } => {
+            let fail = || PolicyViolation {
+                code: code.clone(),
+                message: message.clone(),
+            };
+            let reference = event
+                .payload
+                .get(reference_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if reference.is_empty() {
+                return Err(fail());
+            }
+            let referenced = ledger
+                .iter_events_for_run(&event.run_id)
+                .find(|e| e.event_id == reference)
+                .ok_or_else(fail)?;
+            let mine = event
+                .payload
+                .get("authenticated_principal")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let theirs = referenced
+                .payload
+                .get("authenticated_principal")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if mine.is_empty() || theirs.is_empty() {
+                return Err(fail());
+            }
+            let ok = match relation {
+                PrincipalRelation::Same => mine == theirs,
+                PrincipalRelation::Distinct => mine != theirs,
+            };
+            if ok {
+                Ok(())
+            } else {
+                Err(fail())
+            }
+        }
+        Gate::RequiresIssuedAuthorization {
+            authorization_field,
+            code,
+            message,
+        } => {
+            let fail = || PolicyViolation {
+                code: code.clone(),
+                message: message.clone(),
+            };
+            let auth_id = event
+                .payload
+                .get(authorization_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if auth_id.is_empty() {
+                return Err(fail());
+            }
+            let events: Vec<EvidenceEvent> = ledger.iter_events_for_run(&event.run_id).collect();
+            let issued = events.iter().find(|e| {
+                (e.event_type == "consequential_tool_call" || e.event_type == "tool_call")
+                    && e.payload
+                        .get("execution_authorization_id")
+                        .and_then(|v| v.as_str())
+                        == Some(auth_id.as_str())
+            });
+            let Some(issued) = issued else {
+                return Err(fail());
+            };
+            let same_call = issued.payload.get("tool_name") == event.payload.get("tool_name")
+                && issued.payload.get("args_binding_hash")
+                    == event.payload.get("args_binding_hash");
+            if !same_call {
+                return Err(fail());
+            }
+            let receipted = events.iter().any(|e| {
+                e.event_type == "execution_receipt"
+                    && e.event_id != event.event_id
+                    && e.payload.get(authorization_field).and_then(|v| v.as_str())
+                        == Some(auth_id.as_str())
+            });
+            if receipted {
+                return Err(fail());
             }
             Ok(())
         }
