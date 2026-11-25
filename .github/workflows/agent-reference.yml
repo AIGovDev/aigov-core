@@ -1,0 +1,144 @@
+# AIGov agent reference integration. Two jobs, both required to run (no skip counts as a pass):
+#   - in-process: the deterministic regression tests (no Core, no database).
+#   - core-service: every decision made by a release AIGov Core built in this job, with a PostgreSQL 18 service.
+#
+# Both jobs fail if a test is skipped or missing: the JUnit counts are checked against the expected numbers.
+
+name: agent-reference
+
+on:
+  pull_request:
+    branches: [main, staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  in-process:
+    name: agent-reference-in-process
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install AIGov with the agent-reference extra
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e "./python[dev,agent-reference]"
+
+      - name: Run the 20 in-process reference tests
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_agent_reference_integration.py -q --junitxml="${RUNNER_TEMP}/inproc.xml"
+
+      - name: Require every in-process test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/inproc.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 20, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"in-process reference tests: expected {expected}, got {counts}")
+          print("in-process reference tests: all 20 executed and passed")
+          PY
+
+  core-service:
+    name: agent-reference-core-service
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: govai
+          POSTGRES_USER: aigov_test
+          POSTGRES_PASSWORD: aigov_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aigov_test -d govai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Install AIGov with the agent-reference extra
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e "./python[dev,agent-reference]"
+
+      - name: Build the release Core
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin aigov_audit
+
+      - name: Start Core with the signed reference policy
+        run: |
+          set -euo pipefail
+          python examples/agent-reference/service/start_core_binary.py \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "${DATABASE_URL}" \
+            --port 18088 \
+            --state-dir "${RUNNER_TEMP}/aigov-ref-core"
+
+      - name: Run the 12 service-backed tests against the live Core
+        env:
+          AIGOV_REF_REQUIRE_CORE: "1"
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_agent_reference_core.py -q --junitxml="${RUNNER_TEMP}/core.xml"
+
+      - name: Require every service-backed test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/core.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 12, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"service-backed reference tests: expected {expected}, got {counts}")
+          print("service-backed reference tests: all 12 executed and passed")
+          PY
+
+      - name: Service-backed demonstration and benchmark (small)
+        run: |
+          set -euo pipefail
+          python examples/agent-reference/run_core_demo.py --cases 2 --results-dir "${RUNNER_TEMP}/core-results"
+
+      - name: Upload the service-backed results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent-reference-core-results
+          path: ${{ runner.temp }}/core-results
+          if-no-files-found: error

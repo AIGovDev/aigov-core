@@ -208,6 +208,23 @@ impl PolicyStore {
         enforce_ingest(&p.runtime, event, ledger)
     }
 
+    /// True when the active policy gates this event type on an unconsumed approval.
+    pub fn event_type_requires_unconsumed_approval(
+        &self,
+        tenant_id: &str,
+        event_type: &str,
+    ) -> bool {
+        let p = self.resolve_for_request(tenant_id);
+        p.runtime.event_rules.get(event_type).is_some_and(|rule| {
+            rule.gates.iter().any(|g| {
+                matches!(
+                    g,
+                    crate::policy_engine::Gate::RequiresUnconsumedApproval { .. }
+                )
+            })
+        })
+    }
+
     pub fn deployment_env(&self) -> GovaiEnvironment {
         self.deployment_env
     }

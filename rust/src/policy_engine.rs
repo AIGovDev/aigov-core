@@ -141,6 +141,28 @@ pub enum Gate {
         code: String,
         message_prefix: String,
     },
+
+    /// Require that the event's `ts_utc` is within `max_skew_seconds` of the server's clock at ingest.
+    /// Used on approval events, so an approval cannot be backdated to look fresh later.
+    RequiresTimestampNearServerTime {
+        max_skew_seconds: i64,
+        code: String,
+        message: String,
+    },
+
+    /// Require an unconsumed, in-date approval for this event. The payload field `approval_field` holds the
+    /// approval's `event_id`. The approval must be a `human_approved` event in the same run, with decision
+    /// `approve`, the given `scope`, matching `linkage_keys`, and an age (server clock minus its `ts_utc`) of
+    /// at most `max_age_seconds`. No other event in the run may already reference the same approval.
+    /// Evaluated under the ledger lock, so two concurrent events cannot both consume one approval.
+    RequiresUnconsumedApproval {
+        approval_field: String,
+        scope: String,
+        max_age_seconds: i64,
+        linkage_keys: Vec<String>,
+        code: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,6 +216,16 @@ pub fn enforce_ingest(
     event: &EvidenceEvent,
     ledger: &dyn LedgerView,
 ) -> Result<(), PolicyViolation> {
+    enforce_ingest_at(policy, event, ledger, chrono::Utc::now())
+}
+
+/// As `enforce_ingest`, with the server time supplied by the caller (used by tests and by the locked append).
+pub fn enforce_ingest_at(
+    policy: &RuntimePolicy,
+    event: &EvidenceEvent,
+    ledger: &dyn LedgerView,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), PolicyViolation> {
     let Some(rule) = policy.event_rules.get(event.event_type.as_str()) else {
         return match policy.unknown_event_types {
             UnknownEventTypeBehavior::Allow => Ok(()),
@@ -210,16 +242,29 @@ pub fn enforce_ingest(
     rule.payload_schema.validate(&event.payload)?;
 
     for gate in rule.gates.iter() {
-        enforce_gate(gate, event, ledger)?;
+        enforce_gate(gate, event, ledger, now).map_err(with_reason_code)?;
     }
 
     Ok(())
+}
+
+/// Append the gate code as a machine-readable `reason=<code>` token, unless the message already has one.
+/// Clients use this token to tell refusals apart without parsing the prose.
+fn with_reason_code(v: PolicyViolation) -> PolicyViolation {
+    if v.message.contains("reason=") {
+        return v;
+    }
+    PolicyViolation {
+        message: format!("{} reason={}", v.message, v.code),
+        code: v.code,
+    }
 }
 
 fn enforce_gate(
     gate: &Gate,
     event: &EvidenceEvent,
     ledger: &dyn LedgerView,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), PolicyViolation> {
     match gate {
         Gate::RequiresEventType {
@@ -289,6 +334,97 @@ fn enforce_gate(
                     message: message.clone(),
                 })
             }
+        }
+        Gate::RequiresTimestampNearServerTime {
+            max_skew_seconds,
+            code,
+            message,
+        } => {
+            let fail = || PolicyViolation {
+                code: code.clone(),
+                message: message.clone(),
+            };
+            let ts = chrono::DateTime::parse_from_rfc3339(&event.ts_utc)
+                .map_err(|_| fail())?
+                .with_timezone(&chrono::Utc);
+            let skew = (ts - now).num_seconds().abs();
+            if skew <= *max_skew_seconds {
+                Ok(())
+            } else {
+                Err(fail())
+            }
+        }
+        Gate::RequiresUnconsumedApproval {
+            approval_field,
+            scope,
+            max_age_seconds,
+            linkage_keys,
+            code,
+            message,
+        } => {
+            let fail = |reason: &str| PolicyViolation {
+                code: code.clone(),
+                message: format!("{message} reason={reason}"),
+            };
+            let want = event
+                .payload
+                .get(approval_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if want.is_empty() {
+                return Err(fail("approval_missing"));
+            }
+            let events: Vec<EvidenceEvent> = ledger.iter_events_for_run(&event.run_id).collect();
+            let consumed = events.iter().any(|e| {
+                e.event_id != event.event_id
+                    && e.payload.get(approval_field).and_then(|v| v.as_str()) == Some(want.as_str())
+            });
+            if consumed {
+                return Err(fail("approval_already_consumed"));
+            }
+            let Some(approval) = events
+                .iter()
+                .find(|e| e.event_type == "human_approved" && e.event_id == want)
+            else {
+                return Err(fail("approval_not_found"));
+            };
+            let field = |k: &str| {
+                approval
+                    .payload
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+            };
+            if field("decision") != "approve" {
+                return Err(fail("approval_not_approved"));
+            }
+            if field("scope") != scope {
+                return Err(fail("approval_scope_mismatch"));
+            }
+            for k in linkage_keys.iter() {
+                let a = event.payload.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                let b = approval
+                    .payload
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if a.trim().is_empty() || a != b {
+                    return Err(fail("approval_linkage_mismatch"));
+                }
+            }
+            let granted = chrono::DateTime::parse_from_rfc3339(&approval.ts_utc)
+                .map_err(|_| fail("approval_timestamp_invalid"))?
+                .with_timezone(&chrono::Utc);
+            let age = (now - granted).num_seconds();
+            if age < -5 {
+                return Err(fail("approval_in_future"));
+            }
+            if age > *max_age_seconds {
+                return Err(fail("approval_expired"));
+            }
+            Ok(())
         }
         Gate::RequiresHumanApprovedForPromotion {
             code,
