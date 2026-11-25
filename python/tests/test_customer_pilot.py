@@ -1,9 +1,9 @@
 """Customer pilot: checks that need no running Core. CI runs these on every change.
 
 They cover what the pilot depends on for correctness without a server: the reference policy is unchanged by the
-parametrization, the pilot's policy and identities are generated as configured, the tool registry routes the pilot's
-tools, and the synthetic records behave as the workflow assumes. The live run (``examples/customer-pilot/pilot.py``) is
-the end-to-end check and runs in its own CI job.
+parametrization, the pilot's policy and identities are generated as configured, the pilot's tool registry is complete,
+and the synthetic records behave as the workflow assumes. The live run (``examples/customer-pilot/pilot.py``) is the
+end-to-end check and runs in its own CI job.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ pytest.importorskip(
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PILOT_DIR = REPO_ROOT / "examples" / "customer-pilot"
 REF_DIR = REPO_ROOT / "examples" / "agent-reference"
-for p in (str(PILOT_DIR), str(REF_DIR), str(REF_DIR / "service")):
+for p in (str(PILOT_DIR), str(REF_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -31,12 +31,11 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 import pilot_config
 from aigov_agent_reference.core_policy import policy_document
-from aigov_agent_reference.core_trusted import TOOL_ACTIONS, args_digest
+from aigov_py.trusted import args_binding_hash
 from pilot_workflow import RecordStore
-from trust_setup import build
 
 
-def test_reference_policy_default_is_unchanged_by_parametrization():
+def test_reference_policy_default_is_unchanged_by_the_sdk_builder():
     committed = json.loads(
         (REF_DIR / "policies" / "core_policy.unsigned.json").read_text()
     )
@@ -59,11 +58,22 @@ def test_pilot_policy_uses_pilot_tools_approvers_and_ttl():
     assert f'"max_age_seconds": {pilot_config.APPROVAL_MAX_AGE_SECONDS}' in text
 
 
-def test_pilot_tools_are_registered_with_their_resource_keys():
-    for tool, (action, _) in pilot_config.TOOLS.items():
-        assert TOOL_ACTIONS[tool] == action
-    digest = args_digest(
-        "update_customer_record",
+def test_the_delete_tool_is_registered_but_on_no_allowlist():
+    text = json.dumps(pilot_config.pilot_policy_document())
+    assert "delete_customer_record" in pilot_config.PILOT_TOOLS
+    assert (
+        "delete_customer_record"
+        not in pilot_config.READ_TOOLS + pilot_config.WRITE_TOOLS
+    )
+    assert text.count("delete_customer_record") == 0
+
+
+def test_pilot_tools_are_registered_with_their_actions_and_resource_keys():
+    for name, spec in pilot_config.PILOT_TOOLS.items():
+        assert spec.name == name
+        assert spec.resource_key == "customer_id"
+    digest = args_binding_hash(
+        pilot_config.PILOT_TOOLS["update_customer_record"],
         {"customer_id": "CUST-1002", "changes": {"tier": "gold"}},
     )
     assert len(digest) == 64
@@ -71,15 +81,7 @@ def test_pilot_tools_are_registered_with_their_resource_keys():
 
 def test_generated_identities_are_distinct_and_role_correct():
     with tempfile.TemporaryDirectory() as tmp:
-        built = build(
-            Path(tmp),
-            approver_identities=pilot_config.APPROVER_IDENTITIES,
-            document=pilot_config.pilot_policy_document(),
-            tenant=pilot_config.TENANT,
-            agent_principal=pilot_config.AGENT_IDENTITY,
-            executor_principal=pilot_config.EXECUTOR_IDENTITY,
-            executor_audience=pilot_config.EXECUTOR_AUDIENCE,
-        )
+        built = pilot_config.generate(Path(tmp))
     keys = built["state"]["keys"]
     assert len(set(keys.values())) == len(keys), "every principal has its own key"
     assert set(built["state"]["approver_identities"]) == {
@@ -88,7 +90,7 @@ def test_generated_identities_are_distinct_and_role_correct():
         "outsider",
     }
     principals = json.loads(built["env"]["GOVAI_PRINCIPALS_JSON"])
-    roles = {}
+    roles: dict[str, list[str]] = {}
     for entry in principals.values():
         roles.setdefault(entry["role"], []).append(entry["principal"])
     assert sorted(roles["approver"]) == [

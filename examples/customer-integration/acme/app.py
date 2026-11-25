@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from aigov_integration import Integration, IntegrationConfig, Tool
+from aigov_py.trusted import Integration, IntegrationConfig, Tool
 
 CONFIG = IntegrationConfig(
     tenant="acme-finance",

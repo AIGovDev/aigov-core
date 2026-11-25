@@ -3,8 +3,13 @@
 This guide is for a developer who wants AIGov Core to govern the consequential actions of their own agent: which tools
 the agent may call, which of them need a named human to approve, and what evidence is kept.
 
-It is built on the trusted-execution code in `examples/agent-reference` and the launcher in `examples/customer-pilot`.
-Your application needs no Core internals. It calls one small interface, in `examples/customer-integration/aigov_integration.py`.
+Your application needs no Core internals and nothing from `examples/`. It imports the public SDK:
+
+```python
+from aigov_py.trusted import Integration, IntegrationConfig, Tool, start_core, stop_core
+```
+
+The full API, with the trust boundaries and production limits, is in `docs/trusted-execution-sdk.md`.
 
 You can run the working examples before reading further:
 
@@ -67,6 +72,9 @@ Approval freshness is `approval_max_age_seconds` (30 in the examples). This is a
 approval process needs, typically minutes.
 
 ## 4. The flow your application runs
+
+Before the first run, apply the executor store's migration to the store file once (the section "The executor store" in
+`docs/trusted-execution-sdk.md` has the snippet). The store refuses to start without it.
 
 ```python
 integ = Integration(CONFIG, core_url, state, out_dir, performer)
