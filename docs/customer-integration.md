@@ -163,3 +163,30 @@ your identity and key management, and your approval process. See `docs/customer-
 Section 7 of the acceptance checklist lists what a production deployment still needs. In short: an identity provider for
 approvers and the executor, a managed key store with rotation for the authorization key, a shared executor store with the
 same atomic reservation, reconciliation of reservations without receipts, and a reviewed approval window.
+
+## 10. Running it in production: restarts, unknown outcomes, reconciliation
+
+Your executor process must do two things that the examples do not show:
+
+1. **Recover at startup.** Before it accepts new calls, call `executor.recover()`. It settles what the store and Core
+   show: resumes a reservation that never started (once), delivers receipts that are still pending, and marks an
+   execution whose worker died as `outcome_unknown`. It is safe to call any number of times, and it never repeats an
+   action whose outcome is unknown.
+
+2. **Treat `reconciliation_required` as a case for a person.** When an execution's outcome is unknown, the executor will
+   not retry it. An operator checks the external system and records a signed finding. The procedure is in
+   `docs/operations/executor-store-runbook.md`, section 7. The library calls are in `docs/trusted-execution-sdk.md`,
+   "Reconciliation of an unknown outcome".
+
+Operate the store with the operator tool: `python -m aigov_py.trusted.store_admin report --db <file>` gives the state
+counts, the reconciliation backlog, the missing and pending receipts, and the latency measures. Back it up as the runbook
+describes, and run an upgrade only with the executor stopped.
+
+The guarantees, stated precisely:
+
+- An action runs at most once per authorization on one host. Core and the store both refuse a second attempt.
+- A crash never causes a second run. An action whose outcome is unknown waits for signed evidence.
+- A lost receipt is re-sent without repeating the action.
+- Nothing here guarantees exactly-once execution in your external system. The performer receives a stable idempotency key
+  (`execution_key(authorization_id)`). Use it wherever your system deduplicates on a key, and verify that system's guarantee
+  before you rely on it. Otherwise the reconciliation step above is the only safe path after an unknown outcome.

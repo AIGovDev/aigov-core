@@ -1,0 +1,51 @@
+{
+  "label": "staging",
+  "package": "/private/tmp/claude-502/-Users-monikadvorackova/edf18241-9e22-4cbd-b618-d7bf6dcafc35/scratchpad/staging-wt/python/aigov_py/trusted/__init__.py",
+  "controls": {
+    "C1 crash in the middle of the side effect": {
+      "process_died": true,
+      "store_state_after_crash": "reserved",
+      "restart_retry": "authorization_replayed",
+      "restart_recover": null,
+      "side_effect_count": 1,
+      "can_tell_the_action_ran": false
+    },
+    "C2 receipt lost after Core stored it": {
+      "process_died": true,
+      "core_receipts": 1,
+      "store_receipt_after_crash": null,
+      "restart_recover": null,
+      "store_receipt_after_restart": null,
+      "store_agrees_with_core": false,
+      "side_effect_count": 1
+    },
+    "C3 two workers race for one authorization": {
+      "executed_by": 1,
+      "side_effect_count": 1,
+      "refusals": [
+        "authorization_receipt_recorded",
+        "authorization_replayed"
+      ]
+    },
+    "C4 external system fails mid-call": {
+      "first_call_exit": 1,
+      "first_call_result": "unhandled: RuntimeError: connection reset by the external system",
+      "store_state": "reserved",
+      "retry_after_failure": "authorization_replayed",
+      "side_effect_count": 1,
+      "outcome_recorded_as_unknown": false
+    },
+    "C5 recorded outcome edited after the fact": {
+      "edit_accepted": true,
+      "detected_by_store_check": "no check exists"
+    },
+    "C6 capabilities": {
+      "schema_version_recorded": 0,
+      "versioned_migrations_tool": false,
+      "reconciliation_by_signed_evidence": false,
+      "recovery_after_restart": false,
+      "operational_report": false,
+      "append_only_history": false
+    }
+  }
+}

@@ -3,7 +3,7 @@
 #   - core-service: trusted execution against a release AIGov Core built in this job (separate agent, approver, and
 #     executor identities; Core-issued authorizations; executor verification), with a PostgreSQL 18 service.
 #   - customer-pilot: the customer pilot end to end (synthetic data) against a release Core, with its own PostgreSQL 18
-#     service. It must pass every check and produce its report.
+#     service. It must pass every check and produce its report. It also runs the executor recovery validation.
 #
 # Both jobs fail if a test is skipped or missing: the JUnit counts are checked against the expected numbers.
 
@@ -119,6 +119,27 @@ jobs:
           if counts != expected:
               sys.exit(f"SDK unit tests: expected {expected}, got {counts}")
           print("SDK unit tests: all 27 executed and passed")
+          PY
+
+      - name: Run the executor lifecycle, crash-recovery, reconciliation, and migration tests (no Core)
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_executor_lifecycle.py -q --junitxml="${RUNNER_TEMP}/lifecycle.xml"
+
+      - name: Require every lifecycle test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/lifecycle.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 43, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"lifecycle tests: expected {expected}, got {counts}")
+          print("lifecycle tests: all 43 executed and passed")
           PY
 
   core-service:
@@ -319,6 +340,46 @@ jobs:
             --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
             --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_quickstart" \
             --port 18299
+
+      - name: Create an isolated database for the recovery validation
+        run: |
+          set -euo pipefail
+          python -m pip install -q "psycopg[binary]>=3.3.9"
+          python - <<'PY'
+          import psycopg
+
+          with psycopg.connect("postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai", autocommit=True) as conn:
+              conn.execute("DROP DATABASE IF EXISTS govai_recovery")
+              conn.execute("CREATE DATABASE govai_recovery")
+          print("created govai_recovery")
+          PY
+
+      - name: Executor recovery against a release Core and PostgreSQL (crashes, reconciliation, outage, upgrades)
+        run: |
+          set -euo pipefail
+          python scripts/executor_recovery_live.py \
+            --mode binary \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_recovery" \
+            --port 18455 \
+            --out "${RUNNER_TEMP}/executor-recovery"
+          python - "${RUNNER_TEMP}/executor-recovery/recovery-live.json" <<'PY'
+          import json
+          import sys
+
+          data = json.load(open(sys.argv[1]))
+          failed = [c for c in data["checks"] if not c["ok"]]
+          if not data["passed"] or failed:
+              sys.exit(f"executor recovery: {len(failed)} check(s) failed: {failed[:3]}")
+          print(f"executor recovery: {len(data['checks'])} checks passed against a release Core")
+          PY
+
+      - name: Upload the executor recovery results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: executor-recovery-results
+          path: ${{ runner.temp }}/executor-recovery
+          if-no-files-found: error
 
       - name: Upload the integration validation output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

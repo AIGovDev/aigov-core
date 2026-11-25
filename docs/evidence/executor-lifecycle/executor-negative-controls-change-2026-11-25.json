@@ -1,0 +1,66 @@
+{
+  "label": "change",
+  "package": "/Users/monikadvorackova/verdict-scratch/agentref/python/aigov_py/trusted/__init__.py",
+  "controls": {
+    "C1 crash in the middle of the side effect": {
+      "process_died": true,
+      "store_state_after_crash": "started",
+      "restart_retry": "authorization_replayed",
+      "restart_recover": [
+        {
+          "authorization_id": "auth_6653032637324f6dab2d1f2148d03d5e",
+          "run_id": "run-lifecycle",
+          "from_state": "started",
+          "action": "skipped",
+          "detail": "a live worker holds this execution"
+        }
+      ],
+      "side_effect_count": 1,
+      "can_tell_the_action_ran": true
+    },
+    "C2 receipt lost after Core stored it": {
+      "process_died": true,
+      "core_receipts": 1,
+      "store_receipt_after_crash": null,
+      "restart_recover": [
+        {
+          "authorization_id": "auth_208eba439ad74a5193e807d7a9b4d0cc",
+          "run_id": "run-lifecycle",
+          "from_state": "succeeded",
+          "action": "receipt_recorded",
+          "detail": "evidence re-sent; the action was not repeated"
+        }
+      ],
+      "store_receipt_after_restart": "execution_receipt-6f2cc017c6424415be06dd7ab456808a",
+      "store_agrees_with_core": true,
+      "side_effect_count": 1
+    },
+    "C3 two workers race for one authorization": {
+      "executed_by": 1,
+      "side_effect_count": 1,
+      "refusals": [
+        "authorization_receipt_recorded"
+      ]
+    },
+    "C4 external system fails mid-call": {
+      "first_call_exit": 0,
+      "first_call_result": "outcome_unknown",
+      "store_state": "reconciliation_required",
+      "retry_after_failure": "authorization_replayed",
+      "side_effect_count": 1,
+      "outcome_recorded_as_unknown": true
+    },
+    "C5 recorded outcome edited after the fact": {
+      "edit_accepted": true,
+      "detected_by_store_check": true
+    },
+    "C6 capabilities": {
+      "schema_version_recorded": 2,
+      "versioned_migrations_tool": true,
+      "reconciliation_by_signed_evidence": true,
+      "recovery_after_restart": true,
+      "operational_report": true,
+      "append_only_history": true
+    }
+  }
+}

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -27,7 +26,7 @@ from aigov_py.trusted import (
     Decision,
     ExecutionStore,
     Executor,
-    executor_store_migration,
+    migrate,
     offline_evidence_checks,
 )
 from pilot_config import (
@@ -41,8 +40,7 @@ from pilot_config import (
 def _apply_migration(path: Path) -> None:
     """Apply the executor store migration (out of band, before first use). Customers do this with their own tooling."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
-        conn.executescript(executor_store_migration())
+    migrate(path, backup_dir=None)
 
 
 CUSTOMERS: dict[str, dict[str, Any]] = {

@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import copy
 import json
-import sqlite3
 import sys
 import time
 import uuid
@@ -28,7 +27,7 @@ from aigov_py.trusted import (
     ApproverActor,
     CoreClient,
     Integration,
-    executor_store_migration,
+    migrate,
     start_core,
     stop_core,
     verify_authorization_signature,
@@ -75,8 +74,7 @@ def new_run(
 def _apply_migration(path: Path) -> None:
     """The executor store's migration, applied once to each run's store file before the run starts."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
-        conn.executescript(executor_store_migration())
+    migrate(path, backup_dir=None)
 
 
 def pay_args(ledger: AcmeLedger, invoice: str = "INV-2001") -> dict[str, Any]:

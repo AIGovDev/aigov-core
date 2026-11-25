@@ -51,6 +51,11 @@ def perform(tool: str, arguments: dict, execution_id: str) -> dict:
 
 A performer is required. The SDK has no default side effect.
 
+The performer receives an idempotency key as its third argument: `execution_key(authorization_id)`, a value that is the
+same for every attempt at one authorization, including a resume after a crash. Pass it to your external system wherever
+that system deduplicates on a key. Without such a system, the key does nothing, and nothing is guaranteed (section
+"Idempotency and single use").
+
 ### One call, end to end
 
 ```python
@@ -106,23 +111,135 @@ holds a credential, and Core refuses its approvals by policy. A customer normall
 
 ## The executor store
 
-The executor records each reservation in a local SQLite file. The SDK does not create that file's table. A store
-without the table refuses to start (`ExecutionStoreSchemaError`), and the message names the step that fixes it.
+The executor records each execution durably in a local SQLite file. The file is one host's state; it is not a shared
+store. Schema management is out of band: an operator applies the versioned migrations with
+`python -m aigov_py.trusted.store_admin migrate --db <file> --backup-dir <dir>`. The executor never creates or upgrades a
+table, and it refuses to open a file whose schema version is not exactly `SCHEMA_VERSION` (currently 2). The operator
+procedure is in `docs/operations/executor-store-runbook.md`.
 
-The schema is a versioned migration, `0001_executor_store.sql`, shipped as package data. An operator applies it once,
-before first use, with their own tooling. Re-running it is safe:
+## The execution lifecycle
 
-```python
-import sqlite3
-from aigov_py.trusted import executor_store_migration
+Each authorization has one execution, which moves through these states:
 
-with sqlite3.connect("executor.sqlite") as conn:
-    conn.executescript(executor_store_migration())   # once, out of band, before first use
+```
+reserved -> started -> succeeded | failed | outcome_unknown -> reconciliation_required -> reconciled
+reserved -> failed        (refused before any side effect: revoked, expired, not authorized, arguments unavailable)
 ```
 
-This follows the repository's rule that shipped packages do not create database tables at runtime
-(`docs/operations/runtime-schema-ownership.md`). Where the migration file should live under that rule is a decision for
-the repository owners; it is flagged in the audit report.
+- `reserved`: the authorization was received, verified, checked against Core, and reserved. Its arguments are stored, so
+  it can be resumed after a crash.
+- `started`: written before the performer is called, with a lease. A crash after this point has an unknown outcome.
+- `succeeded` / `failed`: the performer returned a definite result. The outcome and a pending receipt are written in one
+  transaction.
+- `outcome_unknown` -> `reconciliation_required`: the performer raised, or a worker died with its lease expired. These two
+  states are recorded together. **They are never retried automatically.**
+- `reconciled`: signed evidence from an authorized reconciler was applied.
+
+Every transition is checked against a fixed table (`lifecycle.ALLOWED`) inside the transaction that records it. An illegal
+transition is refused and writes nothing. Each row stores the authorization id, the executor identity, the tool, the
+argument digest, and the policy revision.
+
+Concurrency: a reservation is atomic, so of several workers racing for one authorization only one reserves it. Core
+also refuses an authorization once it has a receipt, so a worker that arrives later is refused by Core's status check.
+
+## History
+
+Every transition appends one entry to `execution_events`. The table cannot be updated or deleted (triggers). Each entry
+carries a hash of its content and of the previous entry. `verify_history()` recomputes the chain, and detects an altered,
+reordered, or removed entry. The rows in `executions` are a projection of the history: `verify_projection()` checks that
+each row agrees with the last transition recorded for it. Migrated v1 entries are marked as such and are not part of
+the chain.
+
+## Recovery after a restart
+
+```python
+actions = executor.recover()        # call at startup; safe to call any number of times
+```
+
+`recover` brings each unresolved execution to the state its evidence supports:
+
+- `reserved`, never started: the authorization is checked again (signature, expiry, Core's status), and then performed
+  once. If Core cannot be asked, nothing is performed and the action is `deferred`.
+- `started`, lease expired: recorded as `outcome_unknown`, then `reconciliation_required`. Not retried.
+- `started`, lease live: skipped. A live worker holds it.
+- finished with a pending receipt, or a missing one: the receipt is delivered. The action is not repeated.
+- `reconciliation_required`: reported, not touched.
+
+The arguments are checked against the stored digest before anything is performed. If they do not match, the execution is
+closed without action.
+
+Failure points are tested with real process termination at each boundary (`python/tests/test_executor_lifecycle.py`
+and `scripts/executor_recovery_live.py`): before reservation, after reservation, immediately before the side effect, during
+the side effect, after the side effect before the outcome, after the outcome before the receipt, after Core stored the
+receipt before the acknowledgement, and during recovery itself.
+
+## Receipts
+
+A receipt is written locally with its outcome, in the same transaction (`pending`). Delivery submits the stored event to
+Core, and marks it `recorded` when Core acknowledges it. Core rejects a duplicate event id (409). A timeout may mean Core
+stored it. Both cases are settled by looking the event up in the run's export; the event is resubmitted only if the export
+does not contain it. Receipt delivery is evidence delivery: it never runs the action, and its content is derived only from
+the stored row. Core requires a non-empty result digest, so every receipt carries one, derived from the recorded outcome
+where no result data exists.
+
+## Reconciliation of an unknown outcome
+
+An execution in `reconciliation_required` is never run again by the executor. Someone checks the external system and
+records what they find, signed with their own Ed25519 key, under a domain separator:
+
+```python
+from aigov_py.trusted import ReconcilerRegistry, apply_reconciliation, make_payload, sign_evidence
+
+envelope = sign_evidence(make_payload(row, outcome="succeeded", external_reference="order-7781",
+                                      external_evidence=proof_bytes, reconciler=identity,
+                                      observed_at_utc=now_iso), reconciler_seed_b64)
+apply_reconciliation(store, envelope, ReconcilerRegistry(keys={identity: reconciler_pub_b64}),
+                     receipt_event_id="execution_receipt-...")
+```
+
+The evidence is applied only if the signer is in the registry, the signature verifies under that key, every binding field
+matches the stored execution, the execution is awaiting reconciliation, the outcome is `succeeded`, `failed`, or
+`not_executed`, and the observation time is after the reservation and not in the future. The evidence is appended to the
+history. The earlier unknown-outcome entries remain.
+
+`not_executed` closes the authorization without repeating the action. Running the action again needs a new authorization,
+and so a new human approval. There is no force-execute and no force-success. Refusals are reported with a stable reason
+(`reconciliation_signature_invalid`, `reconciler_not_authorized`, `reconciliation_binding_mismatch`,
+`reconciliation_not_required`, `reconciliation_timestamp_invalid`, `reconciliation_outcome_invalid`).
+
+`apply_escalation` records a signed request for manual investigation, changes no state, and is kept in the history.
+
+## Visibility
+
+`report(store)` returns a structured document: counts by state, pending executions, unknown outcomes, the reconciliation
+backlog, missing and pending receipts, recovery failures (refusals caused by local state), the unresolved list, latency
+(`reserve_to_start`, `execution`, `receipt_delivery`, each with count, p50, p95, max, measured from the history's
+timestamps), and the history and projection checks. The executor also logs one structured line per transition through
+`aigov_py.trusted.executor` and `aigov_py.trusted.receipts`.
+
+## Identities used for each step
+
+| Step | Credential | Checked by |
+|---|---|---|
+| Authorization | Core's signing key (never given to an actor) | the executor's pinned public key, with the domain |
+| Execution and receipt | the executor's API key | Core's role check (`executor`) |
+| Reconciliation | the reconciler's Ed25519 key | the operator's registry, pinned out of band |
+| Schema changes | the operator's shell | the store refuses a file that is not at the expected version |
+
+## Idempotency and single use: what each mechanism guarantees
+
+These are five separate things. Only the first two are guaranteed by this SDK.
+
+| Mechanism | Guarantees | Does not guarantee |
+|---|---|---|
+| Authorization single use (Core) | Core issues at most one authorization for one approval, and refuses a second use | Anything about the external system |
+| Executor reservation (store) | On one host, one reservation per authorization, even under concurrent workers | Anything across hosts (one store per host) |
+| Receipt delivery retry | A receipt reaches Core at most once (duplicates are settled by Core's export), without repeating the action | That the receipt is delivered without a Core outage |
+| Downstream idempotency | Only what your external system guarantees for the key it receives (`execution_key`). Verified by you, not assumed | Anything if the external system ignores the key |
+| Exactly-once external execution | Not claimed. An unknown outcome is held for reconciliation, never retried. Exactly-once needs a verified idempotent external system | Anything the executor cannot observe |
+
+The executor never assumes downstream idempotency. Whether your system deduplicates on `execution_key` is a property you
+must test against that system before you rely on it.
 
 ## Failure handling
 
@@ -138,6 +255,10 @@ the repository owners; it is flagged in the audit report.
 | Approver claims another identity | refused (`approver_identity_mismatch`) |
 | Agent credential tries to approve | refused (`role_not_permitted`) |
 | Unregistered tool | refused (`tool_not_registered`) |
+| Performer raises mid-call | recorded as `outcome_unknown`, then `reconciliation_required`; not retried |
+| Process killed mid-call | on restart, held until the lease expires, then `outcome_unknown`; not retried |
+| Process killed after the outcome | the receipt is re-sent on restart; the action is not repeated |
+| Reconciliation evidence forged or altered | refused; nothing changes |
 
 ## Launching Core
 
@@ -173,6 +294,8 @@ These hold for the SDK as shipped. They are the same limitations the reference a
 - **The executor's store is local SQLite on one host.** Several executors need a shared store with the same atomic reservation.
 - **Revocation window.** Revocation stops an authorization the executor has not yet checked. It does not stop a side
   effect that has begun, and it does not undo a completed one.
+- **The lease.** A started execution is treated as dead only after its lease expires. A worker that runs longer than its lease
+  can be mistaken for dead while still acting. Set `lease_seconds` above your longest external call.
 - **No exactly-once across external systems.** A crash between a side effect and its receipt leaves a reservation with no
   receipt. An operator must reconcile it against your system.
 - **Approval window** is 30 seconds in the examples, a demonstration value.
