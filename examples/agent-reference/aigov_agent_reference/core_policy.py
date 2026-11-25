@@ -48,10 +48,22 @@ def _nonempty(*fields: str) -> dict[str, Any]:
     return {"required_types": {}, "required_nonempty_strings": list(fields)}
 
 
-def policy_document() -> dict[str, Any]:
+def policy_document(
+    *,
+    policy_id: str = POLICY_ID,
+    read_tools: list[str] | None = None,
+    write_tools: list[str] | None = None,
+    approvers: list[str] | None = None,
+    approval_max_age_seconds: int = APPROVAL_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """The reference policy. Defaults reproduce the committed reference file. Other deployments (for example the
+    customer pilot) pass their own tools, approvers, and policy identifier."""
+    read_tools = READ_TOOLS if read_tools is None else read_tools
+    write_tools = WRITE_TOOLS if write_tools is None else write_tools
+    approvers = APPROVERS if approvers is None else approvers
     return {
         "schema": "govai.policy.v1",
-        "policy_id": POLICY_ID,
+        "policy_id": policy_id,
         "version": "1",
         "created_at_utc": CREATED,
         "issuer": {
@@ -84,7 +96,7 @@ def policy_document() -> dict[str, Any]:
                         {
                             "type": "requires_approver_allowlist",
                             "field": "approver",
-                            "allowlist": APPROVERS,
+                            "allowlist": approvers,
                             "code": "approver_not_allowlisted",
                             "message_prefix": "policy_violation: human_approved approver",
                         },
@@ -134,7 +146,7 @@ def policy_document() -> dict[str, Any]:
                         {
                             "type": "requires_decision_enum",
                             "field": "tool_name",
-                            "allowed": READ_TOOLS,
+                            "allowed": read_tools,
                             "code": "tool_not_permitted",
                             "message": "policy_violation: tool is not permitted for this agent",
                         }
@@ -152,7 +164,7 @@ def policy_document() -> dict[str, Any]:
                         {
                             "type": "requires_decision_enum",
                             "field": "tool_name",
-                            "allowed": WRITE_TOOLS,
+                            "allowed": write_tools,
                             "code": "tool_not_permitted",
                             "message": "policy_violation: tool is not permitted for this agent",
                         },
@@ -160,7 +172,7 @@ def policy_document() -> dict[str, Any]:
                             "type": "requires_unconsumed_approval",
                             "approval_field": "approval_event_id",
                             "scope": APPROVAL_SCOPE,
-                            "max_age_seconds": APPROVAL_MAX_AGE_SECONDS,
+                            "max_age_seconds": approval_max_age_seconds,
                             "linkage_keys": APPROVAL_LINKAGE,
                             "code": "approval_required",
                             "message": "policy_violation: a human approval is required",
@@ -200,13 +212,16 @@ def signing_keys() -> tuple[str, str]:
     )
 
 
-def write_signed_policy(out_dir: Path, seed_b64: str) -> Path:
+def write_signed_policy(
+    out_dir: Path, seed_b64: str, document: dict[str, Any] | None = None
+) -> Path:
     """Write the signed bundle to ``out_dir/policy.bundle.staging.json`` and return its path."""
     from aigov_py.policy_bundle_signing import sign_policy_bundle_ed25519
 
     out_dir.mkdir(parents=True, exist_ok=True)
     unsigned = out_dir / "policy.unsigned.json"
-    unsigned.write_text(json.dumps(policy_document(), indent=2), encoding="utf-8")
+    doc = policy_document() if document is None else document
+    unsigned.write_text(json.dumps(doc, indent=2), encoding="utf-8")
     out = out_dir / "policy.bundle.staging.json"
     sign_policy_bundle_ed25519(
         unsigned,

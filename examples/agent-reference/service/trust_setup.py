@@ -48,60 +48,65 @@ def _key() -> str:
     return "aigov-ref-" + secrets.token_urlsafe(24)
 
 
-def build(state_dir: Path) -> dict[str, Any]:
-    """Create keys and configuration for one Core. Returns the environment and the public state."""
+def build(
+    state_dir: Path,
+    *,
+    approver_identities: dict[str, str] | None = None,
+    document: dict[str, Any] | None = None,
+    tenant: str = TENANT,
+    agent_principal: str = AGENT_PRINCIPAL,
+    executor_principal: str = EXECUTOR_PRINCIPAL,
+    executor_audience: str = EXECUTOR_AUDIENCE,
+    auth_ttl_seconds: int = AUTH_TTL_SECONDS,
+) -> dict[str, Any]:
+    """Create keys and configuration for one Core. Returns the environment and the public state.
+
+    Defaults give the reference's identities and policy. A deployment (for example the customer pilot) passes its
+    own approver identities (name -> identity), its policy document, and its tenant. The approver names are the keys
+    of ``approver_identities``, and each gets one key and one principal ``approver:<name>``.
+    """
     from aigov_agent_reference.core_policy import (
         signing_keys,
         trust_store_json,
         write_signed_policy,
     )
 
-    keys = {
-        "agent": _key(),
-        "maintainer": _key(),
-        "lead": _key(),
-        "intern": _key(),
-        "executor": _key(),
-    }
+    identities = dict(
+        APPROVER_IDENTITIES if approver_identities is None else approver_identities
+    )
+    keys: dict[str, str] = {"agent": _key()}
+    for name in identities:
+        keys[name] = _key()
+    keys["executor"] = _key()
+
     seed_b64, policy_pub = signing_keys()
     policy_dir = state_dir / "policies"
-    write_signed_policy(policy_dir, seed_b64)
+    write_signed_policy(policy_dir, seed_b64, document)
 
     auth_sk = SigningKey.generate()
     auth_seed_hex = bytes(auth_sk).hex()
     auth_pub_b64 = base64.b64encode(bytes(auth_sk.verify_key)).decode("ascii")
 
-    principals = {
+    principals: dict[str, Any] = {
         keys["agent"]: {
-            "principal": AGENT_PRINCIPAL,
-            "identity": AGENT_PRINCIPAL,
+            "principal": agent_principal,
+            "identity": agent_principal,
             "role": "agent",
-            "tenant": TENANT,
+            "tenant": tenant,
         },
-        keys["maintainer"]: {
-            "principal": "approver:maintainer",
-            "identity": APPROVER_IDENTITIES["maintainer"],
+    }
+    for name, identity in identities.items():
+        principals[keys[name]] = {
+            "principal": f"approver:{name}",
+            "identity": identity,
             "role": "approver",
-            "tenant": TENANT,
-        },
-        keys["lead"]: {
-            "principal": "approver:lead",
-            "identity": APPROVER_IDENTITIES["lead"],
-            "role": "approver",
-            "tenant": TENANT,
-        },
-        keys["intern"]: {
-            "principal": "approver:intern",
-            "identity": APPROVER_IDENTITIES["intern"],
-            "role": "approver",
-            "tenant": TENANT,
-        },
-        keys["executor"]: {
-            "principal": EXECUTOR_PRINCIPAL,
-            "identity": EXECUTOR_PRINCIPAL,
-            "role": "executor",
-            "tenant": TENANT,
-        },
+            "tenant": tenant,
+        }
+    principals[keys["executor"]] = {
+        "principal": executor_principal,
+        "identity": executor_principal,
+        "role": "executor",
+        "tenant": tenant,
     }
     env = {
         "AIGOV_ENVIRONMENT": "staging",
@@ -109,20 +114,20 @@ def build(state_dir: Path) -> dict[str, Any]:
         "AIGOV_POLICY_BUNDLE_FILE": str(policy_dir / "policy.bundle.staging.json"),
         "AIGOV_POLICY_TRUST_ED25519_JSON": trust_store_json(policy_pub),
         "GOVAI_API_KEYS": ",".join(keys.values()),
-        "GOVAI_API_KEYS_JSON": json.dumps({k: TENANT for k in keys.values()}),
+        "GOVAI_API_KEYS_JSON": json.dumps({k: tenant for k in keys.values()}),
         "GOVAI_PRINCIPALS_JSON": json.dumps(principals),
         "GOVAI_EXECUTION_AUTH_SIGNING_SEED_HEX": auth_seed_hex,
-        "GOVAI_EXECUTOR_AUDIENCE": EXECUTOR_AUDIENCE,
-        "GOVAI_EXECUTION_AUTH_TTL_SECONDS": str(AUTH_TTL_SECONDS),
+        "GOVAI_EXECUTOR_AUDIENCE": executor_audience,
+        "GOVAI_EXECUTION_AUTH_TTL_SECONDS": str(auth_ttl_seconds),
         "GOVAI_AUTO_MIGRATE": "true",
     }
     public_state = {
-        "tenant": TENANT,
+        "tenant": tenant,
         "keys": keys,
-        "agent_principal": AGENT_PRINCIPAL,
-        "executor_principal": EXECUTOR_PRINCIPAL,
-        "approver_identities": APPROVER_IDENTITIES,
-        "executor_audience": EXECUTOR_AUDIENCE,
+        "agent_principal": agent_principal,
+        "executor_principal": executor_principal,
+        "approver_identities": identities,
+        "executor_audience": executor_audience,
         "authorization_public_key": auth_pub_b64,
     }
     return {"env": env, "state": public_state}

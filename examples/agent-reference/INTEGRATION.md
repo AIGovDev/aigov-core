@@ -144,6 +144,10 @@ Uncontrolled bypass paths, which this design does not stop:
 
 ## 8. Reproduce it locally
 
+For an end-to-end run on synthetic enterprise tools, with a report, see `docs/customer-pilot.md` and
+`examples/customer-pilot/pilot.py run`. The steps below reproduce the reference itself.
+
+
 1. `pip install -e "python[agent-reference]"`
 2. `python examples/agent-reference/service/start_local_core.py start` (Docker), or
    `service/start_core_binary.py` with a release binary and a PostgreSQL database.

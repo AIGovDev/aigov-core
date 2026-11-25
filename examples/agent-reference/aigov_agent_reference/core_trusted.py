@@ -38,6 +38,22 @@ from nacl.signing import VerifyKey
 from sandboxed_tools import SandboxedGitHubTools, compute_args_binding_hash
 from tool_gateway import TOOL_CAPABILITY_MAP
 
+# Tool registry. Defaults are the in-process benchmark's tools. A deployment registers its own tools with
+# ``register_tool``, and names the argument that carries the resource (the reference uses ``repo_id``).
+TOOL_ACTIONS: dict[str, str] = dict(TOOL_CAPABILITY_MAP)
+TOOL_RESOURCE_KEY: dict[str, str] = {}
+
+
+def register_tool(tool: str, action: str, resource_key: str = "repo_id") -> None:
+    """Register a tool, its action type, and the argument that names its resource."""
+    TOOL_ACTIONS[tool] = action
+    TOOL_RESOURCE_KEY[tool] = resource_key
+
+
+def resource_of(tool: str, arguments: dict[str, Any]) -> str:
+    return str(arguments.get(TOOL_RESOURCE_KEY.get(tool, "repo_id"), ""))
+
+
 from .core_gate import CoreClient, CoreDecision, new_event
 from .gate import Decision
 
@@ -73,8 +89,9 @@ def verify_authorization_signature(signed: dict[str, Any], public_key_b64: str) 
 
 def args_digest(tool: str, arguments: dict[str, Any]) -> str:
     """Argument digest used by approvals and authorizations. Same function as the in-process benchmark."""
-    repo = arguments.get("repo_id", "")
-    return compute_args_binding_hash(tool, arguments, TOOL_CAPABILITY_MAP[tool], repo)
+    return compute_args_binding_hash(
+        tool, arguments, TOOL_ACTIONS[tool], resource_of(tool, arguments)
+    )
 
 
 def result_digest(result: Any) -> str:
@@ -211,12 +228,17 @@ class Executor:
         audience: str,
         store: ExecutionStore,
         clock: Callable[[], float] = time.time,
+        performer: Callable[[str, dict[str, Any], str], dict[str, Any]] | None = None,
     ) -> None:
+        """``performer(tool, arguments, execution_id)`` performs the side effect and returns
+        ``{"success": bool, "data": ..., "blocked_reason": str | None}``. Without it, the executor uses the sandboxed
+        GitHub-style tools of the in-process benchmark."""
         self._core = core
         self._pub = public_key_b64
         self._audience = audience
         self._store = store
         self._clock = clock
+        self._performer = performer
         self._authority = ExecutionTokenAuthority()
         self._sandbox = SandboxedGitHubTools(token_authority=self._authority)
         self._lock = threading.Lock()
@@ -284,25 +306,28 @@ class Executor:
             ):
                 raise Refused("authorization_replayed")
             t = time.perf_counter()
-            token = self._authority.issue(
-                execution_id="exe_" + uuid.uuid4().hex,
-                tool_name=tool,
-                args_binding_hash=digest,
-                action_type=TOOL_CAPABILITY_MAP[tool],
-                resource_id=arguments.get("repo_id", ""),
-                tenant_id=TENANT,
-            )
-            result = self._sandbox.execute(
-                tool,
-                arguments,
-                execution_id=token.execution_id,
-                tenant_id=TENANT,
-                args_binding_hash=digest,
-                execution_token=token,
-                decision_label="executor_verified",
-                expected_action_type=TOOL_CAPABILITY_MAP[tool],
-                expected_resource_id=arguments.get("repo_id", ""),
-            )
+            if self._performer is not None:
+                result = self._performer(tool, arguments, "exe_" + uuid.uuid4().hex)
+            else:
+                token = self._authority.issue(
+                    execution_id="exe_" + uuid.uuid4().hex,
+                    tool_name=tool,
+                    args_binding_hash=digest,
+                    action_type=TOOL_ACTIONS[tool],
+                    resource_id=resource_of(tool, arguments),
+                    tenant_id=TENANT,
+                )
+                result = self._sandbox.execute(
+                    tool,
+                    arguments,
+                    execution_id=token.execution_id,
+                    tenant_id=TENANT,
+                    args_binding_hash=digest,
+                    execution_token=token,
+                    decision_label="executor_verified",
+                    expected_action_type=TOOL_ACTIONS[tool],
+                    expected_resource_id=resource_of(tool, arguments),
+                )
             ok = bool(result.get("success"))
             outcome = "success" if ok else f"blocked:{result.get('blocked_reason')}"
             res_digest = result_digest(result.get("data")) if ok else None
