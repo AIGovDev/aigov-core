@@ -245,6 +245,17 @@ More context: **`examples/docker-compose-local-demo/README.md`**, canonical cont
 - **Operator runbook (hosted/self-hosted)**: `docs/operator-runbook.md`
 - **Runtime governance (preview / `POST /v1/runtime/evaluate`)**: default **`GOVAI_RUNTIME_GOVERNANCE_ENFORCEMENT=off`**; optional **`shadow`** or **`enforced`** — see `docs/governance/runtime_enforcement_gate.md` and `docs/governance/runtime_integration.md`. Tenant allowlist (**`GOVAI_RUNTIME_GOVERNANCE_ENFORCEMENT_TENANTS`**) scopes hard blocking under **`enforced`**. Operational snapshot: **`GET /ready`** and **`GET /status`** include **`runtime_governance_enforcement`** (informational; not an infra readiness signal on its own).
 
+## Customer pilot (synthetic data, one command)
+
+To evaluate AIGov Core on a synthetic enterprise workflow, with no account or external service:
+
+```bash
+python examples/customer-pilot/pilot.py run
+```
+
+It starts Core, runs read, approval, refusal, impersonation, execution, replay, and outage scenarios, verifies the
+evidence, writes `pilot-output/<timestamp>/pilot-report.md`, and cleans up. See [docs/customer-pilot.md](docs/customer-pilot.md).
+
 ## Quickstart (5 minutes)
 
 Choose one:

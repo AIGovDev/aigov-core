@@ -182,6 +182,9 @@ enforcement, 1,600 unauthorized calls executed; with it, none did. Those figures
 
 ## Files
 
+The customer pilot, which reuses this trusted-execution code with its own tools and identities, is in
+`examples/customer-pilot/` (see `docs/customer-pilot.md`).
+
 ```
 examples/agent-reference/
   README.md                          this file

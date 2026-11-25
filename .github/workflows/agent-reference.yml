@@ -2,6 +2,8 @@
 #   - in-process: the deterministic regression tests (no Core, no database).
 #   - core-service: trusted execution against a release AIGov Core built in this job (separate agent, approver, and
 #     executor identities; Core-issued authorizations; executor verification), with a PostgreSQL 18 service.
+#   - customer-pilot: the customer pilot end to end (synthetic data) against a release Core, with its own PostgreSQL 18
+#     service. It must pass every check and produce its report.
 #
 # Both jobs fail if a test is skipped or missing: the JUnit counts are checked against the expected numbers.
 
@@ -54,6 +56,27 @@ jobs:
           if counts != expected:
               sys.exit(f"in-process reference tests: expected {expected}, got {counts}")
           print("in-process reference tests: all 20 executed and passed")
+          PY
+
+      - name: Run the customer pilot unit tests (no Core)
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_customer_pilot.py -q --junitxml="${RUNNER_TEMP}/pilot-unit.xml"
+
+      - name: Require every customer pilot unit test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/pilot-unit.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 5, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"customer pilot unit tests: expected {expected}, got {counts}")
+          print("customer pilot unit tests: all 5 executed and passed")
           PY
 
   core-service:
@@ -142,4 +165,73 @@ jobs:
         with:
           name: agent-reference-core-results
           path: ${{ runner.temp }}/core-results
+          if-no-files-found: error
+
+  customer-pilot:
+    name: customer-pilot-end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: govai
+          POSTGRES_USER: aigov_test
+          POSTGRES_PASSWORD: aigov_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aigov_test -d govai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Install AIGov with the agent-reference extra
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e "./python[dev,agent-reference]"
+
+      - name: Build the release Core
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin aigov_audit
+
+      - name: Run the customer pilot end to end (synthetic data, release Core, no Docker)
+        run: |
+          set -euo pipefail
+          python examples/customer-pilot/pilot.py run \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "${DATABASE_URL}" \
+            --port 18188 \
+            --out "${RUNNER_TEMP}/customer-pilot"
+
+      - name: Require the pilot report and every acceptance criterion to pass
+        run: |
+          set -euo pipefail
+          test -s "${RUNNER_TEMP}/customer-pilot/pilot-report.md"
+          if grep -q "| FAIL |" "${RUNNER_TEMP}/customer-pilot/pilot-report.md"; then
+            echo "customer pilot report contains a failing check"; exit 1
+          fi
+          echo "customer pilot report written and free of failing checks"
+
+      - name: Upload the pilot output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: customer-pilot-output
+          path: ${{ runner.temp }}/customer-pilot
           if-no-files-found: error
