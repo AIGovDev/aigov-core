@@ -33,10 +33,11 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
+# The decision type is the SDK's, so the in-process gate and Core share one enum.
+from aigov_py.trusted.core import Decision
 from execution_token import ExecutionTokenAuthority
 from replay_protection import ApprovalNonce, ReplayRegistry
 from revocation_list import RevocationList
@@ -46,13 +47,6 @@ from tool_gateway import TOOL_CAPABILITY_MAP
 from .approvals import ApprovalStore
 from .decision_log import DecisionLog, verify_chain
 from .policy import ReferencePolicy
-
-
-class Decision(str, Enum):
-    ALLOW = "ALLOW"
-    DENY = "DENY"
-    REQUIRE_APPROVAL = "REQUIRE_APPROVAL"
-    INDETERMINATE = "INDETERMINATE"
 
 
 @dataclass(frozen=True)

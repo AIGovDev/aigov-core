@@ -17,10 +17,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from aigov_integration import (
+import sqlite3
+
+from aigov_py.trusted import (
     Integration,
     IntegrationConfig,
     Tool,
+    executor_store_migration,
     start_core,
     stop_core,
 )
@@ -77,7 +80,6 @@ def main(argv: list[str] | None = None) -> int:
         / "aigov-customer-integration"
         / f"quickstart-{uuid.uuid4().hex[:8]}"
     )
-    state_dir.mkdir(parents=True, exist_ok=True)
     running, prefix = start_core(
         CONFIG,
         state_dir,
@@ -90,6 +92,12 @@ def main(argv: list[str] | None = None) -> int:
         import json
 
         state = json.loads(running.state_file.read_text())
+        store_path = state_dir / "run" / "executor.sqlite"
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(
+            store_path
+        ) as conn:  # the executor store's migration, applied once before first use
+            conn.executescript(executor_store_migration())
         integ = Integration(CONFIG, running.core_url, state, state_dir / "run", perform)
         args = {"order_id": "ORD-1"}
 

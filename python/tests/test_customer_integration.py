@@ -15,23 +15,14 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip(
-    "smolagents"
-)  # the reference package is part of the agent-reference extra
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INT_DIR = REPO_ROOT / "examples" / "customer-integration"
-for p in (
-    str(INT_DIR),
-    str(INT_DIR / "acme"),
-    str(REPO_ROOT / "examples" / "agent-reference"),
-):
-    if p not in sys.path:
-        sys.path.insert(0, p)
+if str(INT_DIR / "acme") not in sys.path:
+    sys.path.insert(0, str(INT_DIR / "acme"))
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-from aigov_integration import IntegrationConfig, Tool
+from aigov_py.trusted import IntegrationConfig, Tool
 from app import CONFIG
 
 
@@ -73,8 +64,7 @@ def test_unknown_tool_is_refused_before_any_call():
 @pytest.mark.parametrize(
     "overrides, message",
     [
-        ({"tools": (Tool("a", "a", "read"), Tool("a", "a", "write"))}, "unique"),
-        ({"tools": (Tool("a", "a", "delete"),)}, "kind"),
+        ({"tools": (Tool("a", "a", "read"), Tool("a", "a", "write"))}, "duplicate"),
         ({"tools": (Tool("a", "a", "read"),)}, "at least one write"),
         ({"approvers": {}}, "at least one approver"),
         ({"executor_identity": "agent:one"}, "different identities"),
@@ -97,3 +87,8 @@ def test_generated_state_gives_every_principal_its_own_key_and_role():
     assert roles["agent"] == ["agent:one"]
     assert roles["executor"] == ["executor:one"]
     assert roles["approver"] == ["approver:a"]
+
+
+def test_an_unknown_tool_kind_is_rejected_when_the_tool_is_defined():
+    with pytest.raises(ValueError, match="kind"):
+        Tool("a", "a", "delete")

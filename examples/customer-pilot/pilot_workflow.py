@@ -12,27 +12,38 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from aigov_agent_reference.core_gate import CoreClient
-from aigov_agent_reference.core_trusted import (
+from aigov_py.canonical_json import canonical_bytes
+from aigov_py.trusted import (
     AgentActor,
     ApproverActor,
+    CoreClient,
+    Decision,
     ExecutionStore,
     Executor,
+    executor_store_migration,
     offline_evidence_checks,
 )
-from aigov_agent_reference.gate import Decision
-from aigov_py.canonical_json import canonical_bytes
 from pilot_config import (
     AGENT_IDENTITY,
     APPROVER_IDENTITIES,
+    PILOT_TOOLS,
     TENANT,
 )
+
+
+def _apply_migration(path: Path) -> None:
+    """Apply the executor store migration (out of band, before first use). Customers do this with their own tooling."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.executescript(executor_store_migration())
+
 
 CUSTOMERS: dict[str, dict[str, Any]] = {
     "CUST-1001": {
@@ -181,20 +192,28 @@ def run_pilot(core_url: str, state: dict[str, Any], out_dir: Path) -> PilotRun:
     started = time.time()
     t_all = time.perf_counter()
 
-    agent = AgentActor(CoreClient(core_url, keys["agent"]), run_id)
-    steward = ApproverActor(CoreClient(core_url, keys["steward"]), ids["steward"])
-    owner = ApproverActor(CoreClient(core_url, keys["owner"]), ids["owner"])
-    outsider = ApproverActor(CoreClient(core_url, keys["outsider"]), ids["outsider"])
+    agent = AgentActor(CoreClient(core_url, keys["agent"]), run_id, PILOT_TOOLS)
+    steward = ApproverActor(
+        CoreClient(core_url, keys["steward"]), ids["steward"], PILOT_TOOLS
+    )
+    owner = ApproverActor(
+        CoreClient(core_url, keys["owner"]), ids["owner"], PILOT_TOOLS
+    )
+    outsider = ApproverActor(
+        CoreClient(core_url, keys["outsider"]), ids["outsider"], PILOT_TOOLS
+    )
     agent_as_approver = ApproverActor(
-        CoreClient(core_url, keys["agent"]), AGENT_IDENTITY
+        CoreClient(core_url, keys["agent"]), AGENT_IDENTITY, PILOT_TOOLS
     )
     executor_core = CoreClient(core_url, keys["executor"])
+    _apply_migration(out_dir / "executor.sqlite")
     records = RecordStore(out_dir)
     executor = Executor(
         core=executor_core,
         public_key_b64=pub,
         audience=audience,
         store=ExecutionStore(out_dir / "executor.sqlite"),
+        tools=PILOT_TOOLS,
         performer=records.performer,
     )
 
@@ -550,7 +569,7 @@ def run_pilot(core_url: str, state: dict[str, Any], out_dir: Path) -> PilotRun:
     )
     before_cora = records.digest("CUST-1003")
     unreachable = CoreClient("http://127.0.0.1:9", keys["agent"], timeout_sec=2.0)
-    down_agent = AgentActor(unreachable, run_id)
+    down_agent = AgentActor(unreachable, run_id, PILOT_TOOLS)
     t = time.perf_counter()
     d_down = down_agent.submit_write(
         "update_customer_record",
@@ -577,6 +596,7 @@ def run_pilot(core_url: str, state: dict[str, Any], out_dir: Path) -> PilotRun:
         public_key_b64=pub,
         audience=audience,
         store=ExecutionStore(out_dir / "executor.sqlite"),
+        tools=PILOT_TOOLS,
         performer=records.performer,
     )
     t = time.perf_counter()
@@ -647,7 +667,7 @@ def _receipt_summary(
 ) -> dict[str, Any] | None:
     if not authorization_id:
         return None
-    row = executor._store.row(authorization_id)
+    row = executor.store.row(authorization_id)
     if row is None:
         return None
     return {

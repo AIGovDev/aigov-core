@@ -73,10 +73,10 @@ jobs:
           root = ET.parse(sys.argv[1]).getroot()
           suite = root if root.tag == "testsuite" else root[0]
           counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
-          expected = {"tests": 5, "failures": 0, "errors": 0, "skipped": 0}
+          expected = {"tests": 6, "failures": 0, "errors": 0, "skipped": 0}
           if counts != expected:
               sys.exit(f"customer pilot unit tests: expected {expected}, got {counts}")
-          print("customer pilot unit tests: all 5 executed and passed")
+          print("customer pilot unit tests: all 6 executed and passed")
           PY
 
       - name: Run the customer integration unit tests (no Core)
@@ -98,6 +98,27 @@ jobs:
           if counts != expected:
               sys.exit(f"customer integration unit tests: expected {expected}, got {counts}")
           print("customer integration unit tests: all 10 executed and passed")
+          PY
+
+      - name: Run the trusted-execution SDK unit tests (no Core)
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_trusted_sdk.py -q --junitxml="${RUNNER_TEMP}/sdk-unit.xml"
+
+      - name: Require every SDK unit test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/sdk-unit.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 27, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"SDK unit tests: expected {expected}, got {counts}")
+          print("SDK unit tests: all 27 executed and passed")
           PY
 
   core-service:
@@ -305,3 +326,102 @@ jobs:
           name: customer-integration-validation
           path: ${{ runner.temp }}/acme-validation
           if-no-files-found: error
+
+  sdk-wheel:
+    name: sdk-wheel-downstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: govai
+          POSTGRES_USER: aigov_test
+          POSTGRES_PASSWORD: aigov_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aigov_test -d govai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Build the SDK wheel
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip build
+          python -m build --wheel --outdir "${RUNNER_TEMP}/dist" python
+          ls "${RUNNER_TEMP}/dist"
+
+      - name: Check the wheel contains the SDK and nothing from examples
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/dist" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          wheel = next(pathlib.Path(sys.argv[1]).glob("aigov_py-*.whl"))
+          names = zipfile.ZipFile(wheel).namelist()
+          trusted = [n for n in names if n.startswith("aigov_py/trusted/") and n.endswith(".py")]
+          if len(trusted) < 12:
+              sys.exit(f"expected the trusted-execution modules in the wheel, found {len(trusted)}")
+          leaked = [n for n in names if "examples" in n or "agent_reference" in n or "customer" in n]
+          if leaked:
+              sys.exit(f"the wheel contains repository code: {leaked[:3]}")
+          print(f"wheel ok: {len(trusted)} trusted modules, no examples or reference code")
+          PY
+
+      - name: Install the wheel into a clean environment (outside the repository)
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/clean-venv"
+          "${RUNNER_TEMP}/clean-venv/bin/python" -m pip install -q -U pip
+          "${RUNNER_TEMP}/clean-venv/bin/python" -m pip install -q "${RUNNER_TEMP}"/dist/aigov_py-*.whl
+          mkdir -p "${RUNNER_TEMP}/downstream"
+          cp scripts/trusted_sdk_downstream_check.py "${RUNNER_TEMP}/downstream/"
+          cd "${RUNNER_TEMP}/downstream"
+          "${RUNNER_TEMP}/clean-venv/bin/python" -c "import aigov_py, sys; print(aigov_py.__file__)"
+
+      - name: Downstream check, offline (installed wheel)
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/downstream"
+          "${RUNNER_TEMP}/clean-venv/bin/python" trusted_sdk_downstream_check.py offline
+
+      - name: Build the release Core
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin aigov_audit
+
+      - name: Downstream check, live against a release Core (installed wheel, its own database)
+        env:
+          DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import psycopg
+
+          with psycopg.connect("postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai", autocommit=True) as conn:
+              conn.execute("DROP DATABASE IF EXISTS govai_downstream")
+              conn.execute("CREATE DATABASE govai_downstream")
+          print("created govai_downstream")
+          PY
+          cd "${RUNNER_TEMP}/downstream"
+          "${RUNNER_TEMP}/clean-venv/bin/python" trusted_sdk_downstream_check.py live \
+            --mode binary \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_downstream" \
+            --port 18377

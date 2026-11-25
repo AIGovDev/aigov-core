@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import sqlite3
 import sys
 import time
 import uuid
@@ -21,16 +22,17 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
-REF_DIR = HERE.parents[2] / "examples" / "agent-reference"
-for _p in (str(REF_DIR), str(HERE.parent), str(HERE)):
-    sys.path.insert(0, _p)
+sys.path.insert(0, str(HERE))
 
-from aigov_agent_reference.core_gate import CoreClient
-from aigov_agent_reference.core_trusted import (
+from aigov_py.trusted import (
     ApproverActor,
+    CoreClient,
+    Integration,
+    executor_store_migration,
+    start_core,
+    stop_core,
     verify_authorization_signature,
 )
-from aigov_integration import Integration, start_core, stop_core
 from app import CONFIG, AcmeAssistant, AcmeLedger
 
 DEFAULT_STATE = Path.home() / ".cache" / "aigov-customer-integration"
@@ -65,8 +67,16 @@ def new_run(
 ) -> tuple[Integration, AcmeLedger, AcmeAssistant]:
     ledger = AcmeLedger()
     run_dir = out / f"run-{uuid.uuid4().hex[:8]}"
+    _apply_migration(run_dir / "executor.sqlite")
     integ = Integration(CONFIG, core_url, state, run_dir, ledger.perform)
     return integ, ledger, AcmeAssistant(integ, ledger)
+
+
+def _apply_migration(path: Path) -> None:
+    """The executor store's migration, applied once to each run's store file before the run starts."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.executescript(executor_store_migration())
 
 
 def pay_args(ledger: AcmeLedger, invoice: str = "INV-2001") -> dict[str, Any]:
@@ -131,7 +141,7 @@ def case_approval(core_url: str, state: dict, out: Path) -> Case:
     )
     agent_key = state["keys"]["agent"]
     as_agent = ApproverActor(
-        CoreClient(core_url, agent_key), CONFIG.agent_identity
+        CoreClient(core_url, agent_key), CONFIG.agent_identity, CONFIG.registry
     ).decide(
         run_id=integ.run_id,
         request=req,
