@@ -38,3 +38,37 @@ def verify_authorization_signature(signed: dict[str, Any], public_key_b64: str) 
         key.verify(AUTH_DOMAIN + canonical_bytes(payload), sig)
     except (BadSignatureError, KeyError, ValueError, TypeError) as exc:
         raise Refused("authorization_signature_invalid") from exc
+
+
+def verify_authorization_with_registry(signed: dict[str, Any], registry: Any, *, now: Any = None) -> str:
+    """Verify an authorization against the trusted key registry and return its key id.
+
+    The payload must name its signing key (``signing_key_id``). The key must be trusted at the time the authorization
+    claims it was issued: a trusted verdict is required, and an uncertain verdict (signed before a compromise) is refused.
+    Rotation does not change which authorizations are accepted; replay is refused by Core and the executor store, keyed by
+    authorization id, and neither depends on the key.
+    """
+    payload = signed.get("payload")
+    if not isinstance(payload, dict) or payload.get("schema") != AUTH_SCHEMA:
+        raise Refused("authorization_schema_mismatch")
+    kid = payload.get("signing_key_id")
+    if not isinstance(kid, str) or not kid:
+        raise Refused("authorization_key_id_missing")
+    try:
+        signed_at = payload["issued_at_utc"]
+        sig = signed["signature"]
+    except KeyError as exc:
+        raise Refused("authorization_signature_invalid") from exc
+    kwargs = {"purpose": "execution_authorization", "kid": kid, "payload": canonical_bytes(payload),
+              "signature_b64": sig, "signed_at_utc": signed_at}
+    if now is not None:
+        kwargs["now"] = now
+    assessment = registry.assess(**kwargs)
+    if "purpose_mismatch" in assessment.reasons:
+        raise Refused("authorization_key_purpose_mismatch")
+    if not assessment.signature_valid:
+        raise Refused("authorization_signature_invalid")
+    if not assessment.accepted():
+        raise Refused("authorization_key_untrusted")
+    return kid
+

@@ -37,6 +37,10 @@ pub struct AuthorizationPayload {
     pub consequential_record_hash: String,
     pub issued_at_utc: String,
     pub expires_at_utc: String,
+    /// The identifier of the key that signed this authorization. Absent on authorizations issued before key identifiers
+    /// existed, which keeps their signed bytes unchanged. Executors use it to find the key in their trusted registry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_key_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,8 +95,16 @@ pub fn verify_signature(
 #[derive(Debug, Clone)]
 pub struct IssuerConfig {
     pub key: SigningKey,
+    pub key_id: Option<String>,
     pub executor_audience: String,
     pub ttl_seconds: i64,
+}
+
+/// A key identifier: 1 to 64 characters from `A-Z a-z 0-9 . _ -`.
+pub fn valid_key_id(raw: &str) -> bool {
+    !raw.is_empty()
+        && raw.len() <= 64
+        && raw.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
 }
 
 static ISSUER: OnceCell<Option<IssuerConfig>> = OnceCell::new();
@@ -133,8 +145,19 @@ pub fn init_from_env() -> Result<(), String> {
                     "GOVAI_EXECUTION_AUTH_TTL_SECONDS must be an integer from 1 to 3600".to_string()
                 })?
         };
+        let key_id = crate::aigov_env::required(
+            "AIGOV_EXECUTION_AUTH_KEY_ID",
+            "GOVAI_EXECUTION_AUTH_KEY_ID",
+        )
+        .unwrap_or_default();
+        let key_id = match key_id.trim() {
+            "" => None,
+            id if valid_key_id(id) => Some(id.to_string()),
+            _ => return Err("GOVAI_EXECUTION_AUTH_KEY_ID must be 1 to 64 characters from A-Z a-z 0-9 . _ -".to_string()),
+        };
         Some(IssuerConfig {
             key: crate::audit_export_signing::signing_key_from_seed(&bytes),
+            key_id,
             executor_audience: audience,
             ttl_seconds,
         })
@@ -190,6 +213,7 @@ pub fn sign_prepared(
         consequential_record_hash: consequential_record_hash.to_string(),
         issued_at_utc: prepared.issued_at.to_rfc3339(),
         expires_at_utc: prepared.expires_at.to_rfc3339(),
+        signing_key_id: cfg.key_id.clone(),
     };
     Some(sign(&cfg.key, payload))
 }
@@ -215,6 +239,7 @@ mod tests {
             consequential_record_hash: "b".repeat(64),
             issued_at_utc: "2026-11-25T10:00:00+00:00".into(),
             expires_at_utc: "2026-11-25T10:01:00+00:00".into(),
+            signing_key_id: None,
         }
     }
 

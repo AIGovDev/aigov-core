@@ -560,6 +560,33 @@ pub async fn gate_audit_routes_with_state(
     let pool = st.pool.clone();
     let deployment_env = st.deployment_env;
 
+    // OIDC: a bearer token that is a JWT is verified here when OIDC is configured. A verified token gives its mapped
+    // principal and tenant and skips the API-key checks. A token that fails verification stops here with 401; it never
+    // falls back to API-key authentication.
+    if crate::oidc::configured() {
+        if let Some(tok) = crate::oidc::bearer(request.headers()).map(str::to_string) {
+            if crate::oidc::looks_like_jwt(&tok) {
+                let verifier = crate::oidc::verifier().expect("checked configured");
+                return match verifier.verify(&tok).await {
+                    Ok(v) => {
+                        let tenant = v.principal.tenant.clone();
+                        request.extensions_mut().insert(crate::oidc::AuthenticatedPrincipal(v.principal));
+                        request.extensions_mut().insert(ResolvedLedgerTenant(tenant));
+                        next.run(request).await
+                    }
+                    Err(e) => api_error(
+                        StatusCode::UNAUTHORIZED,
+                        e.code(),
+                        "The bearer token could not be verified.",
+                        "Request a token from the configured identity provider for this API, with the configured audience, and retry.",
+                        None,
+                    )
+                    .into_response(),
+                };
+            }
+        }
+    }
+
     let token = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -574,6 +601,18 @@ pub async fn gate_audit_routes_with_state(
     let map_initialized = api_key_tenant_map_is_initialized();
     let keys_configured = cfg.keys.is_some();
     let runtime_key_lookup = runtime_key_lookup_enabled();
+
+    if crate::oidc::configured() && !(map_initialized || keys_configured || runtime_key_lookup) {
+        // OIDC-only deployment: a token that is not a JWT has no way to authenticate.
+        return api_error(
+            StatusCode::UNAUTHORIZED,
+            "INVALID_AUTH_TOKEN",
+            "The bearer token is not an identity-provider token.",
+            "Request a token from the configured identity provider for this API.",
+            None,
+        )
+        .into_response();
+    }
 
     // Primary allowlist: env JSON map, configured API keys, and/or hosted DB-issued keys by hash lookup.
     if map_initialized || keys_configured || runtime_key_lookup {

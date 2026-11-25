@@ -475,3 +475,33 @@ mod tests {
         assert!(!is_hex_digest(&"g".repeat(64)));
     }
 }
+
+/// Regression: rotating the policy-bundle signing key cannot reset the revision anchor.
+///
+/// `decide` takes no key identity. Its result depends only on the anchored revision and digest, the filesystem record, and
+/// the candidate revision and digest. These tests state that directly: a bundle signed by a newly rotated key at an older
+/// revision is still refused as a rollback, and a same-revision content change is still refused.
+#[cfg(test)]
+mod rotation_regressions {
+    use super::decide;
+
+    #[test]
+    fn rollback_under_a_rotated_signing_key_is_still_refused() {
+        // The anchor is revision 7. A bundle at revision 5 is refused whichever key signed it, because the decision
+        // never sees the key.
+        let err = decide(Some((7, "d7")), Some((7, "d7")), (5, "d5"), true).unwrap_err();
+        assert!(err.contains("rollback refused"), "{err}");
+    }
+
+    #[test]
+    fn same_revision_with_different_content_is_refused_after_rotation() {
+        let err = decide(Some((7, "d7")), Some((7, "d7")), (7, "other"), true).unwrap_err();
+        assert!(err.contains("same-revision content change refused"), "{err}");
+    }
+
+    #[test]
+    fn a_newer_revision_advances_the_anchor_after_rotation() {
+        let plan = decide(Some((7, "d7")), Some((7, "d7")), (8, "d8"), true).unwrap();
+        assert_eq!(plan.db, super::DbAction::Advance);
+    }
+}

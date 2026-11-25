@@ -40,7 +40,12 @@ from typing import Any
 from aigov_py.canonical_json import canonical_bytes, canonical_dumps
 
 from . import receipts
-from .authorization import CLOCK_SKEW_SECONDS, Refused, verify_authorization_signature
+from .authorization import (
+    CLOCK_SKEW_SECONDS,
+    Refused,
+    verify_authorization_signature,
+    verify_authorization_with_registry,
+)
 from .core import CoreClient
 from .lifecycle import State
 from .store import ExecutionStore
@@ -128,7 +133,8 @@ class Executor:
         self,
         *,
         core: CoreClient,
-        public_key_b64: str,
+        public_key_b64: str | None = None,
+        registry: Any = None,
         audience: str,
         store: ExecutionStore,
         tools: Mapping[str, ToolSpec],
@@ -142,8 +148,11 @@ class Executor:
             raise TypeError("performer must be callable: it performs the side effect")
         if lease_seconds < 1:
             raise ValueError("lease_seconds must be at least 1")
+        if public_key_b64 is None and registry is None:
+            raise ValueError("provide public_key_b64 (pinned key) or registry (trusted key registry)")
         self._core = core
         self._pub = public_key_b64
+        self._registry = registry
         self._audience = audience
         self._store = store
         self._tools = dict(tools)
@@ -182,7 +191,12 @@ class Executor:
         spec = self._tools.get(tool)
         if spec is None:
             raise Refused("tool_not_registered")
-        verify_authorization_signature(signed, self._pub)
+        if self._registry is not None:
+            verify_authorization_with_registry(
+                signed, self._registry, now=datetime.fromtimestamp(self._clock(), tz=UTC)
+            )
+        else:
+            verify_authorization_signature(signed, self._pub)
         payload = signed["payload"]
         if payload.get("executor_audience") != self._audience:
             raise Refused("authorization_audience_mismatch")

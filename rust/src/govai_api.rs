@@ -204,6 +204,7 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
     crate::principals::init_principals(deployment_env)?;
+    crate::oidc::init_from_env(deployment_env)?;
     crate::execution_authorization::init_from_env()?;
     if crate::execution_authorization::issuer().is_some()
         && !crate::principals::principals_configured()
@@ -391,9 +392,7 @@ async fn get_execution_authorization_status(
         Ok(t) => t,
         Err(e) => return e.into_response(),
     };
-    let principal = match crate::audit_api_key::raw_bearer_token(&headers)
-        .and_then(crate::principals::principal_for_token)
-    {
+    let principal = match crate::principals::request_principal(&headers, &extensions) {
         Some(p) => p,
         None => {
             return api_error(
@@ -515,9 +514,7 @@ async fn post_evidence(
     // Authenticated principals. When configured, the caller's key decides the principal, its role, and the event
     // types it may post. Core writes the authenticated fields itself, so a client cannot choose its own identity.
     let principal = if crate::principals::principals_configured() {
-        match crate::audit_api_key::raw_bearer_token(&headers)
-            .and_then(crate::principals::principal_for_token)
-        {
+        match crate::principals::request_principal(&headers, &extensions) {
             Some(p) => Some(p),
             None => {
                 return api_error(
