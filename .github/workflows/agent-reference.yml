@@ -79,6 +79,27 @@ jobs:
           print("customer pilot unit tests: all 5 executed and passed")
           PY
 
+      - name: Run the customer integration unit tests (no Core)
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_customer_integration.py -q --junitxml="${RUNNER_TEMP}/integration-unit.xml"
+
+      - name: Require every customer integration unit test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/integration-unit.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 10, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"customer integration unit tests: expected {expected}, got {counts}")
+          print("customer integration unit tests: all 10 executed and passed")
+          PY
+
   core-service:
     name: agent-reference-core-service
     runs-on: ubuntu-latest
@@ -203,7 +224,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install -U pip
-          python -m pip install -e "./python[dev,agent-reference]"
+          python -m pip install -e "./python[dev,agent-reference,runs-postgres]"
 
       - name: Build the release Core
         working-directory: rust
@@ -234,4 +255,53 @@ jobs:
         with:
           name: customer-pilot-output
           path: ${{ runner.temp }}/customer-pilot
+          if-no-files-found: error
+
+      - name: Create isolated databases for the integration runs
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import psycopg
+
+          with psycopg.connect("postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai", autocommit=True) as conn:
+              for name in ("govai_acme_validation", "govai_quickstart"):
+                  conn.execute(f"DROP DATABASE IF EXISTS {name}")
+                  conn.execute(f"CREATE DATABASE {name}")
+          print("created isolated databases")
+          PY
+
+      - name: Customer integration - Acme validation against a release Core
+        run: |
+          set -euo pipefail
+          python examples/customer-integration/acme/validate.py run \
+            --mode binary \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_acme_validation" \
+            --port 18288 \
+            --out "${RUNNER_TEMP}/acme-validation"
+          python - "${RUNNER_TEMP}/acme-validation/validation.json" <<'PY'
+          import json
+          import sys
+
+          data = json.load(open(sys.argv[1]))
+          if not data["passed"]:
+              sys.exit("Acme validation reported failing cases")
+          checks = sum(len(c["checks"]) for c in data["cases"])
+          print(f"Acme validation: {len(data['cases'])} cases, {checks} checks, all passed")
+          PY
+
+      - name: Customer integration - minimal quickstart against a release Core
+        run: |
+          set -euo pipefail
+          python examples/customer-integration/quickstart.py \
+            --mode binary \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_quickstart" \
+            --port 18299
+
+      - name: Upload the integration validation output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: customer-integration-validation
+          path: ${{ runner.temp }}/acme-validation
           if-no-files-found: error
