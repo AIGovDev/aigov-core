@@ -1,20 +1,25 @@
-"""Signed AIGov Core policy for agent tool calls.
+"""Signed AIGov Core policy for agent tool calls (trusted-execution version).
 
-The policy is an ordinary ``govai.policy.v1`` bundle. Core verifies its Ed25519 signature at
-startup and enforces the ingest rules on every ``POST /evidence``. Nothing here runs in the
-agent process. The agent only submits events to Core and reads back the result.
+The policy is an ordinary ``govai.policy.v1`` bundle. Core verifies its Ed25519 signature at startup, and
+enforces the ingest rules on every ``POST /evidence``. The agent process never sees the policy signing key.
 
-Event types:
+Event types, and which principal role may post each one (enforced by Core, see ``rust/src/principals.rs``):
 
-- ``tool_approval_requested``: a tool call that needs a human decision is recorded.
-- ``human_approved``: a human decision (approve or reject), with an approver allowlist and a
-  server-time freshness check.
-- ``tool_call``: a read-only tool call. Allowed for the tools on the read allowlist.
-- ``consequential_tool_call``: a write call. Core accepts it only with an unconsumed, in-date,
-  approved approval for the same run and the same tool call.
+- ``tool_approval_requested`` (agent): records that a write needs a human decision. Core stamps the requester.
+- ``human_approved`` (approver): approve or reject. Core checks that the approver named in the payload is the
+  authenticated identity, that the approver is on the allowlist, that the approver is not the requester, and
+  that the timestamp is fresh.
+- ``human_approval_revoked`` (approver): withdraws an approval. Only the approver who gave it may revoke it.
+- ``tool_call`` (agent): a read-only call on the read allowlist. No approval needed.
+- ``consequential_tool_call`` (agent): a write. Core accepts it only with an approval that is recorded, approved,
+  in scope, not revoked, unconsumed, in date, and bound to the same run, tool, argument digest, and policy
+  revision. Core then issues a signed execution authorization (see ``rust/src/execution_authorization.rs``).
+- ``execution_receipt`` (executor): records that the executor ran an authorized call. It needs an issued
+  authorization for the same tool and argument digest, and only one receipt per authorization.
+- ``tool_call_blocked`` (agent): the agent's record of a refusal.
 
-Keys: the signing key is generated for each bundle. It is for this example and for tests. A
-deployment must use its own managed key.
+Keys: the policy signing key is generated per bundle here. It is for this example and for tests. A deployment
+must use its own managed key.
 """
 
 from __future__ import annotations
@@ -35,6 +40,12 @@ WRITE_TOOLS = ["create_file"]
 APPROVERS = ["maintainer@acme-corp.example", "lead@acme-corp.example"]
 APPROVAL_MAX_AGE_SECONDS = 5  # demo TTL; a production policy would use minutes
 APPROVAL_MAX_SKEW_SECONDS = 60
+APPROVAL_SCOPE = "tool_execution"
+APPROVAL_LINKAGE = ["tool_name", "tool_call_id", "args_binding_hash", "policy_revision"]
+
+
+def _nonempty(*fields: str) -> dict[str, Any]:
+    return {"required_types": {}, "required_nonempty_strings": list(fields)}
 
 
 def policy_document() -> dict[str, Any]:
@@ -53,23 +64,22 @@ def policy_document() -> dict[str, Any]:
             "unknown_event_types": {"behavior": "reject"},
             "event_types": {
                 "tool_approval_requested": {
-                    "schema": {
-                        "required_types": {},
-                        "required_nonempty_strings": ["tool_name", "tool_call_id"],
-                    },
+                    "schema": _nonempty(
+                        "tool_name", "tool_call_id", "args_binding_hash"
+                    ),
                     "gates": [],
                 },
                 "human_approved": {
-                    "schema": {
-                        "required_types": {},
-                        "required_nonempty_strings": [
-                            "approver",
-                            "decision",
-                            "scope",
-                            "tool_call_id",
-                            "args_binding_hash",
-                        ],
-                    },
+                    "schema": _nonempty(
+                        "approver",
+                        "decision",
+                        "scope",
+                        "tool_name",
+                        "tool_call_id",
+                        "args_binding_hash",
+                        "policy_revision",
+                        "request_event_id",
+                    ),
                     "gates": [
                         {
                             "type": "requires_approver_allowlist",
@@ -79,6 +89,20 @@ def policy_document() -> dict[str, Any]:
                             "message_prefix": "policy_violation: human_approved approver",
                         },
                         {
+                            "type": "requires_field_matches_field",
+                            "field": "approver",
+                            "other_field": "authenticated_identity",
+                            "code": "approver_identity_mismatch",
+                            "message": "policy_violation: approver does not match the authenticated identity",
+                        },
+                        {
+                            "type": "requires_principal_relation",
+                            "reference_field": "request_event_id",
+                            "relation": "distinct",
+                            "code": "self_approval_refused",
+                            "message": "policy_violation: an approver may not approve their own request",
+                        },
+                        {
                             "type": "requires_timestamp_near_server_time",
                             "max_skew_seconds": APPROVAL_MAX_SKEW_SECONDS,
                             "code": "approval_not_fresh",
@@ -86,22 +110,26 @@ def policy_document() -> dict[str, Any]:
                         },
                     ],
                 },
+                "human_approval_revoked": {
+                    "schema": _nonempty("approval_event_id", "reason"),
+                    "gates": [
+                        {
+                            "type": "requires_principal_relation",
+                            "reference_field": "approval_event_id",
+                            "relation": "same",
+                            "code": "revocation_not_by_approver",
+                            "message": "policy_violation: only the approver who gave the approval may revoke it",
+                        }
+                    ],
+                },
                 "tool_call_blocked": {
-                    "schema": {
-                        "required_types": {},
-                        "required_nonempty_strings": [
-                            "tool_name",
-                            "tool_call_id",
-                            "reason",
-                        ],
-                    },
+                    "schema": _nonempty("tool_name", "tool_call_id", "reason"),
                     "gates": [],
                 },
                 "tool_call": {
-                    "schema": {
-                        "required_types": {},
-                        "required_nonempty_strings": ["tool_name", "tool_call_id"],
-                    },
+                    "schema": _nonempty(
+                        "tool_name", "tool_call_id", "args_binding_hash"
+                    ),
                     "gates": [
                         {
                             "type": "requires_decision_enum",
@@ -113,15 +141,13 @@ def policy_document() -> dict[str, Any]:
                     ],
                 },
                 "consequential_tool_call": {
-                    "schema": {
-                        "required_types": {},
-                        "required_nonempty_strings": [
-                            "tool_name",
-                            "approval_event_id",
-                            "tool_call_id",
-                            "args_binding_hash",
-                        ],
-                    },
+                    "schema": _nonempty(
+                        "tool_name",
+                        "approval_event_id",
+                        "tool_call_id",
+                        "args_binding_hash",
+                        "policy_revision",
+                    ),
                     "gates": [
                         {
                             "type": "requires_decision_enum",
@@ -133,12 +159,29 @@ def policy_document() -> dict[str, Any]:
                         {
                             "type": "requires_unconsumed_approval",
                             "approval_field": "approval_event_id",
-                            "scope": "tool_execution",
+                            "scope": APPROVAL_SCOPE,
                             "max_age_seconds": APPROVAL_MAX_AGE_SECONDS,
-                            "linkage_keys": ["tool_call_id", "args_binding_hash"],
+                            "linkage_keys": APPROVAL_LINKAGE,
                             "code": "approval_required",
                             "message": "policy_violation: a human approval is required",
                         },
+                    ],
+                },
+                "execution_receipt": {
+                    "schema": _nonempty(
+                        "execution_authorization_id",
+                        "tool_name",
+                        "args_binding_hash",
+                        "outcome",
+                        "result_digest",
+                    ),
+                    "gates": [
+                        {
+                            "type": "requires_issued_authorization",
+                            "authorization_field": "execution_authorization_id",
+                            "code": "authorization_not_issued",
+                            "message": "policy_violation: no issued authorization matches this receipt",
+                        }
                     ],
                 },
             },
@@ -149,7 +192,7 @@ def policy_document() -> dict[str, Any]:
 
 
 def signing_keys() -> tuple[str, str]:
-    """Return (seed_b64, pubkey_b64) for a fresh synthetic signing key."""
+    """Return (seed_b64, pubkey_b64) for a fresh synthetic policy signing key."""
     sk = SigningKey.generate()
     return (
         base64.b64encode(bytes(sk)).decode("ascii"),

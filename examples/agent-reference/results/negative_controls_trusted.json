@@ -1,0 +1,58 @@
+{
+  "core_url": "http://127.0.0.1:18099",
+  "mode": "separate agent, approver, and executor credentials",
+  "controls": [
+    {
+      "control": "agent_self_approval",
+      "attack": "the agent's credential records an approval naming an allowlisted approver",
+      "attack_succeeded": false,
+      "core_answer": "HTTP 403: role agent may not post event_type human_approved",
+      "verdict": "protected"
+    },
+    {
+      "control": "forged_approver_identity",
+      "attack": "an approver's credential records an approval in another approver's name",
+      "attack_succeeded": false,
+      "core_answer": "HTTP 400: policy_violation: approver does not match the authenticated identity reason=approver_identity_mismatch",
+      "verdict": "protected"
+    },
+    {
+      "control": "approval_revocation",
+      "attack": "the agent withdraws an approval; mechanism: the approver withdraws its own",
+      "attack_succeeded": false,
+      "mechanism_present": true,
+      "core_answer": "agent: HTTP 403: role agent may not post event_type human_approval_revoked; approver: HTTP 200: accepted",
+      "verdict": "protected"
+    },
+    {
+      "control": "core_issued_authorization",
+      "attack": "an executor needs a verifiable statement that Core accepted the call",
+      "attack_succeeded": null,
+      "mechanism_present": true,
+      "core_answer": "HTTP 200, accepted=True, execution_authorization_present=True",
+      "verdict": "protected"
+    },
+    {
+      "control": "execution_receipt",
+      "attack": "the agent records a receipt; mechanism: the executor records one for the authorization",
+      "attack_succeeded": false,
+      "mechanism_present": true,
+      "core_answer": "agent: HTTP 403: role agent may not post event_type execution_receipt; executor: HTTP 200: accepted",
+      "verdict": "protected"
+    },
+    {
+      "control": "concurrent_consumption",
+      "attack": "eight concurrent submissions consume one approval",
+      "attack_succeeded": false,
+      "core_answer": "accepted 1 of 8",
+      "verdict": "protected"
+    },
+    {
+      "control": "single_credential_write",
+      "attack": "the agent's credential requests, approves, and submits a write",
+      "attack_succeeded": false,
+      "core_answer": "approval refused: role agent may not post event_type human_approved; write accepted: False",
+      "verdict": "protected"
+    }
+  ]
+}

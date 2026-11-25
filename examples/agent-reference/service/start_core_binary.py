@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Start a release AIGov Core process (no Docker) with the signed reference policy.
+"""Start a release AIGov Core process (no Docker) with the trusted-execution reference configuration.
 
-For continuous integration and for hosts where Docker is not available. It needs a built
-``aigov_audit`` binary and a reachable PostgreSQL. It generates a fresh signing key, policy, and API key
-for each run, starts the process in its own session, waits for ``/health``, and exports the address and
-key. The key is masked in CI logs and is never printed.
+For continuous integration and for hosts without Docker. It needs a built ``aigov_audit`` binary and a reachable
+PostgreSQL. It generates the identities, keys, policy, and authorization signing key for this run (see
+``trust_setup.py``), starts the process in its own session, waits for ``/health``, and writes the state file.
+
+Keys are written only to ``<state-dir>/state.json``, with owner-only permissions. They are never printed. When
+``GITHUB_ENV`` is set, only the core URL and the state-file path are exported.
 
 Usage:
     python examples/agent-reference/service/start_core_binary.py \
@@ -18,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import secrets
 import shutil
 import subprocess
 import sys
@@ -27,14 +28,10 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))
 
-from aigov_agent_reference.core_policy import (
-    signing_keys,
-    trust_store_json,
-    write_signed_policy,
-)
+from trust_setup import build
 
 
 def main() -> int:
@@ -51,27 +48,16 @@ def main() -> int:
     state = args.state_dir
     if state.exists():
         shutil.rmtree(state)
-    state.mkdir(parents=True)
-    ledger = state / "ledger"
-    ledger.mkdir()
-    seed, pub = signing_keys()
-    policy_dir = state / "policies"
-    write_signed_policy(policy_dir, seed)
-    api_key = "aigov-ref-" + secrets.token_urlsafe(24)
+    (state / "ledger").mkdir(parents=True)
+    built = build(state)
     url = f"http://127.0.0.1:{args.port}"
 
     env = {
         **os.environ,
-        "AIGOV_ENVIRONMENT": "staging",
+        **built["env"],
         "AIGOV_BIND": f"127.0.0.1:{args.port}",
-        "AIGOV_POLICY_DIR": str(policy_dir),
-        "AIGOV_POLICY_BUNDLE_FILE": str(policy_dir / "policy.bundle.staging.json"),
-        "AIGOV_POLICY_TRUST_ED25519_JSON": trust_store_json(pub),
-        "GOVAI_API_KEYS": api_key,
-        "GOVAI_API_KEYS_JSON": json.dumps({api_key: "ref-tenant"}),
         "GOVAI_DATABASE_URL": args.database_url,
-        "GOVAI_AUTO_MIGRATE": "true",
-        "GOVAI_LEDGER_DIR": str(ledger),
+        "GOVAI_LEDGER_DIR": str(state / "ledger"),
     }
     log = open(state / "core.log", "w", encoding="utf-8")  # noqa: SIM115 - lives as long as the process
     proc = subprocess.Popen(
@@ -99,17 +85,18 @@ def main() -> int:
             f"Core did not answer /health within {args.timeout}s; see {state / 'core.log'}"
         )
 
-    (state / "state.json").write_text(
-        json.dumps({"core_url": url, "api_key": api_key, "pid": proc.pid})
+    state_file = state / "state.json"
+    state_file.write_text(
+        json.dumps({**built["state"], "core_url": url, "pid": proc.pid}, indent=2)
     )
-    (state / "state.json").chmod(0o600)
+    state_file.chmod(0o600)
     github_env = os.environ.get("GITHUB_ENV")
     if github_env:
-        print(f"::add-mask::{api_key}")
+        print(f"::add-mask::{state_file}")
         with open(github_env, "a", encoding="utf-8") as fh:
-            fh.write(f"GOVAI_CORE_URL={url}\nGOVAI_CORE_API_KEY={api_key}\n")
+            fh.write(f"GOVAI_CORE_URL={url}\nGOVAI_TRUST_STATE={state_file}\n")
     print(
-        f"Core is up at {url} (pid {proc.pid}). Key written to {state / 'state.json'}, not printed."
+        f"Core is up at {url} (pid {proc.pid}). Identities and keys are in {state_file} (owner-only), not printed."
     )
     return 0
 

@@ -203,6 +203,16 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
+    crate::principals::init_principals(deployment_env)?;
+    crate::execution_authorization::init_from_env()?;
+    if crate::execution_authorization::issuer().is_some()
+        && !crate::principals::principals_configured()
+    {
+        return Err(
+            "Invalid configuration: execution authorization requires GOVAI_PRINCIPALS_JSON (separate agent, approver, and executor keys)"
+                .to_string(),
+        );
+    }
     let pool = pool_from_env().await?;
     if crate::db::postgres_url_configured_nonempty().is_ok() {
         crate::tenant_api_keys::check_db_tenants_against_env(&pool).await?;
@@ -245,6 +255,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/bundle/{run_id}", get(get_bundle_path))
         .route("/bundle-hash", get(get_bundle_hash_query))
         .route("/bundle-hash/{run_id}", get(get_bundle_hash_path))
+        .route(
+            "/execution-authorizations/{run_id}/{authorization_id}/status",
+            get(get_execution_authorization_status),
+        )
         .route("/compliance-summary", get(get_compliance_summary_query))
         .route("/compliance-summary/{run_id}", get(get_compliance_summary_path))
         .route("/api/export/{run_id}", get(get_api_export))
@@ -365,6 +379,126 @@ async fn get_ready(State(st): State<AppState>) -> impl IntoResponse {
     .into_response()
 }
 
+/// Executor status check for an authorization. Requires the executor principal for this tenant.
+/// `revoked` wins over `authorized`. `receipt_recorded` means an execution receipt exists for it.
+async fn get_execution_authorization_status(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    extensions: axum::http::Extensions,
+    Path((run_id, authorization_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let tenant_id = match resolve_tenant(&st, &headers, &extensions).await {
+        Ok(t) => t,
+        Err(e) => return e.into_response(),
+    };
+    let principal = match crate::audit_api_key::raw_bearer_token(&headers)
+        .and_then(crate::principals::principal_for_token)
+    {
+        Some(p) => p,
+        None => {
+            return api_error(
+                StatusCode::UNAUTHORIZED,
+                "PRINCIPAL_REQUIRED",
+                "Status checks need the executor principal.",
+                "Send the executor key.",
+                None,
+            )
+            .into_response();
+        }
+    };
+    if principal.role != crate::principals::Role::Executor || principal.tenant != tenant_id {
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "ROLE_NOT_PERMITTED",
+            "Only the executor for this tenant may check authorizations.",
+            "Use the executor key.",
+            None,
+        )
+        .into_response();
+    }
+    let log_path = ledger_path_for_tenant(&tenant_id);
+    let events = match collect_events_for_run(&log_path, &run_id) {
+        Ok(e) => e,
+        Err(e) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "LEDGER_READ_ERROR",
+                &e,
+                "Retry later.",
+                None,
+            )
+            .into_response();
+        }
+    };
+    let Some(issued) = events.iter().find(|e| {
+        (e.event_type == "consequential_tool_call" || e.event_type == "tool_call")
+            && e.payload
+                .get("execution_authorization_id")
+                .and_then(|v| v.as_str())
+                == Some(authorization_id.as_str())
+    }) else {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "AUTHORIZATION_NOT_FOUND",
+            "No authorization with this id in this run.",
+            "Check the run and authorization id.",
+            None,
+        )
+        .into_response();
+    };
+    let field = |k: &str| {
+        issued
+            .payload
+            .get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let approval_event_id = field("approval_event_id");
+    let expires_at = field("execution_authorization_expires_at_utc");
+    let revoked = !approval_event_id.is_empty()
+        && events.iter().any(|e| {
+            e.event_type == "human_approval_revoked"
+                && e.payload.get("approval_event_id").and_then(|v| v.as_str())
+                    == Some(approval_event_id.as_str())
+        });
+    let receipted = events.iter().any(|e| {
+        e.event_type == "execution_receipt"
+            && e.payload
+                .get("execution_authorization_id")
+                .and_then(|v| v.as_str())
+                == Some(authorization_id.as_str())
+    });
+    let now = chrono::Utc::now();
+    let expired = chrono::DateTime::parse_from_rfc3339(&expires_at)
+        .map(|t| now > t.with_timezone(&chrono::Utc))
+        .unwrap_or(true);
+    let state = if receipted {
+        "receipt_recorded"
+    } else if revoked {
+        "revoked"
+    } else if expired {
+        "expired"
+    } else {
+        "authorized"
+    };
+    (
+        StatusCode::OK,
+        Json(json!({
+            "ok": true,
+            "authorization_id": authorization_id,
+            "state": state,
+            "run_id": run_id,
+            "approval_event_id": approval_event_id,
+            "tool_name": field("tool_name"),
+            "args_binding_hash": field("args_binding_hash"),
+            "expires_at_utc": expires_at,
+            "checked_at_utc": now.to_rfc3339(),
+        })),
+    )
+        .into_response()
+}
+
 async fn post_evidence(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -377,6 +511,92 @@ async fn post_evidence(
     };
     let log_path = ledger_path_for_tenant(&tenant_id);
     let policy_version = active_policy_version(&st, &tenant_id);
+
+    // Authenticated principals. When configured, the caller's key decides the principal, its role, and the event
+    // types it may post. Core writes the authenticated fields itself, so a client cannot choose its own identity.
+    let principal = if crate::principals::principals_configured() {
+        match crate::audit_api_key::raw_bearer_token(&headers)
+            .and_then(crate::principals::principal_for_token)
+        {
+            Some(p) => Some(p),
+            None => {
+                return api_error(
+                    StatusCode::UNAUTHORIZED,
+                    "PRINCIPAL_REQUIRED",
+                    "This ingest requires an authenticated principal configured in GOVAI_PRINCIPALS_JSON.",
+                    "Send the API key assigned to your role.",
+                    None,
+                )
+                .into_response();
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(p) = &principal {
+        if p.tenant != tenant_id {
+            return api_error(
+                StatusCode::FORBIDDEN,
+                "TENANT_MISMATCH",
+                "The principal is not configured for this ledger tenant.",
+                "Use the key configured for this tenant.",
+                None,
+            )
+            .into_response();
+        }
+        if !crate::principals::allowed_event_types(p.role).contains(&event.event_type.as_str()) {
+            return api_error(
+                StatusCode::FORBIDDEN,
+                "ROLE_NOT_PERMITTED",
+                &format!(
+                    "role {} may not post event_type {}",
+                    p.role.as_str(),
+                    event.event_type
+                ),
+                "Post with the key for the role that owns this event type.",
+                None,
+            )
+            .into_response();
+        }
+        let Some(payload) = event.payload.as_object_mut() else {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "PAYLOAD_NOT_OBJECT",
+                "Authenticated events must carry a JSON object payload.",
+                "Send payload as a JSON object.",
+                None,
+            )
+            .into_response();
+        };
+        payload.insert("authenticated_principal".into(), json!(p.principal_id));
+        payload.insert("authenticated_identity".into(), json!(p.identity));
+        payload.insert("authenticated_role".into(), json!(p.role.as_str()));
+        if matches!(
+            event.event_type.as_str(),
+            "consequential_tool_call" | "tool_approval_requested" | "tool_call"
+        ) {
+            // Stamped by Core: approvals must claim the revision that is actually in force.
+            payload.insert("policy_revision".into(), json!(policy_version));
+        }
+    }
+    // The authorization id and its times are fixed before the append, so the accepted record carries them.
+    let prepared = if principal.is_some()
+        && (event.event_type == "consequential_tool_call" || event.event_type == "tool_call")
+    {
+        crate::execution_authorization::prepare(chrono::Utc::now())
+    } else {
+        None
+    };
+    if let (Some(prep), Some(payload)) = (&prepared, event.payload.as_object_mut()) {
+        payload.insert(
+            "execution_authorization_id".into(),
+            json!(prep.authorization_id),
+        );
+        payload.insert(
+            "execution_authorization_expires_at_utc".into(),
+            json!(prep.expires_at.to_rfc3339()),
+        );
+    }
 
     let existing = match collect_events_for_run(&log_path, &event.run_id) {
         Ok(e) => e,
@@ -409,9 +629,10 @@ async fn post_evidence(
 
     // Events gated on an approval are checked again under the ledger lock, so a single approval cannot be
     // consumed twice by concurrent requests. Other events keep the existing path.
-    let needs_locked_check = st
-        .policy_store
-        .event_type_requires_unconsumed_approval(&tenant_id, &event.event_type);
+    let needs_locked_check = principal.is_some()
+        || st
+            .policy_store
+            .event_type_requires_unconsumed_approval(&tenant_id, &event.event_type);
     let locked_check = |path: &str| -> Result<(), String> {
         if !needs_locked_check {
             return Ok(());
@@ -439,6 +660,21 @@ async fn post_evidence(
                 "policy_version": policy_version,
                 "environment": st.deployment_env.as_str(),
             });
+            if let Some(prep) = &prepared {
+                let str_field =
+                    |k: &str| event.payload.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(signed) = crate::execution_authorization::sign_prepared(
+                    prep,
+                    &event.run_id,
+                    str_field("tool_name"),
+                    str_field("args_binding_hash"),
+                    &policy_version,
+                    str_field("approval_event_id"),
+                    &rec.record_hash,
+                ) {
+                    body["execution_authorization"] = json!(signed);
+                }
+            }
             if metering::metering_enabled() {
                 if let Some(extra) = metering::ingest_success_extras(
                     &tenant_id,

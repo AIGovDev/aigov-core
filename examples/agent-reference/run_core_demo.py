@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Service-backed demonstration: every decision is made by a running AIGov Core.
+"""Trusted-execution demonstration against a running AIGov Core.
 
-Needs a Core that is already running (for example, from `service/start_local_core.py start`) and
-its address and API key in the environment:
+Needs a Core started with the trusted-execution configuration (``service/start_local_core.py start`` or
+``service/start_core_binary.py``). The identities and keys are read from the state file that the launcher writes:
 
     export GOVAI_CORE_URL=http://127.0.0.1:18088
-    export GOVAI_CORE_API_KEY=...
+    export GOVAI_TRUST_STATE=~/.cache/aigov-agent-reference/state.json
     python examples/agent-reference/run_core_demo.py [--cases 10]
 
-Runs the service-backed scenarios and the service-backed benchmark. Writes results to
-`results/core_scenarios.json` and `results/core_benchmark.json`. These results are separate from the
-in-process results in `results/scenarios.json` and `results/benchmark.json`, and are not combined with them.
+Runs the trusted scenarios (separate agent, approver, and executor identities; Core issues authorizations; the executor
+verifies them before any side effect) and the trusted benchmark. Writes ``results/trusted_scenarios.json`` and
+``results/trusted_benchmark.json``. These results are separate from the in-process results and are not combined with
+them.
 """
 
 from __future__ import annotations
@@ -27,11 +28,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-from aigov_agent_reference.core_benchmark import run_core_benchmark
 from aigov_agent_reference.core_gate import CoreClient
-from aigov_agent_reference.core_scenarios import run_all
+from aigov_agent_reference.core_trusted import load_state
+from aigov_agent_reference.trusted_benchmark import run_trusted_benchmark
+from aigov_agent_reference.trusted_scenarios import run_all
 
 RESULTS = HERE / "results"
+DEFAULT_STATE = Path.home() / ".cache" / "aigov-agent-reference" / "state.json"
 
 
 def main() -> int:
@@ -42,39 +45,39 @@ def main() -> int:
         "--cases", type=int, default=10, help="cases per category for the benchmark"
     )
     parser.add_argument("--scenarios-only", action="store_true")
+    parser.add_argument("--results-dir", type=Path, default=RESULTS)
     parser.add_argument(
-        "--results-dir",
+        "--state",
         type=Path,
-        default=RESULTS,
-        help="where to write results (CI writes to a temporary directory)",
+        default=Path(os.environ.get("GOVAI_TRUST_STATE", DEFAULT_STATE)),
+    )
+    parser.add_argument(
+        "--workdir", type=Path, default=None, help="where executor stores are kept"
     )
     args = parser.parse_args()
+
+    state = load_state(args.state)
+    url = state["core_url"]
+    if not CoreClient(url, state["keys"]["agent"]).health():
+        raise SystemExit(f"Core at {url} is not answering /health")
+
     results = args.results_dir
-
-    url = os.environ.get("GOVAI_CORE_URL")
-    key = os.environ.get("GOVAI_CORE_API_KEY")
-    if not url or not key:
-        raise SystemExit(
-            "Set GOVAI_CORE_URL and GOVAI_CORE_API_KEY (see service/start_local_core.py)."
-        )
-    core = CoreClient(url, key)
-    try:
-        ok = core._get("/health")[0] == 200
-    except OSError as exc:
-        raise SystemExit(f"Core is not reachable at {url}: {exc}")
-    if not ok:
-        raise SystemExit(f"Core at {url} did not answer /health with 200")
-
     results.mkdir(parents=True, exist_ok=True)
+    workdir = (
+        args.workdir
+        or Path(os.environ.get("TMPDIR", "/tmp")) / f"aigov-trusted-{int(time.time())}"
+    )
     started = time.time()
-    scenarios = run_all(core)
-    print("\nService-backed scenarios (every decision from the running Core)\n")
+    scenarios = run_all(url, state, workdir)
+    print(
+        "\nTrusted-execution scenarios (agent, approver, and executor are separate identities)\n"
+    )
     for r in scenarios:
         print(f"  [{'PASS' if r.passed else 'FAIL'}] {r.name}  {r.purpose}")
         for c in r.calls:
             ex = "executed" if c["executed"] else "not executed"
             print(
-                f"         core: {c['label']:<34} {c['decision']:<16} {c['reason']:<26} {ex}"
+                f"         {c['label']:<34} {c['decision']:<16} {c['reason']:<30} {ex}"
             )
         for name, ok_, detail in r.checks:
             if not ok_:
@@ -83,10 +86,10 @@ def main() -> int:
             print(f"         EVIDENCE PROBLEM: {problem}")
     passed = sum(1 for r in scenarios if r.passed)
     print(f"\n  {passed}/{len(scenarios)} scenarios passed.")
-    (results / "core_scenarios.json").write_text(
+    (results / "trusted_scenarios.json").write_text(
         json.dumps(
             {
-                "architecture": "service-backed (live AIGov Core over HTTP)",
+                "architecture": "trusted execution (live AIGov Core decides; separate executor performs side effects)",
                 "core_url": url,
                 "scenarios": [
                     {
@@ -115,30 +118,34 @@ def main() -> int:
 
     failed = [r.name for r in scenarios if not r.passed]
     if not args.scenarios_only:
-        bench = run_core_benchmark(core, args.cases)
+        bench = run_trusted_benchmark(url, state, args.cases, workdir)
         s = bench["summary"]
-        print("\nService-backed benchmark (every decision from the running Core)\n")
+        print("\nTrusted-execution benchmark (deterministic; scripted agent)\n")
         print(
-            f"  cases: {s['cases']}  calls: {s['calls']}  Core HTTP requests: {s['core_http_requests']}"
+            f"  cases: {s['cases']}  calls: {s['calls']}  Core HTTP requests: {s['core_http_latency_ms']['overall']['count']}"
         )
         print(
             f"  unauthorized executed: {s['unauthorized_executed']}/{s['unauthorized_calls']}"
         )
         print(
-            f"  authorized completed:  {s['authorized_completed']}/{s['authorized_calls']}  "
-            f"false denials: {s['false_denials']}"
+            f"  authorized completed:  {s['authorized_completed']}/{s['authorized_calls']}  false denials: {s['false_denials']}"
         )
         print(
             f"  consequential calls executed without approval: "
             f"{s['consequential_without_approval_executed']}/{s['consequential_without_approval']}"
         )
         print(f"  evidence verified: {s['evidence_verified_cases']}/{s['cases']} cases")
-        lat = s["http_latency_ms"]["overall"]
-        print(
-            f"  Core HTTP latency (ms): p50 {lat['p50_ms']}  p95 {lat['p95_ms']}  p99 {lat['p99_ms']}"
-        )
-        (results / "core_benchmark.json").write_text(
-            json.dumps(bench, indent=2, sort_keys=True) + "\n"
+        for label, key in [
+            ("authorization", "authorization_latency_ms"),
+            ("executor verification", "executor_verification_latency_ms"),
+            ("end-to-end", "end_to_end_latency_ms"),
+        ]:
+            b = s[key]
+            print(
+                f"  {label} latency (ms): p50 {b['p50_ms']}  p95 {b['p95_ms']}  p99 {b['p99_ms']}  (n={b['count']})"
+            )
+        (results / "trusted_benchmark.json").write_text(
+            json.dumps(bench, indent=2, sort_keys=True, default=str) + "\n"
         )
     print(f"\nResults written to {results}\nElapsed: {time.time() - started:.1f}s")
     if failed:

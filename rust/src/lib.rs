@@ -13,6 +13,8 @@ pub mod policy_config;
 pub mod policy_engine;
 pub mod policy_signing;
 pub mod policy_anchor;
+pub mod principals;
+pub mod execution_authorization;
 pub mod policy_watermark;
 pub mod policy_store;
 pub mod schema;

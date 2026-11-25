@@ -1,25 +1,26 @@
 # AIGov Core: reference integration for tool-using agents
 
-This example puts AIGov enforcement in front of a real
-[smolagents](https://github.com/huggingface/smolagents) agent. Every tool call is decided before it runs,
-as `ALLOW`, `DENY`, `REQUIRE_APPROVAL`, or `INDETERMINATE`. Only `ALLOW` executes, and the sandboxed tool
-checks an execution token before it runs anything.
+This example runs a real [smolagents](https://github.com/huggingface/smolagents) agent against AIGov Core with
+**trusted execution**. Four parties hold separate credentials and can do only their own part:
+
+- the **agent** requests approvals and submits calls;
+- the **approver** (a human) decides approvals, under its own key, in its own identity;
+- **Core** decides every call by policy, records it in the ledger, and issues a signed execution authorization;
+- the **executor** verifies that authorization itself before any side effect, and records a receipt afterwards.
+
+Everything runs locally against synthetic tools. No model API, no network service, no credential beyond the keys this
+example generates.
 
 There are two architectures. Their results are reported separately and never combined:
 
-| | Service-backed (the integration) | In-process prototype |
+| | Trusted execution (the integration) | In-process prototype |
 |---|---|---|
 | Where the decision is made | AIGov Core, over HTTP | The gate, inside the agent's process |
-| Evidence | The Core ledger (`/verify`, `/api/export`) | A local hash-chained log |
-| Needs | Docker (or a release binary), PostgreSQL | Python only |
-| Use it for | What Core enforces and records | Quick regression of the integration logic |
+| Who performs the side effect | A separate executor, after verifying Core's authorization | The same process |
+| Evidence | The Core ledger, plus the executor's receipts | A local hash-chained log |
+| Needs | Docker (or a release binary) and PostgreSQL | Python only |
 
-Everything runs locally against synthetic tools. No model API, no network service, and no credential beyond the
-local keys this example generates.
-
-## Service-backed integration (start here)
-
-### Run it
+## Run it
 
 Requires Python 3.10 or newer (tested on 3.12), Docker, and this repository.
 
@@ -27,159 +28,184 @@ Requires Python 3.10 or newer (tested on 3.12), Docker, and this repository.
 python -m venv .venv && . .venv/bin/activate
 pip install -e "python[agent-reference]"
 
-# 1. Start a local Core container with PostgreSQL and a signed policy.
+# 1. Start a local Core container with PostgreSQL. It generates the identities and keys for this run.
 python examples/agent-reference/service/start_local_core.py start
-#    It prints GOVAI_CORE_URL and GOVAI_CORE_API_KEY. Export both.
 
-# 2. Run the scenarios and the benchmark against that Core.
-python examples/agent-reference/run_core_demo.py
+# 2. Run the 18 trusted-execution scenarios and the benchmark.
+export GOVAI_TRUST_STATE=~/.cache/aigov-agent-reference/state.json
+python examples/agent-reference/run_core_demo.py --cases 10
 
-# 3. Stop the containers, network, and ledger volume when finished.
+# 3. The seven trust-boundary attacks, with the three separate keys.
+python examples/agent-reference/negative_controls.py --core-url http://127.0.0.1:18088 \
+  --agent-key ... --approver-key ... --executor-key ...   # keys are in the state file
+
+# 4. Stop the containers, network, ledger volume, and state file.
 python examples/agent-reference/service/start_local_core.py stop
 ```
 
-Without Docker, `service/start_core_binary.py` starts a release `aigov_audit` against any PostgreSQL. CI uses
-this path.
+No Docker? `service/start_core_binary.py --binary <release aigov_audit> --database-url <postgres url>` starts Core
+without a container. CI uses this path.
 
-Tests: with a Core running, export the same two variables and run
-`python -m pytest python/tests/test_agent_reference_core.py -q`. Without them the tests skip, unless
-`AIGOV_REF_REQUIRE_CORE=1`, which makes a missing Core a failure. The fail-closed test needs no Core.
+Tests, with a Core running and `GOVAI_TRUST_STATE` set: `python -m pytest python/tests/test_agent_reference_core.py -q`.
+Without the state file, the service tests skip, unless `AIGOV_REF_REQUIRE_CORE=1`, which makes a missing Core a failure.
+Seven tests need no Core at all: the fail-closed check, the policy match, signature and domain checks, and the atomic
+single-use reservation.
 
-### How a decision is made
+## How a call is authorized and run
 
-For every tool call the agent process submits an evidence event to Core's `POST /evidence`. Core evaluates the
-signed policy and either accepts the event or refuses it. The sandbox runs the call only when Core accepts it.
-
-| Core answer | Decision here | Meaning |
-|---|---|---|
-| `200`, with a `record_hash` | `ALLOW` | The policy allowed the call. Core stored it first. |
-| `400`, reason `approval_not_found` | `REQUIRE_APPROVAL` | No human decision is recorded yet. An approval request was recorded. |
-| `400`, any other reason | `DENY` | The policy refused, for the reason Core returned. |
-| Unreachable, timeout, or 5xx | `INDETERMINATE` | Fail closed. Nothing runs. |
-
-The reason is read from Core's message (`... reason=<code>`). The reference does not decide it. Each refusal is
-also recorded in Core as `tool_call_blocked`.
-
-### The policy
-
-`policies/core_policy.unsigned.json` is the reviewed policy. The signed bundle is produced from the same definition
-(`aigov_agent_reference/core_policy.py`), and Core verifies its signature at startup. A test fails if the two
-diverge.
-
-- `tool_call` (read tools): allowed only for tools on the read allowlist.
-- `consequential_tool_call` (write tools): allowed only for tools on the write allowlist, and only with an
-  approval recorded in Core that is approved, in scope, linked to the same tool call and argument hash, not yet
-  used by any other event in the run, and at most `max_age_seconds` old by the server clock.
-- `human_approved`: the approver must be on the allowlist, and the approval's timestamp must be within 60 seconds of
-  server time at ingest, so an approval cannot be backdated.
-
-The approval lifetime is 5 seconds, so the demo can show expiry in seconds. A production policy would use minutes.
-
-### Results (last run, in `results/`)
-
-Scenarios: every decision came from the running Core. 9 of 9 passed.
-
-| Scenario | Core answer | Sandbox effect |
-|---|---|---|
-| Allowed read-only call | `ALLOW` | read recorded |
-| Unauthorized approver | approval refused by Core (`approver_not_allowlisted`); write stays `REQUIRE_APPROVAL` | no file |
-| Human-approved write | `REQUIRE_APPROVAL`, then `ALLOW` after approval | file written |
-| Human-rejected | `DENY` (`approval_not_approved`) | no file |
-| Prompt injection asks for a deployment | `DENY` (`tool_not_permitted`) | no deployment |
-| Expired approval | `DENY` (`approval_expired`) | no file |
-| Replayed approval | second use `DENY` (`approval_already_consumed`) | one write |
-| Core unreachable | `INDETERMINATE` (`core_unavailable`) | no file; the same call succeeds once Core returns |
-| Arguments changed after approval | `DENY` (`approval_linkage_mismatch`) | no file |
-
-Benchmark: service-backed, 10 cases per category, 90 cases, 180 calls, 470 Core HTTP requests.
-
-- Unauthorized calls executed: 0 of 140.
-- Authorized calls completed: 40 of 40. False denials: 0.
-- Consequential calls executed without approval: 0 of 140.
-- Evidence verified: 90 of 90 cases. Each case checks Core's chain (`/verify`), that each executed call's record hash
-  is the one Core stored, that each refusal is recorded, and that the sandbox ran exactly the calls Core accepted.
-- Core HTTP latency, client-side, over all 470 evidence submissions: p50 7.3 ms, p95 27.0 ms, p99 64.3 ms. Per
-  event type, in `results/core_benchmark.json`. Latency varies between runs; these are from the last run.
-
-These numbers come from one machine, one run, and one scripted agent. They are not a general estimate.
-
-### What Core needed: the gap, and the change
-
-Core had no pre-execution authorization for tool calls. Its ingest gates could require a prior event, and an approval
-with a fixed scope (`model_promoted`). They could not express:
-
-1. Approval **expiry**. No gate compared an approval's time with the time of the call.
-2. Approval **single use**. Nothing stopped two events from using one approval.
-3. Race-free single use. Policy ran before the ledger lock was taken, so two concurrent calls could both pass.
-4. A **tool-approval scope**. The approval gate was fixed to `model_promoted`.
-5. **Server-time freshness** for approvals. Approval timestamps were client-supplied, so an approval could be backdated.
-6. **Refusal reasons** a client can read. Only some gates put a code in their message.
-
-The change (`rust/src/policy_engine.rs`, `rust/src/audit_store.rs`, `rust/src/govai_api.rs`):
-
-- `requires_unconsumed_approval` gate, for items 1, 2, and 4.
-- `requires_timestamp_near_server_time` gate, for item 5.
-- `append_record_checked`: runs the policy check under the ledger lock, after duplicate detection and before the write.
-  Only events whose rule has the new gate use it. Item 3.
-- Every gate violation carries `reason=<code>`. Item 6.
-
-Tests: 11 Rust tests in `rust/tests/tool_approval_gate.rs`, including a race test in which eight concurrent calls try to
-consume one approval. With the lock, exactly one succeeds. A temporary control that checked without the lock let all
-eight through. The control was removed before commit.
-
-### Gaps that remain (not fixed here)
-
-- **Approver identity is asserted, not authenticated.** Core checks the approver's name against the allowlist. It does
-  not check who posted the approval. In this example the simulated human posts with the same API key as the agent, so the
-  agent could forge an approval. A deployment needs approvals submitted with a separate credential that Core maps to a
-  named approver. This is the most important open item.
-- **No revocation.** Core has no event type for withdrawing an approval, so the in-process revoked-approval scenario
-  is not reproduced here.
-- **Single host.** The ledger lock is per process. Two Core processes on one ledger would not serialize their writes.
-- **The sandbox trusts the runner.** The runner issues the sandbox token after Core accepts a call. The sandbox does not
-  verify Core's record. A deployment should bind the token to Core's record hash.
-- **The approval TTL is a demo value** (5 seconds).
-
-## In-process prototype
-
-`run_demo.py` runs similar scenarios against an in-process gate. Use it for quick regression of the integration logic.
-It is not evidence about Core.
-
-```bash
-python examples/agent-reference/run_demo.py
+```
+ agent (its key)                Core (policy, ledger, signing key)            executor (its key)
+ ───────────────                ───────────────────────────────────            ──────────────────
+ tool_approval_requested  ───▶  record the request, stamp the requester
+                                                      ◀─── human_approved (approver's key)
+                                 check identity, self-approval, freshness
+ consequential_tool_call  ───▶  check approval: approved, in scope, not
+                                revoked, not used, in date, same call
+                                ── record the call, consume the approval
+                                ── sign an authorization ─────────────▶  verify the signature (pinned key, domain)
+                                                                         check audience, run, tool, digest, expiry
+                                ◀──── status check ───────────────────── GET status (must be "authorized")
+                                                                         reserve (single use), then act
+                                ◀──── execution_receipt ────────────────  record the outcome and a result digest
 ```
 
-It writes `results/scenarios.json` and `results/benchmark.json`. Its benchmark uses a deterministic scripted agent under
-three enforcement conditions: none, logging only, and in-process enforcement. Without enforcement, 1,600 unauthorized
-calls executed; with it, none did. Those figures measure the gate, not Core. The gate's logic and its limits are in
-`aigov_agent_reference/gate.py`.
+Core answers each submission with a decision: `ALLOW` (accepted, with a record hash, and for a call, a signed
+authorization), `REQUIRE_APPROVAL` (no approval recorded yet), `DENY` (refused, with Core's reason), or
+`INDETERMINATE` (Core unreachable: fail closed). The reason comes from Core, not from the reference.
 
-Regression tests: `python -m pytest python/tests/test_agent_reference_integration.py -q` (20 tests, no Core needed).
+## What each credential can and cannot do
+
+| Credential | Can | Cannot (refused by Core, by role) |
+|---|---|---|
+| Agent | request approvals, submit reads and writes, record blocked calls | approve, revoke, record receipts |
+| Approver (identity `maintainer@…`) | approve or reject its own identity's requests, revoke its own approvals | approve in another identity, approve its own request, submit calls, record receipts |
+| Executor | record receipts for issued authorizations, check status | approve, submit calls |
+| Core's authorization key | sign authorizations | (held only by Core; never given to an actor) |
+
+## Results (last run, `results/trusted_*.json`)
+
+Scenarios: 18 of 18 passed. Each checks Core's decisions and refusal reasons, the sandbox state, the executor's
+receipts, Core's chain verification, and that every executed call is backed by an authorization whose record hash
+matches Core's ledger.
+
+- Allowed read-only call, run through the executor.
+- Agent self-approval refused (`role_not_permitted`). Forged approver identity refused (`approver_identity_mismatch`).
+  Unlisted approver refused (`approver_not_allowlisted`).
+- Human-approved write: refused before approval, then authorized and executed once, with a receipt.
+- Human-rejected write refused. Prompt injection asking for a deployment refused (`tool_not_permitted`).
+- Expired approval refused. Replayed approval refused twice: by Core (`approval_already_consumed`) and by the executor
+  (`authorization_receipt_recorded`).
+- Core unreachable: the agent gets `INDETERMINATE`, and the executor refuses (`core_unavailable`). The same authorization
+  runs once Core returns.
+- Changed arguments after approval refused by Core (`approval_linkage_mismatch`).
+- Revoked approval refused. Another approver's revocation refused (`revocation_not_by_approver`). Revocation after
+  issuance and before the executor's check stops execution (`authorization_revoked`).
+- Tampered, re-signed, wrong-audience, and expired authorizations refused by the executor.
+- Changed arguments under a valid authorization refused by the executor (`authorization_arguments_mismatch`).
+- Eight concurrent submissions on one approval: one authorization. Eight concurrent executors on one authorization: one
+  execution.
+- An authorization with no receipt is distinguishable from a completed execution (`status` moves from `authorized` to
+  `receipt_recorded`).
+- Evidence verifies offline: the authorization's signature with the pinned key, and its record hash against Core's ledger.
+
+Benchmark (deterministic, scripted agent; 10 categories, 10 cases each, 100 cases, 190 calls, 520 Core HTTP requests):
+
+| Measure | Result |
+|---|---|
+| Unauthorized executions | 0 of 150 calls that must not run |
+| Authorized completions | 40 of 40 |
+| False denials | 0 |
+| Consequential calls executed without approval | 0 of 150 |
+| Evidence verified (Core chain, record hashes, receipts, refusals recorded) | 100 of 100 cases |
+| Authorization latency (Core accepts and signs) | p50 22.3 ms, p95 33.2 ms, p99 36.9 ms (n=50) |
+| Executor verification latency (local checks and status call) | p50 2.0 ms, p95 5.0 ms, p99 8.5 ms (n=50) |
+| End-to-end latency (agent submission to executor receipt) | p50 50.1 ms, p95 69.6 ms, p99 71.1 ms (n=40) |
+
+These are one machine and one run. Latency varies between runs.
+
+## Negative controls: the same attacks against two systems
+
+`negative_controls.py` runs seven attacks against a Core. Each control separates the attack from the mechanism the
+design needs.
+
+| Control | Trusted Core (separate keys) | Current staging (one key for every role) |
+|---|---|---|
+| Agent self-approval | protected: `role_not_permitted` | **gap**: accepted |
+| Forged approver identity | protected: `approver_identity_mismatch` | **gap**: accepted |
+| Approval revocation | protected: agent refused, approver's own revocation accepted | **gap**: no revocation event exists |
+| Core-issued authorization | protected: signed authorization present | **gap**: none issued |
+| Execution receipts | protected: agent refused, executor's receipt accepted | **gap**: no receipt event exists |
+| Concurrent consumption of one approval | protected: exactly one accepted | protected: exactly one accepted |
+| One credential requests, approves, and writes | protected: approval refused | **gap**: the write is accepted |
+
+Staging already has the consumption lock. Everything else in the table is missing there.
+
+## What Core needed
+
+Core had no pre-execution authorization for tool calls, and no way to tie an approval to an authenticated person. This
+change adds:
+
+- **Principals with roles** (`rust/src/principals.rs`). `GOVAI_PRINCIPALS_JSON` maps each key to one principal, a human
+  identity, a role, and a tenant. Core stamps the authenticated fields into every event itself, and checks the event type
+  against the role.
+- **Approval gates** (`rust/src/policy_engine.rs`): `requires_field_matches_field` (approver identity),
+  `requires_principal_relation` (distinct requester for approvals, same approver for revocation), revocation checked
+  inside the approval gate, and `requires_issued_authorization` for receipts.
+- **Signed execution authorizations** (`rust/src/execution_authorization.rs`). Ed25519 with a domain prefix
+  (`govai.execution_authorization.v1`) and a dedicated key. The signed payload binds the run, tool, argument digest,
+  policy revision, approval, the ledger record, the executor audience, the expiry, and a unique id.
+- **Ledger ordering** (`rust/src/govai_api.rs`, `rust/src/audit_store.rs`): with principals configured, every ingest is
+  checked under the ledger lock, so revocation and consumption serialize.
+- **Status endpoint**: `GET /execution-authorizations/{run}/{id}/status`, for the executor only.
+
+Tests: 18 Rust gate tests (7 new, for identity, self-approval, revocation, and receipts), the race test, and the
+authorization signature tests.
+
+## Trust boundary and what is not claimed
+
+The full statement is in `INTEGRATION.md` (sections 4 and 5), and in the report. In summary:
+
+- **Exactly-once across external systems is not claimed.** The executor reserves before it acts. A crash between the
+  side effect and the receipt leaves a reservation with no receipt, which an operator must reconcile.
+- **Revocation** stops an authorization that has not yet been checked by the executor. It does not stop a side effect
+  that has begun, and it does not undo a completed one.
+- **Identities are static.** Approver identities are names in configuration, not from an identity provider.
+- **Single host.** One Core process per ledger. The executor's store is a local SQLite file.
+- **Bypass paths** the design does not stop: a process that performs the side effect without the executor, a process
+  that holds the executor's store and key, and a Core other than the one the executor trusts.
+
+## The in-process prototype
+
+`run_demo.py` runs similar scenarios against an in-process gate, for quick regression of the integration logic. It is not
+evidence about Core. Its benchmark uses a deterministic scripted agent under three enforcement conditions. Without
+enforcement, 1,600 unauthorized calls executed; with it, none did. Those figures measure the gate, not Core.
 
 ## Files
 
 ```
 examples/agent-reference/
   README.md                          this file
-  INTEGRATION.md                     guide for wiring your own tools and approvals to Core
-  run_core_demo.py                   service-backed scenarios and benchmark (needs a running Core)
+  INTEGRATION.md                     guide: identities, commit points, revocation window, bypass paths
+  run_core_demo.py                   trusted scenarios and benchmark (needs a running Core)
+  negative_controls.py               the seven trust-boundary attacks, against any Core
   run_demo.py                        in-process prototype scenarios and benchmark
   policies/
     core_policy.unsigned.json        reviewed Core policy (the signed bundle is generated at start)
     example_policy.json              in-process prototype policy
   service/
-    start_local_core.py              Docker: Core and PostgreSQL 18, signed policy, generated keys
+    trust_setup.py                   identities, API keys, principals, signing keys for one Core run
+    start_local_core.py              Docker: Core and PostgreSQL 18
     start_core_binary.py             no Docker: release binary, used by CI
   aigov_agent_reference/
     core_policy.py                   the Core policy and its signing
-    core_gate.py                     HTTP client: decisions from Core's answers, fail closed
-    core_runner.py                   runs a call only after Core accepts it
-    core_scenarios.py                nine service-backed scenarios
-    core_benchmark.py                service-backed benchmark, latency percentiles
+    core_gate.py                     HTTP client, one principal per client; decisions from Core's answers
+    core_trusted.py                  agent, approver, and executor actors; authorization verification; executor store
+    trusted_scenarios.py             18 scenarios
+    trusted_benchmark.py             benchmark with authorization, verification, and end-to-end latency
     gate.py, approvals.py, decision_log.py, policy.py, environment.py, agent.py, scenarios.py, benchmark.py
                                      in-process prototype
   results/                           machine-readable results from the last runs
-python/tests/test_agent_reference_core.py          12 service-backed tests
+python/tests/test_agent_reference_core.py          27 service-backed and no-Core tests
 python/tests/test_agent_reference_integration.py   20 in-process tests
-rust/tests/tool_approval_gate.rs                   11 Rust tests for the new Core gates
+rust/tests/tool_approval_gate.rs                   18 Rust gate tests
 ```
