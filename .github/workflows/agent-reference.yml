@@ -411,6 +411,7 @@ jobs:
           DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
         run: |
           set -euo pipefail
+          python -m pip install -q "psycopg[binary]>=3.3.9"
           python - <<'PY'
           import psycopg
 
