@@ -1,0 +1,24 @@
+{
+  "schema": "aigov.reference.policy.v1",
+  "tenant_id": "acme-corp",
+  "resource_pattern": "acme-corp/*",
+  "agent": {
+    "principal": "agent:release-bot",
+    "allowed_tools": ["read_repo_metadata", "create_file", "open_pull_request"]
+  },
+  "approval_required_action_types": ["repo:write", "repo:admin", "deploy:production"],
+  "grants": [
+    {
+      "principal": "agent:release-bot",
+      "action_types": ["repo:read"]
+    },
+    {
+      "principal": "maintainer@acme-corp.example",
+      "action_types": ["repo:read", "repo:write"]
+    },
+    {
+      "principal": "lead@acme-corp.example",
+      "action_types": ["repo:read", "repo:write", "repo:admin", "deploy:production"]
+    }
+  ]
+}

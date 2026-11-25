@@ -51,6 +51,9 @@ dev = [
 runs-postgres = [
   "psycopg[binary]>=3.3.9",
 ]
+agent-reference = [
+  "smolagents==1.26.0",
+]
 
 [build-system]
 requires = ["setuptools>=84.2.1", "wheel"]
