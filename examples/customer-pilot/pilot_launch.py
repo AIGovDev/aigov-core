@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import time
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -84,7 +85,7 @@ def _health(url: str) -> bool:
         return False
 
 
-def _generated(state_dir: Path) -> dict[str, Any]:
+def default_generate(state_dir: Path) -> dict[str, Any]:
     """Identities, keys, policy, and environment for one Core. Written under the state directory only."""
     if state_dir.exists():
         shutil.rmtree(state_dir)
@@ -122,7 +123,14 @@ def _write_state(
     return state_file
 
 
-def start_docker(state_dir: Path, port: int, image: str) -> Running:
+def start_docker(
+    state_dir: Path,
+    port: int,
+    image: str,
+    *,
+    prefix: str = PREFIX,
+    generate: Callable[[Path], dict[str, Any]] = default_generate,
+) -> Running:
     t0 = time.time()
     if not _docker_ok("info"):
         raise SystemExit(
@@ -135,27 +143,27 @@ def start_docker(state_dir: Path, port: int, image: str) -> Running:
             flush=True,
         )
         subprocess.run(["docker", "build", "-t", image, str(repo)], check=True)
-    if _docker_ok("container", "inspect", f"{PREFIX}-core"):
-        raise SystemExit(f"{PREFIX}-core already exists. Run `pilot.py down` first.")
+    if _docker_ok("container", "inspect", f"{prefix}-core"):
+        raise SystemExit(f"{prefix}-core already exists. Run `pilot.py down` first.")
 
-    built = _generated(state_dir)
+    built = generate(state_dir)
     env = dict(built["env"])
     env["AIGOV_POLICY_DIR"] = "/app/policies"
     env["AIGOV_POLICY_BUNDLE_FILE"] = "/app/policies/policy.bundle.staging.json"
     pg_password = secrets.token_urlsafe(24)
     env["DATABASE_URL"] = (
-        f"postgres://{DB_USER}:{pg_password}@{PREFIX}-pg:5432/{DB_NAME}"
+        f"postgres://{DB_USER}:{pg_password}@{prefix}-pg:5432/{DB_NAME}"
     )
 
-    _docker("network", "create", f"{PREFIX}-net", check=False)
-    _docker("volume", "create", f"{PREFIX}-ledger", check=False)
+    _docker("network", "create", f"{prefix}-net", check=False)
+    _docker("volume", "create", f"{prefix}-ledger", check=False)
     _docker(
         "run",
         "-d",
         "--name",
-        f"{PREFIX}-pg",
+        f"{prefix}-pg",
         "--network",
-        f"{PREFIX}-net",
+        f"{prefix}-net",
         "-e",
         f"POSTGRES_DB={DB_NAME}",
         "-e",
@@ -166,7 +174,7 @@ def start_docker(state_dir: Path, port: int, image: str) -> Running:
     )
     _wait(
         lambda: _docker_ok(
-            "exec", f"{PREFIX}-pg", "pg_isready", "-U", DB_USER, "-d", DB_NAME
+            "exec", f"{prefix}-pg", "pg_isready", "-U", DB_USER, "-d", DB_NAME
         ),
         90,
         "PostgreSQL",
@@ -175,15 +183,15 @@ def start_docker(state_dir: Path, port: int, image: str) -> Running:
         "run",
         "-d",
         "--name",
-        f"{PREFIX}-core",
+        f"{prefix}-core",
         "--network",
-        f"{PREFIX}-net",
+        f"{prefix}-net",
         "-p",
         f"127.0.0.1:{port}:8088",
         "-v",
         f"{state_dir / 'policies'}:/app/policies:ro",
         "-v",
-        f"{PREFIX}-ledger:/var/lib/govai/ledger",
+        f"{prefix}-ledger:/var/lib/govai/ledger",
     ]
     for key, value in env.items():
         run_args += ["-e", f"{key}={value}"]
@@ -196,12 +204,17 @@ def start_docker(state_dir: Path, port: int, image: str) -> Running:
 
 
 def start_binary(
-    state_dir: Path, port: int, binary: Path, database_url: str
+    state_dir: Path,
+    port: int,
+    binary: Path,
+    database_url: str,
+    *,
+    generate: Callable[[Path], dict[str, Any]] = default_generate,
 ) -> Running:
     t0 = time.time()
     if not binary.exists():
         raise SystemExit(f"binary not found: {binary}")
-    built = _generated(state_dir)
+    built = generate(state_dir)
     ledger = state_dir / "ledger"
     ledger.mkdir()
     env = {
@@ -234,19 +247,19 @@ def start_binary(
     return Running("binary", url, state_file, time.time() - t0, {"pid": proc.pid})
 
 
-def stop(state_dir: Path) -> list[str]:
+def stop(state_dir: Path, *, prefix: str = PREFIX) -> list[str]:
     """Remove the pilot's containers, network, volume, and state directory. Returns what was removed."""
     removed: list[str] = []
-    for name in (f"{PREFIX}-core", f"{PREFIX}-pg"):
+    for name in (f"{prefix}-core", f"{prefix}-pg"):
         if _docker_ok("container", "inspect", name):
             _docker("rm", "-f", name, check=False)
             removed.append(f"container {name}")
-    if _docker_ok("network", "inspect", f"{PREFIX}-net"):
-        _docker("network", "rm", f"{PREFIX}-net", check=False)
-        removed.append(f"network {PREFIX}-net")
-    if _docker_ok("volume", "inspect", f"{PREFIX}-ledger"):
-        _docker("volume", "rm", f"{PREFIX}-ledger", check=False)
-        removed.append(f"volume {PREFIX}-ledger")
+    if _docker_ok("network", "inspect", f"{prefix}-net"):
+        _docker("network", "rm", f"{prefix}-net", check=False)
+        removed.append(f"network {prefix}-net")
+    if _docker_ok("volume", "inspect", f"{prefix}-ledger"):
+        _docker("volume", "rm", f"{prefix}-ledger", check=False)
+        removed.append(f"volume {prefix}-ledger")
     state_file = state_dir / "state.json"
     if state_file.exists():
         try:
