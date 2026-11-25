@@ -224,7 +224,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install -U pip
-          python -m pip install -e "./python[dev,agent-reference]"
+          python -m pip install -e "./python[dev,agent-reference,runs-postgres]"
 
       - name: Build the release Core
         working-directory: rust
