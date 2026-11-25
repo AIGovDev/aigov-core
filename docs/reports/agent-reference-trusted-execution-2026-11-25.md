@@ -173,6 +173,14 @@ its store, and its key; the ledger lock.
 5. **Reconciliation** of reservations without receipts is manual.
 6. **Approval TTL** in the reference policy is five seconds (a demonstration value).
 
+## Evaluation gate
+
+Passes when every trust-boundary requirement has a regression test that runs against a live Core and passes; the
+negative controls show the attacks refused on the trusted Core and succeeding or missing on the baseline; the benchmark
+shows zero unauthorized executions and zero false denials on the deterministic workload; the Rust, Python, PostgreSQL,
+container, and security-harness suites pass; the agent-reference tests run in CI with none skipped; and `make gate`
+passes. These hold for this change set on the committed tree.
+
 ## Human approval gate
 
 Not approved for production by this report. Merging into `staging` is a separate decision. Before any production use:
