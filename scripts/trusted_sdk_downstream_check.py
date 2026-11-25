@@ -45,13 +45,11 @@ def _refuse_repo_on_path() -> None:
 
 def _open_store(path: Path):  # type: ignore[no-untyped-def]
     """Apply the executor store migration once, then open the store, as an operator does before first use."""
-    import sqlite3
 
-    from aigov_py.trusted import ExecutionStore, executor_store_migration
+    from aigov_py.trusted import ExecutionStore, migrate
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
-        conn.executescript(executor_store_migration())
+    migrate(path, backup_dir=None)
     return ExecutionStore(path)
 
 

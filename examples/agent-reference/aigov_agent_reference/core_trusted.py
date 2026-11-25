@@ -12,7 +12,6 @@ Every security check runs in the SDK. Nothing here decides whether a call is aut
 
 from __future__ import annotations
 
-import sqlite3
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -33,7 +32,7 @@ from aigov_py.trusted.executor import ExecutionOutcome, result_digest
 from aigov_py.trusted.executor import Executor as _SDKExecutor
 from aigov_py.trusted.provision import load_state
 from aigov_py.trusted.store import ExecutionStore as _SDKExecutionStore
-from aigov_py.trusted.store import executor_store_migration
+from aigov_py.trusted.store_admin import migrate
 from aigov_py.trusted.tools import ToolSpec, args_binding_hash
 
 # The benchmark's modules are imported by name; the reference's tests and scripts put that directory on sys.path.
@@ -80,8 +79,7 @@ class ExecutionStore(_SDKExecutionStore):
     def __init__(self, path: Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(path) as conn:
-            conn.executescript(executor_store_migration())
+        migrate(path, backup_dir=None)
         super().__init__(path)
 
 

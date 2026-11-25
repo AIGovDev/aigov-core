@@ -25,7 +25,7 @@ from aigov_py.trusted import (
     ToolSpec,
     args_binding_hash,
     build_policy_document,
-    executor_store_migration,
+    migrate,
     provision,
     tool_registry,
     verify_authorization_signature,
@@ -68,11 +68,9 @@ GOLDEN = [
 
 def _store(path: Path) -> ExecutionStore:
     """Apply the executor store migration to a fresh file, as an operator does before first use."""
-    import sqlite3
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
-        conn.executescript(executor_store_migration())
+    migrate(path, backup_dir=None)
     return ExecutionStore(path)
 
 
@@ -81,19 +79,17 @@ def test_a_store_without_the_migration_refuses_to_start():
 
     with (
         tempfile.TemporaryDirectory() as tmp,
-        pytest.raises(ExecutionStoreSchemaError, match="executor_store_migration"),
+        pytest.raises(ExecutionStoreSchemaError, match="migrate"),
     ):
         ExecutionStore(Path(tmp) / "fresh.sqlite")
 
 
 def test_the_migration_creates_the_table_once_and_is_idempotent():
-    import sqlite3
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "m.sqlite"
-        with sqlite3.connect(path) as conn:
-            conn.executescript(executor_store_migration())
-            conn.executescript(executor_store_migration())  # re-running is safe
+        migrate(path, backup_dir=None)
+        migrate(path, backup_dir=None)  # re-running is safe
         ExecutionStore(path)  # now starts
 
 
