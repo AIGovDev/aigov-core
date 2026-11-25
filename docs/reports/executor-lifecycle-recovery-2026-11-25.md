@@ -113,7 +113,7 @@ existing logging of the host collects. No external monitoring was added.
 ## Negative controls against the staging implementation
 
 The same six controls were run against `origin/staging` (877d11f) and against this change, with the same harness
-(`scripts/executor_negative_controls.py`, evidence in `docs/reports/data/`). The first attempt was invalid: child processes
+(`scripts/executor_negative_controls.py`, evidence in `docs/evidence/executor-lifecycle/`). The first attempt was invalid: child processes
 started in the repository root and imported the root-level `aigov_py` shim instead of the package under test. The fix
 starts every child in a scratch directory; the results below are from the corrected runs.
 
@@ -160,7 +160,7 @@ All on the final tree (the last code change was the stable idempotency key; ever
 | Downstream check from the installed wheel, offline | passed |
 | Downstream check from the installed wheel, live (Docker Core) | refund executed once; 10 evidence checks pass |
 | Staging policy harness, `--skip-live`, throwaway PostgreSQL 18 | 66 passed, 0 failed |
-| Negative controls (staging and change) | recorded in `docs/reports/data/` |
+| Negative controls (staging and change) | recorded in `docs/evidence/executor-lifecycle/` |
 | `make gate` | passed |
 | Lint of changed Python (ruff) | clean for changed code |
 
