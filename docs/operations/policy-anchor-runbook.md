@@ -70,7 +70,7 @@ The sequence, with its transaction boundaries, is in `reconcile_all_and_commit` 
 | A refusal during the decisions in step 4 | Nothing written, for any policy. The transaction rolls back. |
 | A database write fails in step 4 | The transaction rolls back. The filesystem record is not written. |
 | The filesystem write fails in step 4 | The transaction rolls back. The anchor is not advanced. |
-| The commit fails in step 4 (after the filesystem write) | The record is ahead of the anchor. For an **update**, the next start rolls the anchor forward when the bundle matches the record, and refuses any older bundle. For a **first start**, the record exists and no anchor row exists: the next start refuses until the bootstrap procedure is run. This is the one state that needs an operator, and it is tested. |
+| The commit fails in step 4 (after the filesystem write) | The record is ahead of the anchor. For an **update**, the next start rolls the anchor forward when the bundle matches the record, and refuses any older bundle. For a **first start**, the record exists and no anchor row exists: the next start refuses until the bootstrap procedure is run. This is the one state that needs an operator, and it is tested. Accepted for staging only; not accepted for production (issue #501). |
 | The process fails after step 4 (serving) | The activation has committed. A later runtime failure does not undo it. |
 
 Two properties follow from the order:

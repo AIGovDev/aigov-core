@@ -33,24 +33,39 @@ bootstrap procedure is run.
 
 ## Evidence
 
-Results on commit `2bd70f4` (PR #503 head after this review), local only. Skipped and blocked items are not counted as passing.
+Results on the follow-up branch `fix/anchor-activation-protocol`, from a fresh branch off `origin/staging` (`c9bf9ac`),
+with the fix commits and the window test. Local only. Skipped and blocked items are not counted as passing.
 
 | Suite | Result |
 |-------|--------|
-| Rust `cargo test --locked --no-fail-fast`, no database | 281 passed, 0 failed, 21 ignored (PostgreSQL-backed) |
-| Rust ignored tests, PostgreSQL 18 (`--ignored`, fresh database per test) | 21 passed, 0 failed |
-| Anchor integration tests, PostgreSQL 18 (`policy_anchor_pg`) | 17 passed (12 earlier cases, plus 5 activation-protocol cases) |
-| Python `pytest` full suite, no database configured | 1026 passed, 0 failed, 87 skipped (database-gated) |
-| Python `tests/test_postgres_integration.py`, PostgreSQL 18, destructive flag set on a scratch database | 33 passed, 0 failed |
-| Python container tests, clean no-cache image `aigov-core:test` | 16 passed, 0 failed |
-| Local harness, `--skip-live`, PostgreSQL 18 per ledger | 66 passed, 0 failed (includes 6 new checks in 3 scenarios: bind failure, insert failure, two bundles) |
+| Rust `cargo test --locked --no-fail-fast`, no database | 281 passed, 0 failed, 22 ignored (PostgreSQL-backed) |
+| Rust ignored tests, PostgreSQL 18 (`--ignored`, fresh database per test) | 22 passed, 0 failed |
+| Anchor integration tests, PostgreSQL 18 (`policy_anchor_pg`) | 18 passed (12 earlier, 5 activation-protocol, 1 accepted first-start window) |
+| Python `pytest` full suite, no database configured | 1072 passed, 0 failed, 41 skipped (database-gated) |
+| Python `tests/test_postgres_integration.py`, PostgreSQL 18, destructive flag on a scratch database | 33 passed, 0 failed |
+| Python container tests, clean no-cache image `aigov-core:test` built from this tree | 16 passed, 0 failed |
+| Local harness, `--skip-live`, PostgreSQL 18 per ledger | 66 passed, 0 failed, 0 blocked (includes the bind-failure, insert-failure, and two-bundle checks) |
 | `ruff check`, `mypy` on the harness | pass |
 | `make gate` | passes |
-| Clippy on `policy_anchor`, `policy_watermark` | no findings |
+| Clippy, `policy_store.rs` | one warning, `unnecessarily eager cloning of iterator items`. It already exists on `origin/staging` (at line 720), so it predates this change. |
 
-Not run in this review: the full Python suite with a database configured (the 1109-passing figure in the earlier version
-of this report was from a previous commit), live staging checks, and CI on the new head. CI on PR #503 must be checked
-before any merge decision.
+Not run here: live staging checks (skipped by `--skip-live`, reported as blocked, not passed). CI on the PR head is reported
+separately, against that exact SHA.
+
+## Accepted limitation (staging only)
+
+A commit failure on a **first start** leaves the filesystem record ahead of an absent anchor. This window is accepted for
+staging, with these conditions, each covered by a test (`first_start_window_admits_nothing_until_an_explicit_bootstrap`,
+`commit_failure_after_the_filesystem_write_needs_bootstrap_and_is_deterministic`):
+
+- Startup fails closed. The same bundle, an older revision, and a different digest at the same revision are all refused.
+- No older policy can be activated through recovery. An older bundle is refused as a rollback after bootstrap.
+- Bootstrap requires an explicit operator action that inserts the verified `(policy_id, revision, digest)` row, on a healthy
+  database. Nothing creates the row automatically.
+- No automatic insecure recovery path exists. The anchor is never created from the filesystem record.
+
+This is **not** cross-store atomicity. PostgreSQL and the filesystem are still two writes. The limitation is recorded in
+issue #501. It is not accepted for production.
 
 ## Negative controls
 
