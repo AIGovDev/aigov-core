@@ -24,7 +24,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-IMAGE = os.environ.get("AIGOV_TEST_IMAGE", "aigov-core:hardened")
+# Build from the repository first: docker build --no-cache -t aigov-core:test .
+IMAGE = os.environ.get("AIGOV_TEST_IMAGE", "aigov-core:test")
 REQUIRE = os.environ.get("AIGOV_REQUIRE_CONTAINER_TESTS") == "1"
 MOUNT_BASE = REPO_ROOT / "artifacts" / "container-tests"
 PG_IMAGE = os.environ.get("AIGOV_TEST_PG_IMAGE", "postgres:16-alpine")

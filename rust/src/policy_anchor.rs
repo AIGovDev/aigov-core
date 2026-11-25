@@ -163,100 +163,164 @@ fn db_err(e: sqlx::Error) -> String {
     format!("policy revision anchor unavailable: {text}")
 }
 
-/// Reconcile the filesystem record with the database anchor, and commit the revision. Fail closed on any error.
-pub async fn reconcile_and_commit(pool: &DbPool, p: &PendingAnchor) -> Result<(), String> {
-    if !is_hex_digest(&p.digest_sha256) {
-        return Err(
-            "policy revision anchor: digest is not a lowercase SHA-256 hex string".to_string(),
-        );
+/// Reconcile and commit every pending revision of one activation. Fail closed on any error.
+///
+/// Order, with explicit transaction boundaries:
+///
+/// 1. Validate all pending revisions. Duplicate policy identifiers are refused.
+/// 2. Take the per-host filesystem lock (on the blocking pool). Read the filesystem record.
+/// 3. Open one database transaction. Take an advisory lock for each policy, in identifier order, and decide every
+///    policy against the database. A refusal returns here and the transaction rolls back. Nothing has been written.
+/// 4. Apply the database writes inside the transaction (not yet committed). A failure here rolls back.
+/// 5. Write the filesystem record once, atomically, covering every policy. A failure here rolls back the transaction.
+/// 6. Commit the transaction.
+///
+/// Crash and failure outcomes:
+///
+/// - A failure before step 5 leaves the database and the filesystem unchanged.
+/// - A failure at step 6 leaves the filesystem record written and the anchor not advanced (or not created). For an
+///   update, the next start rolls the anchor forward when the bundle matches the record. For a first start, the record
+///   exists and the anchor does not, so the next start refuses until the bootstrap procedure is run. This is the one
+///   state that needs an operator, and it is tested.
+///
+/// There is no atomicity across PostgreSQL and the filesystem. The protocol above fixes the order so that every failure
+/// point has a defined outcome.
+pub async fn reconcile_all_and_commit(
+    pool: &DbPool,
+    pendings: &[PendingAnchor],
+) -> Result<(), String> {
+    if pendings.is_empty() {
+        return Ok(());
     }
-    let candidate_rev = policy_watermark::parse_version(&p.version_raw)?;
+    let dir = pendings[0].ledger_dir.clone();
+    let mut seen = std::collections::BTreeSet::new();
+    for p in pendings {
+        if p.ledger_dir != dir {
+            return Err(
+                "policy revision anchor: pending revisions name different ledger directories"
+                    .to_string(),
+            );
+        }
+        if !seen.insert(p.policy_id.clone()) {
+            return Err(format!(
+                "policy revision anchor: policy {:?} appears more than once in one activation",
+                p.policy_id
+            ));
+        }
+        if !is_hex_digest(&p.digest_sha256) {
+            return Err(
+                "policy revision anchor: digest is not a lowercase SHA-256 hex string".to_string(),
+            );
+        }
+        policy_watermark::parse_version(&p.version_raw)?;
+    }
+    let mut ordered: Vec<&PendingAnchor> = pendings.iter().collect();
+    ordered.sort_by(|a, b| a.policy_id.cmp(&b.policy_id));
 
-    // Step 1: per-host lock over the filesystem record. The lock is a blocking `flock`, so it is taken on the
-    // blocking pool: a blocked worker thread could otherwise stop the task that holds the lock from finishing.
-    let dir = p.ledger_dir.clone();
-    let _fs_lock = tokio::task::spawn_blocking(move || policy_watermark::FsLock::acquire(&dir))
-        .await
-        .map_err(|e| format!("policy watermark lock task failed: {e}"))??;
-    let fs_wm: Option<Watermark> = policy_watermark::read_optional(&p.ledger_dir)?;
-    let fs_entry: Option<(u64, String)> = fs_wm
-        .as_ref()
-        .and_then(|w| w.policies.get(&p.policy_id))
-        .map(|e| (e.version, e.digest_sha256.clone()));
-    let ledger_has_data = policy_watermark::ledger_has_data(&p.ledger_dir);
+    // Step 2: per-host lock over the filesystem record. Blocking `flock` runs on the blocking pool.
+    let lock_dir = dir.clone();
+    let _fs_lock =
+        tokio::task::spawn_blocking(move || policy_watermark::FsLock::acquire(&lock_dir))
+            .await
+            .map_err(|e| format!("policy watermark lock task failed: {e}"))??;
+    let fs_wm: Option<Watermark> = policy_watermark::read_optional(&dir)?;
+    let ledger_has_data = policy_watermark::ledger_has_data(&dir);
 
-    // Step 2: database transaction, serialized per policy identifier.
+    // Step 3: one transaction; decide every policy before any write.
     let mut tx = pool.begin().await.map_err(db_err)?;
-    sqlx::query("select pg_advisory_xact_lock(hashtextextended($1, 0))")
+    let mut plans: Vec<(&PendingAnchor, Plan)> = Vec::new();
+    for p in &ordered {
+        sqlx::query("select pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(&p.policy_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "select revision, digest_sha256 from policy_revision_anchor where policy_id = $1",
+        )
         .bind(&p.policy_id)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(db_err)?;
-    let row: Option<(i64, String)> = sqlx::query_as(
-        "select revision, digest_sha256 from policy_revision_anchor where policy_id = $1",
-    )
-    .bind(&p.policy_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_err)?;
-    let anchor: Option<(u64, String)> = match row {
-        Some((rev, dg)) => {
-            let rev = u64::try_from(rev)
-                .map_err(|_| "policy revision anchor holds a negative revision".to_string())?;
-            Some((rev, dg))
+        let anchor: Option<(u64, String)> = match row {
+            Some((rev, dg)) => Some((
+                u64::try_from(rev)
+                    .map_err(|_| "policy revision anchor holds a negative revision".to_string())?,
+                dg,
+            )),
+            None => None,
+        };
+        let fs_entry: Option<(u64, String)> = fs_wm
+            .as_ref()
+            .and_then(|w| w.policies.get(&p.policy_id))
+            .map(|e| (e.version, e.digest_sha256.clone()));
+        let candidate_rev = policy_watermark::parse_version(&p.version_raw)?;
+        let plan = decide(
+            anchor.as_ref().map(|(r, d)| (*r, d.as_str())),
+            fs_entry.as_ref().map(|(r, d)| (*r, d.as_str())),
+            (candidate_rev, &p.digest_sha256),
+            ledger_has_data,
+        )?;
+        plans.push((p, plan));
+    }
+
+    // Step 4: database writes, inside the transaction, before the filesystem write.
+    for (p, plan) in &plans {
+        let candidate_rev = policy_watermark::parse_version(&p.version_raw)?;
+        match plan.db {
+            DbAction::None => {}
+            DbAction::Insert => {
+                sqlx::query(
+                    "insert into policy_revision_anchor (policy_id, revision, digest_sha256) values ($1, $2, $3)",
+                )
+                .bind(&p.policy_id)
+                .bind(candidate_rev as i64)
+                .bind(&p.digest_sha256)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+            }
+            DbAction::Advance => {
+                sqlx::query(
+                    "update policy_revision_anchor set revision = $2, digest_sha256 = $3, updated_at = now() where policy_id = $1",
+                )
+                .bind(&p.policy_id)
+                .bind(candidate_rev as i64)
+                .bind(&p.digest_sha256)
+                .execute(&mut *tx)
+                .await
+                .map_err(db_err)?;
+            }
         }
-        None => None,
-    };
+    }
 
-    // Step 3: decide. Any refusal returns here, and the transaction is dropped without committing.
-    let plan = decide(
-        anchor.as_ref().map(|(r, d)| (*r, d.as_str())),
-        fs_entry.as_ref().map(|(r, d)| (*r, d.as_str())),
-        (candidate_rev, &p.digest_sha256),
-        ledger_has_data,
-    )?;
-
-    // Step 4: filesystem first. A failure here rolls the transaction back, so the anchor does not move.
-    if let Some((rev, dg)) = plan.fs_target.clone() {
-        let mut wm = fs_wm.unwrap_or_else(Watermark::empty);
-        wm.policies.insert(
-            p.policy_id.clone(),
-            WatermarkEntry {
+    // Step 5: one filesystem write covering every policy. A failure here returns, and the transaction rolls back.
+    let mut wm = fs_wm.clone().unwrap_or_else(Watermark::empty);
+    let mut changed = false;
+    for (p, plan) in &plans {
+        if let Some((rev, dg)) = plan.fs_target.clone() {
+            let entry = WatermarkEntry {
                 version: rev,
                 digest_sha256: dg,
-            },
-        );
-        policy_watermark::write_record(&p.ledger_dir, &wm)?;
+            };
+            if wm.policies.get(&p.policy_id) != Some(&entry) {
+                wm.policies.insert(p.policy_id.clone(), entry);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        policy_watermark::write_record(&dir, &wm)?;
     }
 
-    // Step 5: database commit. A failure here leaves the filesystem record ahead; the next start rolls it forward.
-    match plan.db {
-        DbAction::None => {}
-        DbAction::Insert => {
-            sqlx::query(
-                "insert into policy_revision_anchor (policy_id, revision, digest_sha256) values ($1, $2, $3)",
-            )
-            .bind(&p.policy_id)
-            .bind(candidate_rev as i64)
-            .bind(&p.digest_sha256)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
-        }
-        DbAction::Advance => {
-            sqlx::query(
-                "update policy_revision_anchor set revision = $2, digest_sha256 = $3, updated_at = now() where policy_id = $1",
-            )
-            .bind(&p.policy_id)
-            .bind(candidate_rev as i64)
-            .bind(&p.digest_sha256)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_err)?;
-        }
-    }
+    // Step 6: commit.
     tx.commit().await.map_err(db_err)?;
     Ok(())
+}
+
+/// One policy. Equivalent to `reconcile_all_and_commit` with a single pending revision.
+pub async fn reconcile_and_commit(pool: &DbPool, p: &PendingAnchor) -> Result<(), String> {
+    reconcile_all_and_commit(pool, std::slice::from_ref(p)).await
 }
 
 #[cfg(test)]

@@ -356,3 +356,221 @@ async fn missing_table_reports_that_migrations_are_needed() {
         .unwrap_err();
     assert!(err.contains("apply migrations"), "{err}");
 }
+
+// ---- Activation protocol: multiple policies, first-start failures, explicit transaction boundaries ----
+
+fn pending_for(ledger: &Path, policy: &str, version: &str, digest: &str) -> PendingAnchor {
+    PendingAnchor {
+        ledger_dir: ledger.to_path_buf(),
+        policy_id: policy.to_string(),
+        version_raw: version.to_string(),
+        digest_sha256: digest.to_string(),
+    }
+}
+
+async fn anchor_row(pool: &sqlx::PgPool, policy: &str) -> Option<(i64, String)> {
+    sqlx::query_as(
+        "select revision, digest_sha256 from policy_revision_anchor where policy_id = $1",
+    )
+    .bind(policy)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+}
+
+fn record_policies(ledger: &Path) -> Option<Vec<String>> {
+    policy_watermark::read_optional(ledger)
+        .unwrap()
+        .map(|w| w.policies.keys().cloned().collect())
+}
+
+#[tokio::test]
+#[ignore = "requires AIGOV_TEST_PG_ADMIN_URL (PostgreSQL)"]
+async fn multi_policy_activation_with_one_refusal_writes_nothing() {
+    use aigov_audit::policy_anchor::reconcile_all_and_commit;
+    let pool = fresh_pool().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let l = ledger(&tmp);
+    // Policy B is anchored at revision 3; policy A is new.
+    sqlx::query("insert into policy_revision_anchor (policy_id, revision, digest_sha256) values ('policy-b', 3, $1)")
+        .bind(D3)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let batch = vec![
+        pending_for(&l, "policy-a", "2", D2),
+        pending_for(&l, "policy-b", "1", D1), // rollback: refused
+    ];
+    let err = reconcile_all_and_commit(&pool, &batch).await.unwrap_err();
+    assert!(err.contains("rollback refused"), "{err}");
+    assert!(
+        anchor_row(&pool, "policy-a").await.is_none(),
+        "policy A must not be advanced by a refused activation"
+    );
+    assert_eq!(anchor_row(&pool, "policy-b").await.unwrap().0, 3);
+    assert!(
+        record_policies(&l).is_none(),
+        "no filesystem record may be written by a refused activation"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires AIGOV_TEST_PG_ADMIN_URL (PostgreSQL)"]
+async fn multi_policy_activation_commits_every_policy_together() {
+    use aigov_audit::policy_anchor::reconcile_all_and_commit;
+    let pool = fresh_pool().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let l = ledger(&tmp);
+    let batch = vec![
+        pending_for(&l, "policy-a", "2", D2),
+        pending_for(&l, "policy-b", "1", D1),
+    ];
+    reconcile_all_and_commit(&pool, &batch).await.unwrap();
+    assert_eq!(anchor_row(&pool, "policy-a").await.unwrap().0, 2);
+    assert_eq!(anchor_row(&pool, "policy-b").await.unwrap().0, 1);
+    let mut names = record_policies(&l).unwrap();
+    names.sort();
+    assert_eq!(names, vec!["policy-a".to_string(), "policy-b".to_string()]);
+}
+
+#[tokio::test]
+#[ignore = "requires AIGOV_TEST_PG_ADMIN_URL (PostgreSQL)"]
+async fn first_start_insert_failure_writes_no_filesystem_record() {
+    // The identifier exceeds the column constraint, so the database insert fails inside the transaction.
+    // The filesystem write comes after the database writes, so no record may be left behind.
+    let pool = fresh_pool().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let l = ledger(&tmp);
+    let long = "x".repeat(300);
+    assert!(
+        reconcile_and_commit(&pool, &pending_for(&l, &long, "1", D1))
+            .await
+            .is_err()
+    );
+    assert!(
+        record_policies(&l).is_none(),
+        "a failed first start must not leave a filesystem record"
+    );
+    // A retry with a valid identifier is a clean first start.
+    reconcile_and_commit(&pool, &pending(&l, "1", D1))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires AIGOV_TEST_PG_ADMIN_URL (PostgreSQL)"]
+async fn filesystem_failure_rolls_back_the_first_start_insert() {
+    let pool = fresh_pool().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let l = ledger(&tmp);
+    // The record path is a directory, so the filesystem write cannot succeed.
+    std::fs::create_dir(policy_watermark::watermark_path(&l)).unwrap();
+    assert!(reconcile_and_commit(&pool, &pending(&l, "1", D1))
+        .await
+        .is_err());
+    assert!(
+        anchor_row(&pool, POLICY).await.is_none(),
+        "the insert must roll back when the filesystem write fails"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires AIGOV_TEST_PG_ADMIN_URL (PostgreSQL)"]
+async fn commit_failure_after_the_filesystem_write_needs_bootstrap_and_is_deterministic() {
+    // The documented first-start window: the record is written, then the commit fails.
+    let pool = fresh_pool().await;
+    sqlx::query(
+        "create function fail_commit() returns trigger language plpgsql as $$ begin raise exception 'injected commit failure'; end $$",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "create constraint trigger anchor_fail after insert on policy_revision_anchor deferrable initially deferred for each row when (new.policy_id = 'trig-policy') execute function fail_commit()",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let l = ledger(&tmp);
+    let p = pending_for(&l, "trig-policy", "2", D2);
+    let err = reconcile_and_commit(&pool, &p).await.unwrap_err();
+    assert!(err.contains("injected commit failure"), "{err}");
+    assert_eq!(
+        record_policies(&l),
+        Some(vec!["trig-policy".to_string()]),
+        "the record was written before the commit"
+    );
+    assert!(
+        anchor_row(&pool, "trig-policy").await.is_none(),
+        "the commit failed, so no anchor row exists"
+    );
+    // The next start refuses deterministically and asks for the bootstrap procedure. It never guesses.
+    let err = reconcile_and_commit(&pool, &p).await.unwrap_err();
+    assert!(err.contains("bootstrap"), "{err}");
+}
+
+// Accepted staging window: a commit failure on a first start leaves the record ahead of the (absent) anchor.
+// Recovery must be explicit. Nothing automatic may activate an older policy or a different digest.
+#[tokio::test]
+#[ignore = "requires AIGOV_TEST_PG_ADMIN_URL (PostgreSQL)"]
+async fn first_start_window_admits_nothing_until_an_explicit_bootstrap() {
+    let pool = fresh_pool().await;
+    sqlx::query(
+        "create function fail_window_commit() returns trigger language plpgsql as $$ begin raise exception 'injected commit failure'; end $$",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "create constraint trigger window_fail after insert on policy_revision_anchor deferrable initially deferred for each row when (new.policy_id = 'window-policy') execute function fail_window_commit()",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let l = ledger(&tmp);
+    let current = pending_for(&l, "window-policy", "2", D2);
+    assert!(reconcile_and_commit(&pool, &current).await.is_err());
+    assert!(anchor_row(&pool, "window-policy").await.is_none());
+    assert_eq!(record_policies(&l), Some(vec!["window-policy".to_string()]));
+
+    // Startup fails closed for the same bundle, for an older revision, and for a different digest at the same revision.
+    let same = reconcile_and_commit(&pool, &current).await.unwrap_err();
+    assert!(same.contains("bootstrap"), "{same}");
+    let older = reconcile_and_commit(&pool, &pending_for(&l, "window-policy", "1", D1))
+        .await
+        .unwrap_err();
+    assert!(
+        older.contains("bootstrap"),
+        "older bundle must not activate: {older}"
+    );
+    let other_digest = reconcile_and_commit(&pool, &pending_for(&l, "window-policy", "2", D1))
+        .await
+        .unwrap_err();
+    assert!(
+        other_digest.contains("bootstrap"),
+        "different digest must not activate: {other_digest}"
+    );
+    assert!(
+        anchor_row(&pool, "window-policy").await.is_none(),
+        "no automatic anchor row may appear"
+    );
+
+    // Explicit operator bootstrap with the verified (revision, digest), on a healthy database (the injected
+    // failure is removed). The same bundle is then accepted; an older bundle is refused as a rollback.
+    sqlx::query("drop trigger window_fail on policy_revision_anchor")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into policy_revision_anchor (policy_id, revision, digest_sha256) values ('window-policy', 2, $1)")
+        .bind(D2)
+        .execute(&pool)
+        .await
+        .unwrap();
+    reconcile_and_commit(&pool, &current).await.unwrap();
+    let rollback = reconcile_and_commit(&pool, &pending_for(&l, "window-policy", "1", D1))
+        .await
+        .unwrap_err();
+    assert!(rollback.contains("rollback refused"), "{rollback}");
+}

@@ -60,10 +60,15 @@ pub use govai_api::{build_app_state, build_router};
 pub async fn run() -> Result<(), String> {
     let bind = std::env::var("AIGOV_BIND").unwrap_or_else(|_| "127.0.0.1:8088".to_string());
     let state = build_app_state().await?;
+    let pool = state.pool.clone();
+    let policy_store = state.policy_store.clone();
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
         .map_err(|e| format!("bind {bind}: {e}"))?;
+    // The activation commits only once the listener is bound. If the commit fails, the process exits before
+    // serving, and the anchor is not advanced by the failed activation.
+    policy_store.commit_revisions(&pool).await?;
     eprintln!("govai listening on http://{bind}");
     axum::serve(listener, app)
         .await

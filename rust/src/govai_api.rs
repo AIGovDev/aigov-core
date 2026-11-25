@@ -213,8 +213,8 @@ pub async fn build_app_state() -> Result<AppState, String> {
         .or_else(|_| std::env::var("AIGOV_BASE_URL"))
         .ok()
         .filter(|s| !s.trim().is_empty());
-    // Every fallible startup step has passed. Only now does a verified policy revision become accepted.
-    policy_store.commit_revisions(&pool).await?;
+    // The policy revision is committed by `crate::run` after the listener is bound, so a bind failure never
+    // advances the anchor. See `PolicyStore::commit_revisions`.
     Ok(AppState {
         deployment_env,
         policy_store,
