@@ -177,14 +177,6 @@ pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
     refuse_fault_injection_outside_test(deployment_env)?;
     crate::principals::init_principals(deployment_env)?;
-    // Production authenticates every write. Without configured principals, any holder of a key can post any event type,
-    // including approvals and receipts, so production refuses to start in that configuration.
-    if matches!(deployment_env, GovaiEnvironment::Prod) && !crate::principals::principals_configured() {
-        return Err(
-            "Invalid configuration: production requires GOVAI_PRINCIPALS_JSON (or OIDC); refusing to start without authenticated principals"
-                .to_string(),
-        );
-    }
     let bundle_only = match deployment_env {
         GovaiEnvironment::Prod => true,
         GovaiEnvironment::Staging => signed_bundle_configured(deployment_env),
@@ -213,6 +205,14 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
+    // Production authenticates every write. Without configured principals, any holder of a key can post any event type,
+    // including approvals and receipts, so production refuses to start in that configuration.
+    if matches!(deployment_env, GovaiEnvironment::Prod) && !crate::principals::principals_configured() {
+        return Err(
+            "Invalid configuration: production requires GOVAI_PRINCIPALS_JSON (or OIDC); refusing to start without authenticated principals"
+                .to_string(),
+        );
+    }
     crate::oidc::init_from_env(deployment_env)?;
     crate::execution_authorization::init_from_env()?;
     if crate::execution_authorization::enabled()
