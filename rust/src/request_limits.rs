@@ -1,7 +1,8 @@
 //! Bounded request handling for the ledger routes: a per-request time limit, a concurrency limit, and a body size limit.
 //!
-//! A request holds a concurrency permit only while it runs. The time limit includes the wait for a permit and the time
-//! spent reading the body, so a stalled client cannot hold a permit forever. Health and readiness routes are not limited,
+//! A request that finds the in-flight count at its limit is refused at once with 503 OVERLOADED, before any handler runs,
+//! so nothing is recorded for it. The time limit covers an admitted request's body read and its handler, so a stalled client
+//! cannot hold a slot forever. Health and readiness routes are not limited,
 //! so an operator can still see a loaded instance. Invalid settings stop startup: a limit that cannot be parsed is not
 //! silently replaced by a default.
 
@@ -11,7 +12,7 @@ use std::time::Duration;
 
 /// Counts requests in flight across every connection. A request that finds the count at the limit is refused at once, so it
 /// never reaches a handler and records nothing. A counter shared by all connections does not depend on how a service layer
-/// polls readiness per connection, which is what made the earlier queueing layers unreliable under keep-alive.
+/// polls readiness per connection, which is why the queueing layers were replaced (see the layer order in `build_router`).
 #[derive(Debug)]
 pub struct Shedder {
     in_flight: AtomicUsize,
