@@ -1,10 +1,10 @@
 {
   "schema": "govai.release_provenance.v1",
-  "generated_at_utc": "2026-11-26T12:14:52Z",
+  "generated_at_utc": "2026-11-26T12:22:34Z",
   "source": {
-    "commit": "c636e67d86916e06806f0748ab0c2f3359e79315",
+    "commit": "18de55a3ebd62fa6513d61a9323cd5e14de88f5c",
     "branch": "feat/pilot-readiness-closure",
-    "working_tree_clean": false
+    "working_tree_clean": true
   },
   "toolchain": {
     "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
@@ -21,11 +21,15 @@
     "python -m build --wheel python",
     "python scripts/generate_sbom.py --rust-dir rust --out-dir <dir>"
   ],
-  "reproducibility": "crate-only rebuild in the same target directory (cargo clean -p aigov_audit, then build): both builds 1dea2793fd\u2026, identical. Dependencies were not rebuilt; a full from-scratch comparison was not run (disk).",
+  "reproducibility": "Core crate rebuilt twice in the same target directory after cargo clean -p aigov_audit: identical hash (1dea2793fd...). Dependencies not rebuilt. Full from-scratch comparison not run (disk).",
   "artifacts": {
     "aigov_audit (release binary)": {
       "path": "rust/target/release/aigov_audit",
       "sha256": "1dea2793fddee6712579a35572e34c890e9cdd769bab71a7acf933ce97215329"
+    },
+    "aigov_py wheel": {
+      "path": "aigov_py-0.2.1-py3-none-any.whl",
+      "sha256": "b67fc422e2110d04496ce65ad2f85183b6ea4341bef2c06e283d8ae78ac57c43"
     },
     "SBOM aigov-core-rust.cdx.json": {
       "path": "aigov-core-rust.cdx.json",
