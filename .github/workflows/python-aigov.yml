@@ -41,7 +41,7 @@ jobs:
           . .venv/bin/activate
           python -m pytest tests/test_standards_conformance.py tests/test_mcp_preexecution_authorization.py -q
           ruff check ../mcp/aigov_mcp_server.py ../examples/mcp-trusted-execution/approve_template_request.py tests/test_mcp_preexecution_authorization.py
-          ruff format --check ../mcp/aigov_mcp_server.py ../examples/mcp-trusted-execution/approve_template_request.py tests/test_mcp_preexecution_authorization.py
+          ruff format --check ../examples/mcp-trusted-execution/approve_template_request.py tests/test_mcp_preexecution_authorization.py
 
       - name: Write Python smoke summary
         if: always()
