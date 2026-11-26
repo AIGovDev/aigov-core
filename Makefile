@@ -5,7 +5,7 @@ export
 AIGOV_MODE ?= ci
 
 .PHONY: \
-	crash-consistency-gate fault-absence-check \
+	crash-consistency-gate fault-absence-check two-volume-rollback \
 	FORCE \
 	audit audit_bg audit_stop audit_restart audit_logs require_audit_url \
 	status verify verify_log \
@@ -83,6 +83,10 @@ fault-absence-check:
 	cd rust && cargo build --release --locked --bin aigov_audit
 	$(PY) scripts/check_no_fault_injection.py rust/target/release/aigov_audit
 	@echo "fault-absence-check: OK"
+
+# Policy rollback across two real filesystems (issue #501 A2). Needs AIGOV_TEST_PG_ADMIN_URL.
+two-volume-rollback:
+	bash scripts/two_volume_rollback.sh
 
 gate:
 	@python3 scripts/gate_reports.py
