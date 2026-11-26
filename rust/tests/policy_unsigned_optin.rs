@@ -10,6 +10,11 @@ async fn staging_accepts_unsigned_policy_file_only_with_explicit_opt_in() {
     std::env::set_var("GOVAI_LEDGER_DIR", ledger.path());
     std::env::set_var("GOVAI_API_KEYS", "pol-key-two");
     std::env::set_var("GOVAI_API_KEYS_JSON", r#"{"pol-key-two":"tenant-pol2"}"#);
+    // Staging requires authenticated principals; this key is the agent.
+    std::env::set_var(
+        "GOVAI_PRINCIPALS_JSON",
+        r#"{"pol-key-two":{"principal":"agent:pol2","identity":"agent:pol2","role":"agent","tenant":"tenant-pol2"}}"#,
+    );
     std::env::set_var("AIGOV_ENVIRONMENT", "staging");
     std::env::set_var("AIGOV_POLICY_FILE", &policy);
     std::env::set_var("AIGOV_ALLOW_UNSIGNED_POLICY_FILE", "1");
