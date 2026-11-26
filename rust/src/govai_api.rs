@@ -213,7 +213,8 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
-    // Production authenticates every write. Without confe::execution_authorization::init_from_env()?;
+    crate::oidc::init_from_env(deployment_env)?;
+    crate::execution_authorization::init_from_env()?;
     if crate::execution_authorization::enabled()
         && !crate::principals::principals_configured()
     {
