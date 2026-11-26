@@ -14,3 +14,9 @@ Run `cd python && python -m pytest tests/test_huggingface_provenance.py -q`. Moc
 
 ## Limitations and residual risk
 No publisher signature, complete inventory, independent metadata validation or automatic Core evidence submission. Malformed manifests and credential handling require further hardening. Do not treat this report as evidence of a completed external audit.
+
+## Evaluation gate
+Acceptance requires passing offline provenance regression tests and repository CI. Live Hub compatibility remains unverified. No model quality or safety evaluation is asserted. Evaluation status: pending final validation.
+
+## Human approval gate
+Maintainer review and explicit merge approval are required before promotion. No human approval is asserted by this report. Approval status: pending.
