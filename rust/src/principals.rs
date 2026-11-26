@@ -9,7 +9,7 @@
 //!
 //! When configured, every `POST /evidence` must come from a configured key. Core stamps the
 //! authenticated `principal`, `identity`, and `role` into the event payload itself, overwriting anything the
-//! client sent. The role decides which event types the principal may post (see [`allowed_event_types`]).
+//! client sent. The role decides which event types the principal may post (see [`role_may_post`]).
 //!
 //! Validation at startup refuses: keys that are not also in `GOVAI_API_KEYS`, a principal id or key reused
 //! across principals, an approver identity that is also the agent's identity (self-approval by configuration),
@@ -59,18 +59,24 @@ struct RawPrincipal {
     tenant: String,
 }
 
-/// Event types each role may post to `POST /evidence`. Anything else is refused for that principal.
-pub fn allowed_event_types(role: Role) -> &'static [&'static str] {
-    match role {
-        Role::Agent => &[
-            "ai_discovery_reported",
-            "tool_call",
-            "tool_approval_requested",
-            "consequential_tool_call",
-            "tool_call_blocked",
-        ],
-        Role::Approver => &["human_approved", "human_approval_revoked"],
-        Role::Executor => &["execution_receipt"],
+/// Event types that only one role may post. They are the human and executor acts that gates depend on, so no other role
+/// may record them, whatever the payload says.
+const PROTECTED_EVENT_TYPES: &[(&str, Role)] = &[
+    ("human_approved", Role::Approver),
+    ("human_approval_revoked", Role::Approver),
+    ("risk_reviewed", Role::Approver),
+    ("execution_receipt", Role::Executor),
+];
+
+/// True when `role` may post `event_type` to `POST /evidence`.
+///
+/// Protected types belong to exactly one role (above). Every other event type is evidence from the automated pipeline or
+/// the agent, so only the agent role may post it. The policy still checks each event against its gate, so an agent cannot
+/// use this rule to satisfy an approval, a review, or a receipt.
+pub fn role_may_post(role: Role, event_type: &str) -> bool {
+    match PROTECTED_EVENT_TYPES.iter().find(|(t, _)| *t == event_type) {
+        Some((_, owner)) => *owner == role,
+        None => role == Role::Agent,
     }
 }
 
@@ -248,11 +254,20 @@ mod tests {
 
     #[test]
     fn roles_allow_only_their_own_event_types() {
-        assert!(allowed_event_types(Role::Agent).contains(&"consequential_tool_call"));
-        assert!(!allowed_event_types(Role::Agent).contains(&"human_approved"));
-        assert!(allowed_event_types(Role::Approver).contains(&"human_approved"));
-        assert!(!allowed_event_types(Role::Approver).contains(&"consequential_tool_call"));
-        assert!(allowed_event_types(Role::Executor).contains(&"execution_receipt"));
-        assert!(!allowed_event_types(Role::Executor).contains(&"human_approved"));
+        assert!(role_may_post(Role::Agent, "consequential_tool_call"));
+        assert!(!role_may_post(Role::Agent, "human_approved"));
+        assert!(!role_may_post(Role::Agent, "risk_reviewed"));
+        assert!(!role_may_post(Role::Agent, "execution_receipt"));
+        assert!(role_may_post(Role::Approver, "human_approved"));
+        assert!(role_may_post(Role::Approver, "risk_reviewed"));
+        assert!(!role_may_post(Role::Approver, "consequential_tool_call"));
+        assert!(role_may_post(Role::Executor, "execution_receipt"));
+        assert!(!role_may_post(Role::Executor, "human_approved"));
+        // Unowned types are pipeline or agent evidence. Other roles may not post them.
+        for t in ["run_started", "trace_started", "policy_eval", "evidence_genesis", "model_invocation_recorded", "completed"] {
+            assert!(role_may_post(Role::Agent, t), "agent must be able to record {t}");
+            assert!(!role_may_post(Role::Approver, t), "approver must not record {t}");
+            assert!(!role_may_post(Role::Executor, t), "executor must not record {t}");
+        }
     }
 }

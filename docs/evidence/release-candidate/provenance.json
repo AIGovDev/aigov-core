@@ -1,0 +1,60 @@
+{
+  "schema": "govai.release_provenance.v1",
+  "generated_at_utc": "2026-11-26T12:22:34Z",
+  "source": {
+    "commit": "18de55a3ebd62fa6513d61a9323cd5e14de88f5c",
+    "branch": "feat/pilot-readiness-closure",
+    "working_tree_clean": true
+  },
+  "toolchain": {
+    "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+    "cargo": "cargo 1.100.0 (3acc79c0c 2026-11-05)",
+    "python": "3.12.1"
+  },
+  "base_images_pinned_by_digest": [
+    "debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc",
+    "rust:1-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea"
+  ],
+  "build_commands": [
+    "cargo build --locked --release --bin aigov_audit",
+    "cargo build --locked --release --features fault-injection --bin aigov_audit --target-dir ../target-fault  (test only, never released)",
+    "python -m build --wheel python",
+    "python scripts/generate_sbom.py --rust-dir rust --out-dir <dir>"
+  ],
+  "reproducibility": "Core crate rebuilt twice in the same target directory after cargo clean -p aigov_audit: identical hash (1dea2793fd...). Dependencies not rebuilt. Full from-scratch comparison not run (disk).",
+  "artifacts": {
+    "aigov_audit (release binary)": {
+      "path": "rust/target/release/aigov_audit",
+      "sha256": "1dea2793fddee6712579a35572e34c890e9cdd769bab71a7acf933ce97215329"
+    },
+    "aigov_py wheel": {
+      "path": "aigov_py-0.2.1-py3-none-any.whl",
+      "sha256": "b67fc422e2110d04496ce65ad2f85183b6ea4341bef2c06e283d8ae78ac57c43"
+    },
+    "SBOM aigov-core-rust.cdx.json": {
+      "path": "aigov-core-rust.cdx.json",
+      "sha256": "f3497b07cce36e57a1062f3cf8eb1d5d58bfd0fb15679d6a9f8660be66cfb169"
+    },
+    "SBOM aigov-py-python.cdx.json": {
+      "path": "aigov-py-python.cdx.json",
+      "sha256": "c115e9002746b353cbd7b65ac496d9d553f0f3fe1201b788afa6a11e559ec59d"
+    },
+    "rust/Cargo.lock": {
+      "path": "rust/Cargo.lock",
+      "sha256": "f65d2e6baf8bb7b37a9c328bf8baa80d59765e51a190115540627547971fc372"
+    },
+    "python/pyproject.toml": {
+      "path": "python/pyproject.toml",
+      "sha256": "1d4c4676aedf77b51170484e62b6385020d8882adf4815f31b3796aa0a68db9f"
+    },
+    "rust/Dockerfile": {
+      "path": "rust/Dockerfile",
+      "sha256": "a49d33f606aec94dcb72b7d03d739583195404e235f8ce0268a9e8703b773d42"
+    }
+  },
+  "not_proven": [
+    "that the artifacts were built on an isolated or hardened builder",
+    "that the record is authentic: it is not signed",
+    "that the dependency sources were not altered after the lock was written, beyond the lockfile checksums"
+  ]
+}

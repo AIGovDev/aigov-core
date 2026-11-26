@@ -45,6 +45,7 @@ const LEDGER_STEM: &str = "audit_log.jsonl";
 #[derive(Clone)]
 pub struct AppState {
     pub deployment_env: GovaiEnvironment,
+    pub request_limits: crate::request_limits::RequestLimits,
     pub policy_store: Arc<PolicyStore>,
     pub legacy_policy: PolicyConfig,
     pub policy_source: PolicySource,
@@ -62,8 +63,10 @@ struct RunIdQuery {
 
 async fn pool_from_env() -> Result<DbPool, String> {
     if db::postgres_url_configured_nonempty().is_err() {
+        // No database is configured. A key lookup that reaches this pool must fail fast, not wait for the default 30 s.
         return PgPoolOptions::new()
             .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(2))
             .connect_lazy("postgres://localhost:5432/govai_unused")
             .map_err(|e| format!("lazy pool: {e}"));
     }
@@ -176,6 +179,8 @@ pub fn enforce_policy_file_trust(
 pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
     refuse_fault_injection_outside_test(deployment_env)?;
+    // Fail closed: a limit that cannot be read stops startup, before any other configuration is used.
+    let request_limits = crate::request_limits::RequestLimits::from_env()?;
     crate::principals::init_principals(deployment_env)?;
     let bundle_only = match deployment_env {
         GovaiEnvironment::Prod => true,
@@ -205,13 +210,15 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
-    // Production authenticates every write. Without configured principals, any holder of a key can post any event type,
-    // including approvals and receipts, so production refuses to start in that configuration.
-    if matches!(deployment_env, GovaiEnvironment::Prod) && !crate::principals::principals_configured() {
-        return Err(
-            "Invalid configuration: production requires GOVAI_PRINCIPALS_JSON (or OIDC); refusing to start without authenticated principals"
-                .to_string(),
-        );
+    // Staging and production authenticate every write. Without configured principals, any holder of a key can post any
+    // event type, including approvals and execution evidence, so these environments refuse to start in that configuration.
+    if matches!(deployment_env, GovaiEnvironment::Prod | GovaiEnvironment::Staging)
+        && !crate::principals::principals_configured()
+    {
+        return Err(format!(
+            "Invalid configuration: {} requires GOVAI_PRINCIPALS_JSON (or OIDC); refusing to start without authenticated principals",
+            deployment_env.as_str()
+        ));
     }
     crate::oidc::init_from_env(deployment_env)?;
     crate::execution_authorization::init_from_env()?;
@@ -236,6 +243,7 @@ pub async fn build_app_state() -> Result<AppState, String> {
     // The policy revision is committed by `crate::run` after the listener is bound, so a bind failure never
     // advances the anchor. See `PolicyStore::commit_revisions`.
     Ok(AppState {
+        request_limits,
         deployment_env,
         policy_store,
         legacy_policy: resolved.config,
@@ -259,6 +267,7 @@ fn gate_state(st: &AppState) -> AuditKeyGateState {
 
 pub fn build_router(state: AppState) -> Router {
     let gate = gate_state(&state);
+    let limits = state.request_limits;
     let ledger_routes = Router::new()
         .route("/evidence", post(post_evidence))
         .route("/bundle", get(get_bundle_query))
@@ -277,7 +286,11 @@ pub fn build_router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(
             gate,
             gate_audit_routes_with_state,
-        ));
+        ))
+        // Outermost first: the time limit covers the wait for a concurrency permit and the body read.
+        .layer(axum::extract::DefaultBodyLimit::max(limits.max_body_bytes))
+        .layer(tower::limit::ConcurrencyLimitLayer::new(limits.max_concurrent))
+        .layer(tower_http::timeout::TimeoutLayer::new(limits.timeout));
 
     Router::new()
         .route("/", get(get_root))
@@ -585,7 +598,7 @@ async fn post_evidence(
             )
             .into_response();
         }
-        if !crate::principals::allowed_event_types(p.role).contains(&event.event_type.as_str()) {
+        if !crate::principals::role_may_post(p.role, event.event_type.as_str()) {
             return api_error(
                 StatusCode::FORBIDDEN,
                 "ROLE_NOT_PERMITTED",

@@ -157,6 +157,7 @@ def _items(seed: str, n: int) -> list[dict]:
 
 
 def run_level(store: Store, root: Path, concurrency: int, valid: int, forged: int, admin_url: str | None) -> dict:
+    receipts_before = store.receipts_recorded()  # the store is shared by all levels of one run
     seed, pub = h.new_authorization_key()
     forged_seed, _ = h.new_authorization_key()
     level = root / f"c{concurrency}"
@@ -235,7 +236,9 @@ def run_level(store: Store, root: Path, concurrency: int, valid: int, forged: in
                        "mean": round(statistics.fmean(ms), 3) if ms else None, "samples": len(ms)},
         "latency_executed_ms": {"p50": _percentile(ms_exec, 50), "p95": _percentile(ms_exec, 95),
                                 "p99": _percentile(ms_exec, 99), "samples": len(ms_exec)},
-        "receipts_recorded": store.receipts_recorded(),
+        # The receipts recorded during this level. The store is shared across levels, so the total is kept separately.
+        "receipts_recorded": store.receipts_recorded() - receipts_before,
+        "receipts_recorded_store_total": store.receipts_recorded(),
         "evidence": store.verify(),
     }
     if sampler:

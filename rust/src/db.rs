@@ -70,6 +70,8 @@ pub async fn init_pool_from_env() -> Result<DbPool, String> {
         })?;
     PgPoolOptions::new()
         .max_connections(10)
+        // Bounded wait for a connection: a database that cannot serve fails the request instead of queuing it.
+        .acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&database_url)
         .await
         .map_err(|e| format!("DB connect failed: {}", e))

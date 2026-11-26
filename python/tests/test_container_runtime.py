@@ -160,6 +160,8 @@ def _staging_env(trust_json: str) -> list[str]:
         "-e",
         "GOVAI_API_KEYS=refusal-probe",
         "-e",
+        'GOVAI_PRINCIPALS_JSON={"refusal-probe":{"principal":"agent:probe","identity":"agent:probe","role":"agent","tenant":"tenant-probe"}}',
+        "-e",
         'GOVAI_API_KEYS_JSON={"refusal-probe":"tenant-probe"}',
     ]
 
@@ -331,6 +333,8 @@ def stack(fixtures: Path):
             f"DATABASE_URL=postgres://govai:{pw}@{pg}:5432/govai",
             "-e",
             "GOVAI_API_KEYS=ct-key",
+            "-e",
+            'GOVAI_PRINCIPALS_JSON={"ct-key":{"principal":"agent:ct","identity":"agent:ct","role":"agent","tenant":"tenant-ct"}}',
             "-e",
             'GOVAI_API_KEYS_JSON={"ct-key":"tenant-ct"}',
             IMAGE,

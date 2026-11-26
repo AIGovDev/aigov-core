@@ -378,11 +378,21 @@ def base_env(
         for k, v in os.environ.items()
         if not k.startswith(("AIGOV_", "GOVAI_")) and k not in {"DATABASE_URL"}
     }
+    # Staging and production require principals. One key per role: the agent key posts pipeline evidence, the approver
+    # key posts human decisions, and the executor key posts receipts. See `principal_keys` and `http`.
+    keys = principal_keys(api_key)
     env.update(
         {
             "GOVAI_LEDGER_DIR": str(ledger),
-            "GOVAI_API_KEYS": api_key,
-            "GOVAI_API_KEYS_JSON": json.dumps({api_key: "tenant-staging-verify"}),
+            "GOVAI_API_KEYS": ",".join(keys.values()),
+            "GOVAI_API_KEYS_JSON": json.dumps({k: "tenant-staging-verify" for k in keys.values()}),
+            "GOVAI_PRINCIPALS_JSON": json.dumps(
+                {
+                    keys["agent"]: {"principal": "agent:staging-verify", "identity": "agent:staging-verify", "role": "agent", "tenant": "tenant-staging-verify"},
+                    keys["approver"]: {"principal": "approver:staging-verify", "identity": "approver:staging-verify", "role": "approver", "tenant": "tenant-staging-verify"},
+                    keys["executor"]: {"principal": "executor:staging-verify", "identity": "executor:staging-verify", "role": "executor", "tenant": "tenant-staging-verify"},
+                }
+            ),
             "GOVAI_API_USAGE_STORE": "memory",
             "AIGOV_ENVIRONMENT": environment,
             "AIGOV_BIND": bind,
@@ -408,7 +418,8 @@ def start_server(
         proc = subprocess.Popen(
             [str(BINARY)], env=env, stdout=fh, stderr=subprocess.STDOUT
         )
-    server = Server(proc, base_url, env["GOVAI_API_KEYS"], log)
+    # The first configured key is the agent key; the other keys are the approver and executor for the same run.
+    server = Server(proc, base_url, env["GOVAI_API_KEYS"].split(",")[0], log)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         if proc.poll() is not None:
@@ -439,6 +450,15 @@ def last_error_line(stderr: str) -> str:
 # --------------------------------------------------------------------------------------------------
 
 
+# Event types that only the approver role may post (see `role_may_post` in Core).
+APPROVER_EVENT_TYPES = {"human_approved", "human_approval_revoked", "risk_reviewed"}
+
+
+def principal_keys(api_key: str) -> dict[str, str]:
+    """The three keys for one harness run: agent, approver, executor."""
+    return {"agent": api_key, "approver": f"{api_key}-approver", "executor": f"{api_key}-executor"}
+
+
 def http(
     method: str,
     url: str,
@@ -447,6 +467,8 @@ def http(
     body: dict[str, Any] | None = None,
     timeout: float = 10.0,
 ) -> tuple[int, dict[str, Any]]:
+    if api_key and body and body.get("event_type") in APPROVER_EVENT_TYPES:
+        api_key = principal_keys(api_key.removesuffix("-approver").removesuffix("-executor"))["approver"]
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     if body is not None:
