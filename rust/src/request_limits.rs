@@ -5,7 +5,52 @@
 //! so an operator can still see a loaded instance. Invalid settings stop startup: a limit that cannot be parsed is not
 //! silently replaced by a default.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
+
+/// Counts requests in flight across every connection. A request that finds the count at the limit is refused at once, so it
+/// never reaches a handler and records nothing. A counter shared by all connections does not depend on how a service layer
+/// polls readiness per connection, which is what made the earlier queueing layers unreliable under keep-alive.
+#[derive(Debug)]
+pub struct Shedder {
+    in_flight: AtomicUsize,
+    max: usize,
+}
+
+/// Holds one in-flight slot for as long as it lives.
+#[derive(Debug)]
+pub struct Slot(Arc<Shedder>);
+
+impl Shedder {
+    pub fn new(max: usize) -> Arc<Self> {
+        Arc::new(Shedder { in_flight: AtomicUsize::new(0), max })
+    }
+
+    /// A slot if the count is below the limit, otherwise `None`. Taking a slot is atomic: two requests cannot both take the last one.
+    pub fn try_acquire(self: &Arc<Self>) -> Option<Slot> {
+        let mut current = self.in_flight.load(Ordering::Acquire);
+        loop {
+            if current >= self.max {
+                return None;
+            }
+            match self.in_flight.compare_exchange_weak(current, current + 1, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(Slot(Arc::clone(self))),
+                Err(seen) => current = seen,
+            }
+        }
+    }
+
+    pub fn in_flight(&self) -> usize {
+        self.in_flight.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 pub const ENV_TIMEOUT_SECS: &str = "AIGOV_REQUEST_TIMEOUT_SECS";
 pub const ENV_MAX_CONCURRENT: &str = "AIGOV_MAX_CONCURRENT_REQUESTS";
@@ -88,6 +133,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shedder_admits_up_to_the_limit_and_releases_on_drop() {
+        let s = Shedder::new(2);
+        let a = s.try_acquire().expect("first");
+        let b = s.try_acquire().expect("second");
+        assert!(s.try_acquire().is_none(), "the third must be refused while two are held");
+        drop(a);
+        assert!(s.try_acquire().is_some(), "a released slot is available again");
+        drop(b);
+        assert_eq!(s.in_flight(), 0, "every slot is released once its holder is dropped");
+    }
 
     #[test]
     fn unset_takes_the_defaults() {

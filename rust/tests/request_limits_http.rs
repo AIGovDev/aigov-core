@@ -92,7 +92,10 @@ async fn bounded_requests_over_a_real_socket() {
     let (resp, took) = health.await.unwrap();
     assert!(status_line(&resp).contains("200"), "health under load: {:?}", status_line(&resp));
     assert!(took < Duration::from_secs(2), "health waited {took:?} behind the request limit");
-    // A third request waits for a permit, and the time limit ends it. It must not hang.
+    // A third request finds both permits taken. It is refused at once with 503 OVERLOADED, before any handler runs, so it
+    // records nothing. The ledger's record count must not change.
+    let ledger_file = ledger.path().join("audit_log__t1.jsonl");
+    let records_before = std::fs::read_to_string(&ledger_file).map(|s| s.lines().count()).unwrap_or(0);
     let third_body = r#"{"event_id":"lim-3","event_type":"ai_discovery_reported","ts_utc":"2026-11-26T10:00:00Z","actor":"a","system":"s","run_id":"lim-run","payload":{"openai":false}}"#;
     let third_req = format!(
         "POST /evidence HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {KEY}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{third_body}",
@@ -100,8 +103,11 @@ async fn bounded_requests_over_a_real_socket() {
     );
     let third = blocking(Box::new(move || exchange(addr, third_req.as_bytes(), Duration::from_secs(6))));
     let (resp, took) = third.await.unwrap();
-    assert!(took < Duration::from_secs(5), "queued request was not bounded: {took:?}");
-    assert!(!resp.is_empty() || took < Duration::from_secs(5), "no response");
+    assert!(status_line(&resp).contains("503"), "a request over the limit must be refused at once, got {:?}", status_line(&resp));
+    assert!(resp.contains("OVERLOADED"), "refusal must carry the OVERLOADED code: {resp}");
+    assert!(took < Duration::from_millis(900), "the refusal must not wait: {took:?}");
+    let records_after_refusal = std::fs::read_to_string(&ledger_file).map(|s| s.lines().count()).unwrap_or(0);
+    assert_eq!(records_after_refusal, records_before, "a refused request must not be recorded");
     for h in holders {
         let _ = h.await;
     }

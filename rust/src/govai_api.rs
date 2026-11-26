@@ -265,9 +265,35 @@ fn gate_state(st: &AppState) -> AuditKeyGateState {
     }
 }
 
+/// Admit a request to a slot, or refuse it with 503 OVERLOADED. A refused request was not read past its headers and recorded nothing.
+async fn shed_over_limit(
+    State(shedder): State<std::sync::Arc<crate::request_limits::Shedder>>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    match shedder.try_acquire() {
+        Some(_slot) => next.run(req).await,
+        None => {
+            // The body is not read for a refused request, so the connection cannot be reused safely: say so.
+            let mut resp = api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "OVERLOADED",
+                "The service is at its concurrency limit. Nothing was recorded for this request.",
+                "Retry after a short delay. The request was not processed.",
+                None,
+            )
+            .into_response();
+            resp.headers_mut().insert(axum::http::header::CONNECTION, axum::http::HeaderValue::from_static("close"));
+            resp.headers_mut().insert(axum::http::header::RETRY_AFTER, axum::http::HeaderValue::from_static("1"));
+            resp
+        }
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     let gate = gate_state(&state);
     let limits = state.request_limits;
+    let shedder = crate::request_limits::Shedder::new(limits.max_concurrent);
     let ledger_routes = Router::new()
         .route("/evidence", post(post_evidence))
         .route("/bundle", get(get_bundle_query))
@@ -287,10 +313,14 @@ pub fn build_router(state: AppState) -> Router {
             gate,
             gate_audit_routes_with_state,
         ))
-        // Outermost first: the time limit covers the wait for a concurrency permit and the body read.
-        .layer(axum::extract::DefaultBodyLimit::max(limits.max_body_bytes))
-        .layer(tower::limit::ConcurrencyLimitLayer::new(limits.max_concurrent))
-        .layer(tower_http::timeout::TimeoutLayer::new(limits.timeout));
+        // No queue. A request that finds the in-flight count at its limit is refused at once with 503 OVERLOADED, before any
+        // handler runs, so nothing is recorded for it. Inside that, the time limit covers the body read and the handler.
+        .layer(middleware::from_fn_with_state(shedder, shed_over_limit))
+        .layer(
+            tower::ServiceBuilder::new()
+                .layer(tower_http::timeout::TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, limits.timeout))
+                .layer(axum::extract::DefaultBodyLimit::max(limits.max_body_bytes)),
+        );
 
     Router::new()
         .route("/", get(get_root))
@@ -764,33 +794,57 @@ async fn post_evidence(
         || st
             .policy_store
             .event_type_requires_unconsumed_approval(&tenant_id, &event.event_type);
-    let locked_check = |path: &str| -> Result<(), String> {
-        if !needs_locked_check {
-            return Ok(());
-        }
-        let view = FileLedgerView::new(path);
-        st.policy_store
-            .enforce_ingest_for_request(&tenant_id, &event, &view)
-            .map_err(|v| v.to_string())?;
-        // With issuance enabled, Core issues an authorization only for a consequential call that names a real approval,
-        // whatever the policy says. Checked under the lock, so two calls cannot both use one approval.
-        if prepared.is_some() && event.event_type == "consequential_tool_call" {
-            let events = collect_events_for_run(path, &event.run_id)?;
-            if let Some(reason) = crate::execution_authorization::approval_refusal(&events, &event) {
-                return Err(format!("policy_violation: a human approval is required reason={reason}"));
-            }
-        }
-        Ok(())
-    };
     crash_point("before_append");
-    let append_result =
-        match crate::audit_store::append_record_checked(&log_path, event.clone(), &locked_check) {
-            Ok(v) => Ok(v),
-            Err(crate::audit_store::CheckedAppendError::Rejected(msg)) => {
-                return policy_violation_response(&policy_version, &msg);
+    // The append waits on the ledger lock and on disk. It runs on the blocking pool, so a request waiting for it does not hold
+    // a runtime worker, and the in-flight limit counts it. The check that runs under the lock is an owned copy of the one that
+    // was used before.
+    let check_store = st.policy_store.clone();
+    let check_tenant = tenant_id.clone();
+    let check_event = event.clone();
+    let check_prepared = prepared.clone();
+    let check_needed = needs_locked_check;
+    let append_path = log_path.clone();
+    let append_event = event.clone();
+    let append_join = tokio::task::spawn_blocking(move || {
+        let locked_check = move |path: &str| -> Result<(), String> {
+            if !check_needed {
+                return Ok(());
             }
-            Err(crate::audit_store::CheckedAppendError::Store(msg)) => Err(msg),
+            let view = FileLedgerView::new(path);
+            check_store
+                .enforce_ingest_for_request(&check_tenant, &check_event, &view)
+                .map_err(|v| v.to_string())?;
+            // With issuance enabled, Core issues an authorization only for a consequential call that names a real approval,
+            // whatever the policy says. Checked under the lock, so two calls cannot both use one approval.
+            if check_prepared.is_some() && check_event.event_type == "consequential_tool_call" {
+                let events = collect_events_for_run(path, &check_event.run_id)?;
+                if let Some(reason) = crate::execution_authorization::approval_refusal(&events, &check_event) {
+                    return Err(format!("policy_violation: a human approval is required reason={reason}"));
+                }
+            }
+            Ok(())
         };
+        crate::audit_store::append_record_checked(&append_path, append_event, &locked_check)
+    })
+    .await;
+    let append_result = match append_join {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(crate::audit_store::CheckedAppendError::Rejected(msg))) => {
+            return policy_violation_response(&policy_version, &msg);
+        }
+        Ok(Err(crate::audit_store::CheckedAppendError::Store(msg))) => Err(msg),
+        // The blocking task did not finish. Whether the record was written is then unknown to the client: say so.
+        Err(join_err) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "LEDGER_WRITE_ABORTED",
+                &format!("the ledger write did not complete: {join_err}"),
+                "The outcome is not confirmed. Retry with the same event_id; a duplicate is refused rather than recorded twice.",
+                None,
+            )
+            .into_response();
+        }
+    };
     match append_result {
         Ok((rec, pre_count)) => {
             crash_point("after_append_before_sign");

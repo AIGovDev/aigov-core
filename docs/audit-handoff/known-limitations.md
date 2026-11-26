@@ -1,0 +1,23 @@
+# Known limitations and residual risks
+
+Status is as of release candidate 0.4.0-rc.1. "Open" means not resolved by code; the owner decides or accepts.
+
+| ID | Limitation | Status | Where it is documented |
+|---|---|---|---|
+| R-1 | Staging and production need principals. A staging environment deployed before this release has no principals and will not start until they are configured. Without principals, any key can post approvals (dev only). | Closed in code. Deployment prerequisite. | `docs/release/pilot-readiness.md`; `scripts/deploy_preflight.py` |
+| R-2 | The policy anchor row and the filesystem record are authenticated only by the database. A privileged database user who changes the row and the record together can roll back a revision. The filesystem checksum is not authentication. | Open. Owner decisions D1, D2. | `docs/decisions/issue-501-owner-decisions.md` |
+| R-3 | No capacity claim beyond the measured host. Measured: one Core process serialises appends and sustains about 40 to 48 evidence writes per second on the test workstation, with latency growing linearly with concurrency. Defaults (30 s, 256, 2 MiB) are not tuned for any customer. | Measured; the pilot sets its own limits. | `docs/evidence/release-candidate/load/` |
+| R-4 | Several Core instances on different hosts sharing one ledger directory are not supported (the lock is host-local). | Unsupported by design. | `docs/operations/distributed-execution-runbook.md` |
+| R-5 | The crash and two-volume tests need a fault-injection build or real separate volumes. The crash gate runs in CI; the two-volume test runs on a workstation. | Partly closed. | `Makefile` targets |
+| R-6 | Concurrent issuance across processes during key rotation, revocation, and policy change: tested for rotation and revocation and for a superseded revision (three processes; two revisions). Not tested: many hosts, a database restart mid-issuance, or a policy change during a rotation. | Tested in the stated configuration; residual outside it. | `python/tests/test_issuance_cross_process.py`; `python/tests/test_policy_revision_across_processes.py` |
+| R-6a | A call whose key is retired after its record is committed is refused, and its approval is consumed. The human must approve again. | Designed behaviour (fail closed). Recorded here. | `security-invariants.md` I-5 |
+| R-7 | Evidence writes are refused while the anchor cannot be read, so an unreachable database stops writes. Reads that do not consult the anchor continue to serve, including verdicts. | By design. | `docs/operations/policy-anchor-runbook.md` |
+| R-8 | Container tests depend on the Docker networking of the host. Fixed in the image; the hosted runner is the authority. | Closed in code. | `rust/Dockerfile` |
+| R-9 | Exactly-once external effects are not claimed. A downstream system without a deduplication key can apply a retried side effect twice. | Open. Customer's downstream decision. | `docs/architecture/distributed-execution.md` |
+| R-10 | SBOMs are CycloneDX 1.5, validated against the official schema for this release (see the release record). Provenance is unsigned. No independent reproducibility comparison of the whole dependency graph. | Partly closed. | `docs/evidence/release-candidate/` |
+| R-11 | The version is recommended (0.4.0-rc.1), not applied. The tag history predates the version bump. | Open. Owner decision. | `docs/release/release-artifacts.md` |
+| L-1 | Staging rejects approvals and evidence from keys without a role. Dev accepts any key and any event type. | By design; dev is not a deployment target. | `docs/release/pilot-package.md` |
+| L-2 | The server returns the connection closed for an oversized body, not an HTTP 413 (measured earlier). The limit is enforced. | Open, low severity. | `docs/reports/release-candidate-2026-11-26.md` (F-6) |
+| L-3 | The root-level `aigov_py/__init__.py` shim changes import behaviour when Python runs from the repository root. | Documented. | `docs/reports/pilot-readiness-closure-2026-11-26.md` (F-15) |
+| L-4 | `chrono` is an unmaintained crate (RUSTSEC-2026-0543). No vulnerability is known. CI allows the warning. | Open, low severity. | `cargo audit` output |
+| L-5 | Load tests were run from the same host as Core, with a Python client. They show the ceiling of this configuration, not of the product. | Documented. | `docs/evidence/release-candidate/load/` |

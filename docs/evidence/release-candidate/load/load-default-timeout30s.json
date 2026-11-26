@@ -1,0 +1,179 @@
+{
+  "started_utc": "2026-11-26T13:50:02Z",
+  "platform": "macOS-26.2-arm64-arm-64bit",
+  "cpu_count": 12,
+  "load_average_start": [
+    12.68994140625,
+    10.29150390625,
+    7.26953125
+  ],
+  "settings": {
+    "max_concurrent_requests": "default (256)",
+    "request_timeout_secs": 30,
+    "seconds_per_level": 15.0
+  },
+  "levels": [
+    {
+      "concurrency": 1,
+      "seconds": 15.0,
+      "requests": 640,
+      "ok_200": 640,
+      "throughput_ok_per_s": 42.7,
+      "latency_ok_ms": {
+        "p50": 23.0,
+        "p95": 28.1,
+        "p99": 35.0,
+        "n": 640
+      },
+      "latency_all_ms": {
+        "p50": 23.0,
+        "p95": 28.1,
+        "p99": 35.0
+      },
+      "status_codes": {
+        "200": 640
+      },
+      "non_200_fraction": 0.0,
+      "client_timeouts": 0,
+      "rss_kb_max": 12208,
+      "rss_kb_end": 12208
+    },
+    {
+      "concurrency": 4,
+      "seconds": 15.07,
+      "requests": 673,
+      "ok_200": 673,
+      "throughput_ok_per_s": 44.7,
+      "latency_ok_ms": {
+        "p50": 88.99,
+        "p95": 96.75,
+        "p99": 106.21,
+        "n": 673
+      },
+      "latency_all_ms": {
+        "p50": 88.99,
+        "p95": 96.75,
+        "p99": 106.21
+      },
+      "status_codes": {
+        "200": 673
+      },
+      "non_200_fraction": 0.0,
+      "client_timeouts": 0,
+      "rss_kb_max": 14048,
+      "rss_kb_end": 14048
+    },
+    {
+      "concurrency": 16,
+      "seconds": 15.4,
+      "requests": 641,
+      "ok_200": 641,
+      "throughput_ok_per_s": 41.6,
+      "latency_ok_ms": {
+        "p50": 379.06,
+        "p95": 428.99,
+        "p99": 456.07,
+        "n": 641
+      },
+      "latency_all_ms": {
+        "p50": 379.06,
+        "p95": 428.99,
+        "p99": 456.07
+      },
+      "status_codes": {
+        "200": 641
+      },
+      "non_200_fraction": 0.0,
+      "client_timeouts": 0,
+      "rss_kb_max": 18816,
+      "rss_kb_end": 18816
+    },
+    {
+      "concurrency": 64,
+      "seconds": 16.6,
+      "requests": 664,
+      "ok_200": 664,
+      "throughput_ok_per_s": 40.0,
+      "latency_ok_ms": {
+        "p50": 1591.95,
+        "p95": 1616.07,
+        "p99": 1624.03,
+        "n": 664
+      },
+      "latency_all_ms": {
+        "p50": 1591.95,
+        "p95": 1616.07,
+        "p99": 1624.03
+      },
+      "status_codes": {
+        "200": 664
+      },
+      "non_200_fraction": 0.0,
+      "client_timeouts": 0,
+      "rss_kb_max": 28448,
+      "rss_kb_end": 28448
+    },
+    {
+      "concurrency": 256,
+      "seconds": 22.01,
+      "requests": 821,
+      "ok_200": 821,
+      "throughput_ok_per_s": 37.3,
+      "latency_ok_ms": {
+        "p50": 6686.94,
+        "p95": 7067.06,
+        "p99": 7101.05,
+        "n": 821
+      },
+      "latency_all_ms": {
+        "p50": 6686.94,
+        "p95": 7067.06,
+        "p99": 7101.05
+      },
+      "status_codes": {
+        "200": 821
+      },
+      "non_200_fraction": 0.0,
+      "client_timeouts": 0,
+      "rss_kb_max": 64112,
+      "rss_kb_end": 64112
+    }
+  ],
+  "recovery_probe_c1": {
+    "concurrency": 1,
+    "seconds": 10.02,
+    "requests": 289,
+    "ok_200": 289,
+    "throughput_ok_per_s": 28.9,
+    "latency_ok_ms": {
+      "p50": 34.94,
+      "p95": 37.02,
+      "p99": 38.94,
+      "n": 289
+    },
+    "latency_all_ms": {
+      "p50": 34.94,
+      "p95": 37.02,
+      "p99": 38.94
+    },
+    "status_codes": {
+      "200": 289
+    },
+    "non_200_fraction": 0.0,
+    "client_timeouts": 0,
+    "rss_kb_max": 64112,
+    "rss_kb_end": 64112
+  },
+  "process_alive_after_sweep": true,
+  "ledger": {
+    "chain_ok": true,
+    "records": 3728,
+    "records_without_200_response": 0
+  },
+  "load_average_end": [
+    9.8662109375,
+    10.03759765625,
+    7.4912109375
+  ],
+  "process_exit_code": -15
+}
