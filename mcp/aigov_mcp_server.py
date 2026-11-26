@@ -5,19 +5,24 @@
 - MCP stdio: ``python mcp/aigov_mcp_server.py mcp-stdio`` (newline-delimited JSON-RPC)
 
 Subprocesses always use explicit argv lists (never ``shell=True``). Default commands avoid
-network I/O. Write-capable tool: ``govai_generate_audit_report_template`` (unless ``dry_run``).
+network I/O. MCP file writes use the existing trusted Core authorization and executor path;
+``dry_run`` is local and does not write.
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Final, Mapping
+from urllib.parse import urlsplit
 
 _STDIO_MAX_CHARS: Final[int] = 256 * 1024
 
@@ -30,6 +35,7 @@ _TOOLS_READ_ONLY: Final[frozenset[str]] = frozenset(
     }
 )
 _TOOLS_WRITE: Final[frozenset[str]] = frozenset({"govai_generate_audit_report_template"})
+_TOOLS_GOVERNANCE: Final[frozenset[str]] = frozenset({"govai_request_audit_template_approval"})
 
 _MCP_SILENT_NOTIFICATIONS: Final[frozenset[str]] = frozenset(
     {
@@ -77,6 +83,8 @@ def _resolve_python_for_package() -> list[str]:
 def _tool_access(tool: str) -> str:
     if tool in _TOOLS_WRITE:
         return "write"
+    if tool in _TOOLS_GOVERNANCE:
+        return "governance"
     if tool in _TOOLS_READ_ONLY:
         return "read_only"
     return "unknown"
@@ -277,6 +285,266 @@ def _audit_template_markdown(safe: str) -> str:
     )
 
 
+_MCP_TEMPLATE_TOOL = "govai_generate_audit_report_template"
+_SAFE_CORE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+
+
+def _trusted_runtime_config() -> dict[str, str]:
+    """Load the separate agent/executor credentials required by trusted execution."""
+    names = {
+        "core_url": "GOVAI_RUNTIME_AUTH_URL",
+        "agent_key": "GOVAI_AGENT_API_KEY",
+        "executor_key": "GOVAI_EXECUTOR_API_KEY",
+        "public_key": "GOVAI_EXECUTION_AUTH_PUBLIC_KEY_B64",
+        "audience": "GOVAI_EXECUTOR_AUDIENCE",
+        "store_path": "GOVAI_EXECUTOR_STORE_PATH",
+    }
+    values = {
+        key: (os.environ.get(env_name) or "").strip()
+        for key, env_name in names.items()
+    }
+    missing = [env_name for key, env_name in names.items() if not values[key]]
+    if missing:
+        raise ValueError("trusted MCP execution is not configured: " + ", ".join(missing))
+    for key in ("agent_key", "executor_key"):
+        if len(values[key]) > 4096 or "\r" in values[key] or "\n" in values[key]:
+            raise ValueError("trusted MCP API credential is invalid")
+    if values["agent_key"] == values["executor_key"]:
+        raise ValueError("agent and executor must use separate API credentials")
+    try:
+        parsed = urlsplit(values["core_url"])
+        local_hosts = {"localhost", "127.0.0.1", "::1"}
+        if (
+            not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or (
+                parsed.scheme != "https"
+                and not (parsed.scheme == "http" and parsed.hostname in local_hosts)
+            )
+        ):
+            raise ValueError
+        public_key = base64.b64decode(values["public_key"], validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("trusted MCP Core URL or authorization public key is invalid") from exc
+    if len(public_key) != 32:
+        raise ValueError("trusted MCP authorization public key must decode to 32 bytes")
+    if not _SAFE_CORE_ID.fullmatch(values["audience"]):
+        raise ValueError("trusted MCP executor audience is invalid")
+    return values
+
+
+def _trusted_sdk() -> tuple[Any, ...]:
+    """Import the already-shipped trusted execution SDK only when a governed write is requested."""
+    from aigov_py.trusted import (
+        AgentActor,
+        CoreClient,
+        Decision,
+        ExecutionStore,
+        Executor,
+        ToolSpec,
+        args_binding_hash,
+    )
+
+    return (
+        AgentActor,
+        CoreClient,
+        Decision,
+        ExecutionStore,
+        Executor,
+        ToolSpec,
+        args_binding_hash,
+    )
+
+
+def _template_tool_spec(ToolSpec: Any) -> Any:
+    return ToolSpec(
+        _MCP_TEMPLATE_TOOL,
+        action="docs:write",
+        kind="write",
+        resource_key="stem",
+    )
+
+
+def _template_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    stem = arguments.get("stem")
+    if not isinstance(stem, str) or not stem.strip():
+        raise ValueError("a non-empty stem is required for a governed write")
+    stem = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "-"
+        for char in stem.strip().lower()
+    )
+    if len(stem) > 120:
+        raise ValueError("stem must be at most 120 characters after normalization")
+    force = arguments.get("force", False)
+    if not isinstance(force, bool):
+        raise ValueError("force must be a boolean")
+    return {"stem": stem, "force": force}
+
+
+def _request_template_approval(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    """Record a write request. An independent approver must approve it before execution."""
+    try:
+        config = _trusted_runtime_config()
+        (
+            AgentActor,
+            CoreClient,
+            Decision,
+            _Store,
+            _Executor,
+            ToolSpec,
+            args_binding_hash,
+        ) = _trusted_sdk()
+        supplied_run_id = arguments.get("run_id")
+        if supplied_run_id is not None and not isinstance(supplied_run_id, str):
+            raise ValueError("run_id must be a string")
+        run_id = supplied_run_id or f"run-{uuid.uuid4().hex}"
+        if not _SAFE_CORE_ID.fullmatch(run_id):
+            raise ValueError("run_id is invalid")
+        tool_call_id = f"mcp-call-{uuid.uuid4().hex}"
+        tool = _template_tool_spec(ToolSpec)
+        core = CoreClient(
+            config["core_url"],
+            config["agent_key"],
+            actor="mcp-agent",
+            system="aigov-mcp",
+        )
+        actor = AgentActor(core, run_id, {tool.name: tool})
+        business_args = _template_arguments(arguments)
+        decision = actor.request_approval(tool.name, business_args, tool_call_id)
+        if decision.decision != Decision.ALLOW or not decision.event_id:
+            return {
+                "ok": False,
+                "error": "approval_request_refused",
+                "reason": decision.reason,
+                "decision": decision.decision.value,
+            }
+        return {
+            "ok": True,
+            "approval_status": "pending_human_approval",
+            "run_id": run_id,
+            "tool_call_id": tool_call_id,
+            "request_event_id": decision.event_id,
+            "args_binding_hash": args_binding_hash(tool, business_args),
+            "target_path": f"docs/reports/{business_args['stem']}.md",
+            "policy_revision": decision.policy_revision,
+            "hint": (
+                "A separately authenticated approver must approve this exact request "
+                "before the write can execute."
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001 - all configuration and transport failures must deny
+        return {
+            "ok": False,
+            "error": "trusted_authorization_unavailable",
+            "reason": type(exc).__name__,
+        }
+
+
+def _execute_approved_template(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    """Submit the approved call to Core and execute only through the trusted SDK executor."""
+    try:
+        config = _trusted_runtime_config()
+        (
+            AgentActor,
+            CoreClient,
+            Decision,
+            ExecutionStore,
+            Executor,
+            ToolSpec,
+            _args_hash,
+        ) = _trusted_sdk()
+        run_id = arguments.get("run_id")
+        tool_call_id = arguments.get("tool_call_id")
+        approval_event_id = arguments.get("approval_event_id")
+        identifiers = (run_id, tool_call_id, approval_event_id)
+        if not all(
+            isinstance(value, str) and _SAFE_CORE_ID.fullmatch(value)
+            for value in identifiers
+        ):
+            raise ValueError(
+                "run_id, tool_call_id, and approval_event_id must be safe identifiers"
+            )
+        business_args = _template_arguments(arguments)
+        tool = _template_tool_spec(ToolSpec)
+        tools = {tool.name: tool}
+        agent_core = CoreClient(
+            config["core_url"],
+            config["agent_key"],
+            actor="mcp-agent",
+            system="aigov-mcp",
+        )
+        agent = AgentActor(agent_core, run_id, tools)
+        decision = agent.submit_write(tool.name, business_args, tool_call_id, approval_event_id)
+        if decision.decision != Decision.ALLOW or not decision.authorization:
+            return {
+                "ok": False,
+                "error": "execution_authorization_refused",
+                "reason": decision.reason,
+                "decision": decision.decision.value,
+            }
+
+        executor_core = CoreClient(
+            config["core_url"],
+            config["executor_key"],
+            actor="mcp-executor",
+            system="aigov-mcp",
+        )
+
+        performed: list[dict[str, Any]] = []
+
+        def perform(_tool: str, args: dict[str, Any], _execution_id: str) -> dict[str, Any]:
+            result = tool_govai_generate_audit_report_template(
+                stem=args.get("stem"), force=args["force"], dry_run=False
+            )
+            performed.append(result)
+            return {
+                "success": bool(result.get("ok") and result.get("wrote_file")),
+                "data": {"path": result.get("path"), "wrote_file": result.get("wrote_file")},
+                "blocked_reason": result.get("error"),
+            }
+
+        store = ExecutionStore(Path(config["store_path"]))
+        executor = Executor(
+            core=executor_core,
+            public_key_b64=config["public_key"],
+            audience=config["audience"],
+            store=store,
+            tools=tools,
+            performer=perform,
+        )
+        outcome = executor.execute(
+            run_id=run_id,
+            tool=tool.name,
+            arguments=business_args,
+            signed=decision.authorization,
+        )
+        response = {
+            "ok": outcome.executed and outcome.reason == "executed",
+            "error": (
+                None
+                if outcome.executed and outcome.reason == "executed"
+                else "execution_refused"
+            ),
+            "reason": outcome.reason,
+            "authorization_id": outcome.authorization_id,
+            "receipt_recorded": outcome.receipt_recorded,
+            "execution_state": outcome.execution_state,
+        }
+        if performed:
+            response["path"] = performed[0].get("path")
+            response["wrote_file"] = performed[0].get("wrote_file", False)
+        return response
+    except Exception as exc:  # noqa: BLE001 - all auth, storage, and transport failures must deny
+        return {
+            "ok": False,
+            "error": "trusted_authorization_unavailable",
+            "reason": type(exc).__name__,
+        }
+
+
 def tool_govai_generate_audit_report_template(
     *, stem: str | None, force: bool, dry_run: bool
 ) -> dict[str, Any]:
@@ -307,25 +575,56 @@ def tool_govai_generate_audit_report_template(
         }
 
     reports.mkdir(parents=True, exist_ok=True)
-    if target.exists() and not force:
+    try:
+        reports.resolve().relative_to(REPO_ROOT.resolve())
+    except ValueError:
         return {
             "ok": False,
-            "error": "file_exists",
-            "path": str(target),
-            "tool": "govai_generate_audit_report_template",
-            "govai_access": _tool_access("govai_generate_audit_report_template"),
-            "hint": "Pass --force to overwrite.",
-            "dry_run": False,
+            "error": "report_directory_outside_repository",
+            "path": str(reports),
+            "tool": _MCP_TEMPLATE_TOOL,
+            "govai_access": _tool_access(_MCP_TEMPLATE_TOOL),
             "wrote_file": False,
-            "command": [],
-            "exit_code": None,
-            "stdout": "",
-            "stderr": "",
-            "stdout_truncated": False,
-            "stderr_truncated": False,
-            "duration_ms": 0,
         }
-    target.write_text(content, encoding="utf-8")
+
+    if not force:
+        try:
+            with target.open("x", encoding="utf-8") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except FileExistsError:
+            return {
+                "ok": False,
+                "error": "file_exists",
+                "path": str(target),
+                "tool": _MCP_TEMPLATE_TOOL,
+                "govai_access": _tool_access(_MCP_TEMPLATE_TOOL),
+                "hint": "Pass --force to overwrite.",
+                "dry_run": False,
+                "wrote_file": False,
+                "command": [],
+                "exit_code": None,
+                "stdout": "",
+                "stderr": "",
+                "stdout_truncated": False,
+                "stderr_truncated": False,
+                "duration_ms": 0,
+            }
+    else:
+        fd, temporary_path = tempfile.mkstemp(prefix=f".{safe}-", suffix=".tmp", dir=reports)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary_path, target)
+        except Exception:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+            raise
     return {
         "ok": True,
         "path": str(target),
@@ -366,13 +665,38 @@ _MCP_TOOL_SPECS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "govai_request_audit_template_approval",
+        "description": (
+            "[governed] Record a request to create or overwrite an audit report template. "
+            "Returns a run_id, tool_call_id, and request_event_id. A separately authenticated "
+            "human approver must approve the exact request before the write tool can execute."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "required": ["stem"],
+            "properties": {
+                "stem": {"type": "string"},
+                "force": {"type": "boolean", "default": False},
+                "run_id": {"type": "string", "description": "Optional run identifier; generated when omitted."},
+            },
+        },
+    },
+    {
         "name": "govai_generate_audit_report_template",
-        "description": "[write] Create docs/reports/<stem>.md with required audit sections. Use dry_run=true to preview without writing.",
+        "description": (
+            "[write; trusted execution required] Create docs/reports/<stem>.md. For a real write, "
+            "first request and obtain separate human approval, then provide its run_id, tool_call_id, "
+            "and approval_event_id here. Core issues a signed execution authorization and the local "
+            "trusted executor verifies it before writing. Use dry_run=true for a local preview."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "stem": {"type": "string"},
                 "force": {"type": "boolean", "default": False},
+                "run_id": {"type": "string"},
+                "tool_call_id": {"type": "string"},
+                "approval_event_id": {"type": "string"},
                 "dry_run": {
                     "type": "boolean",
                     "default": False,
@@ -413,12 +737,21 @@ def _dispatch_tool(name: str, arguments: dict[str, Any] | None) -> dict[str, Any
         return tool_govai_gate_reports()
     if name == "govai_make_gate":
         return tool_govai_make_gate()
+    if name == "govai_request_audit_template_approval":
+        return _request_template_approval(arguments)
     if name == "govai_generate_audit_report_template":
         stem = arguments.get("stem")
-        stem_s = str(stem).strip() if stem else None
-        force = bool(arguments.get("force"))
-        dry_run = bool(arguments.get("dry_run"))
-        return tool_govai_generate_audit_report_template(stem=stem_s, force=force, dry_run=dry_run)
+        if stem is not None and not isinstance(stem, str):
+            return {"ok": False, "error": "invalid_write_arguments", "reason": "stem must be a string"}
+        force = arguments.get("force", False)
+        dry_run = arguments.get("dry_run", False)
+        if not isinstance(force, bool) or not isinstance(dry_run, bool):
+            return {"ok": False, "error": "invalid_write_arguments", "reason": "force and dry_run must be booleans"}
+        if dry_run:
+            return tool_govai_generate_audit_report_template(
+                stem=stem.strip() if stem else None, force=force, dry_run=True
+            )
+        return _execute_approved_template(arguments)
     return {
         "ok": False,
         "error": "unknown_tool",
@@ -554,13 +887,31 @@ def main(argv: list[str] | None = None) -> int:
     p_mg = sub.add_parser("govai-make-gate", help="Run make gate.")
     p_mg.set_defaults(func=lambda _: _emit(tool_govai_make_gate()))
 
-    p_tpl = sub.add_parser("govai-generate-audit-report-template", help="Write docs/reports/<stem>.md template.")
+    p_tpl = sub.add_parser(
+        "govai-generate-audit-report-template",
+        help="Preview a report template or execute an approved template write.",
+    )
     p_tpl.add_argument("--stem", default=None, help="Filename stem (no extension).")
     p_tpl.add_argument("--force", action="store_true", help="Overwrite if exists.")
     p_tpl.add_argument("--dry-run", action="store_true", help="Print preview JSON only; do not write.")
+    p_tpl.add_argument("--run-id", help="Run ID returned by the MCP approval request.")
+    p_tpl.add_argument("--tool-call-id", help="Tool call ID returned by the MCP approval request.")
+    p_tpl.add_argument("--approval-event-id", help="Human approval event ID.")
     p_tpl.set_defaults(
         func=lambda ns: _emit(
-            tool_govai_generate_audit_report_template(stem=ns.stem, force=ns.force, dry_run=ns.dry_run)
+            tool_govai_generate_audit_report_template(
+                stem=ns.stem, force=ns.force, dry_run=True
+            )
+            if ns.dry_run
+            else _execute_approved_template(
+                {
+                    "stem": ns.stem,
+                    "force": ns.force,
+                    "run_id": ns.run_id,
+                    "tool_call_id": ns.tool_call_id,
+                    "approval_event_id": ns.approval_event_id,
+                }
+            )
         )
     )
 
