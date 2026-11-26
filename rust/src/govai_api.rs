@@ -45,6 +45,7 @@ const LEDGER_STEM: &str = "audit_log.jsonl";
 #[derive(Clone)]
 pub struct AppState {
     pub deployment_env: GovaiEnvironment,
+    pub request_limits: crate::request_limits::RequestLimits,
     pub policy_store: Arc<PolicyStore>,
     pub legacy_policy: PolicyConfig,
     pub policy_source: PolicySource,
@@ -176,6 +177,8 @@ pub fn enforce_policy_file_trust(
 pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
     refuse_fault_injection_outside_test(deployment_env)?;
+    // Fail closed: a limit that cannot be read stops startup, before any other configuration is used.
+    let request_limits = crate::request_limits::RequestLimits::from_env()?;
     crate::principals::init_principals(deployment_env)?;
     let bundle_only = match deployment_env {
         GovaiEnvironment::Prod => true,
@@ -238,6 +241,7 @@ pub async fn build_app_state() -> Result<AppState, String> {
     // The policy revision is committed by `crate::run` after the listener is bound, so a bind failure never
     // advances the anchor. See `PolicyStore::commit_revisions`.
     Ok(AppState {
+        request_limits,
         deployment_env,
         policy_store,
         legacy_policy: resolved.config,
@@ -261,6 +265,7 @@ fn gate_state(st: &AppState) -> AuditKeyGateState {
 
 pub fn build_router(state: AppState) -> Router {
     let gate = gate_state(&state);
+    let limits = state.request_limits;
     let ledger_routes = Router::new()
         .route("/evidence", post(post_evidence))
         .route("/bundle", get(get_bundle_query))
@@ -279,7 +284,11 @@ pub fn build_router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(
             gate,
             gate_audit_routes_with_state,
-        ));
+        ))
+        // Outermost first: the time limit covers the wait for a concurrency permit and the body read.
+        .layer(axum::extract::DefaultBodyLimit::max(limits.max_body_bytes))
+        .layer(tower::limit::ConcurrencyLimitLayer::new(limits.max_concurrent))
+        .layer(tower_http::timeout::TimeoutLayer::new(limits.timeout));
 
     Router::new()
         .route("/", get(get_root))
