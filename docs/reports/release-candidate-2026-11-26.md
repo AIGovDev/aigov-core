@@ -79,20 +79,21 @@ The matrix from PR #515 is the appendix of `docs/reports/distributed-execution-2
 
 Issue #501 is **not** closed by this report. The owner decisions D1–D4 and the two-volume test remain open.
 
-## Validation (final HEAD `302c6dc`, plus one test-only commit `bb03393`)
+## Validation (final code HEAD `f6d5395`)
 
 | Suite | Result | Notes |
 |---|---|---|
 | Rust, all tests with PostgreSQL (`cargo test --no-fail-fast -- --include-ignored`) | **414 passed, 0 failed** | includes `prod_requires_principals` |
+| Local staging simulation (`scripts/staging_policy_verify.py --skip-live`, the check that failed in CI on `61342b6`) | **66 passed, 0 failed** | the four production-override and bundle refusals now report their own messages |
 | Release and fault-injection builds | pass | `--features fault-injection` build is separate, in `target-fault/` |
 | Python, full suite with PostgreSQL and release Core | **1334 passed, 0 failed, 34 skipped** | skips are for external identity providers, Sigstore, and live trust-state Core |
 | PostgreSQL integration (destructive, opt-in) | 33 passed | includes nonce, revocation, and audit store |
 | Crash consistency (fault build) | 4 passed | normal-build refusal control included |
 | Receipt provenance | 4 passed | forged, unissued, agent, and legitimate receipt |
 | Two-instance approval | 1 passed (5 rounds) | |
-| Container runtime (local, Docker Desktop) | 12 of 16 passed on the final image; see note | |
+| Container runtime (local, Docker Desktop) | 13 of 16 passed on the final image; see note | the no-bundle production test passes |
 | Acme Finance validation (binary mode, PostgreSQL) | pass, exit 0 | |
-| Customer pilot end to end (release Core, PostgreSQL) | pass, "all checks passed" | |
+| Customer pilot end to end (release Core, PostgreSQL) | pass, "all checks passed", on a fresh output directory | A reused output directory keeps exports from earlier runs, which fail the "no export before approval" check. CI always starts empty. |
 | `make gate` | pass | |
 | `make enterprise-readiness-check` | OK | |
 | SDK wheel: build, contents, offline downstream | pass | wheel contains the PostgreSQL migration |
@@ -107,15 +108,14 @@ the authority for these tests, and the report does not claim a local pass for th
 
 Commits on this branch, in order: `c9ca72d` (crash-point tests), `989cefa` (fault gating, receipts, prod principals), `a8e151a` (two-instance
 approval test, wheel migration, discovery role), `5ec7cf7` (principal check before policy load), `302c6dc` (restores two dropped startup calls),
-`bb03393` (container assertion accepts either production refusal). The release documents are in `docs/release/`, and the negative controls
+`bb03393` (container assertion accepts either production refusal), `f6d5395` (principal check back after the policy checks, as originally, so the staging simulation's messages are reported). The release documents are in `docs/release/`, and the negative controls
 are in `docs/evidence/release-candidate/`.
 
 ## Evaluation gate
 
 Passes when, on the exact final HEAD: the Rust and Python suites pass locally with PostgreSQL; every High finding has a fix and a test; the
 negative controls are recorded, including the inconclusive ones; the wheel contains the PostgreSQL schema and passes the offline downstream
-check; Acme Finance, the customer pilot, `make gate`, and `make enterprise-readiness-check` pass. Status: these pass locally on `302c6dc` and
-`bb03393`, with the container caveat above. The hosted checks on the PR's head are a separate gate, recorded on the PR.
+check; Acme Finance, the customer pilot, `make gate`, and `make enterprise-readiness-check` pass. Status: these pass locally on `f6d5395`, with the container caveat above. The hosted checks on the PR's head are a separate gate, recorded on the PR.
 
 ## Human approval gate
 
