@@ -46,9 +46,13 @@ def main() -> int:
         parser.error("arguments do not match the request's binding hash")
     mode = "overwrite" if normalized["force"] else "create"
     print(f"Approve {mode}: {TOOL} for docs/reports/{normalized['stem']}.md")
-    print(f"Run: {args.run_id}; call: {args.tool_call_id}; policy: {args.policy_revision}")
+    print(
+        f"Run: {args.run_id}; call: {args.tool_call_id}; policy: {args.policy_revision}"
+    )
     print(f"Argument binding: {binding_hash}")
-    print("Type APPROVE to authorize this exact, single-use request:", end=" ", flush=True)
+    print(
+        "Type APPROVE to authorize this exact, single-use request:", end=" ", flush=True
+    )
     if input().strip() != "APPROVE":
         print("Approval not submitted.", file=sys.stderr)
         return 1
@@ -82,7 +86,9 @@ def main() -> int:
     except ValueError:
         parser.error("Core URL or approver credential is invalid")
 
-    core = CoreClient(base_url, api_key, actor=identity, system="aigov-mcp-human-approval")
+    core = CoreClient(
+        base_url, api_key, actor=identity, system="aigov-mcp-human-approval"
+    )
     actor = ApproverActor(core, identity, {TOOL: tool})
     request = CoreDecision(
         decision=Decision.ALLOW,
