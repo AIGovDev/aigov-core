@@ -633,6 +633,32 @@ async fn post_evidence(
             payload.insert("policy_revision".into(), json!(policy_version));
         }
     }
+    // A process that serves a superseded revision (or cannot confirm its revision) writes nothing. Checked before the append.
+    if !st.policy_store.in_force_revisions().is_empty() {
+        match crate::policy_anchor::check_in_force_not_superseded(&st.pool, st.policy_store.in_force_revisions()).await {
+            Ok(()) => {}
+            Err(crate::policy_anchor::InForceCheckError::Superseded(m)) => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "POLICY_REVISION_SUPERSEDED",
+                    &m,
+                    "Restart this process on the anchored revision, or send the event to a process that serves it.",
+                    None,
+                )
+                .into_response();
+            }
+            Err(crate::policy_anchor::InForceCheckError::Unavailable(m)) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "POLICY_ANCHOR_UNAVAILABLE",
+                    &m,
+                    "Retry when the database is reachable and the policy anchor is in place.",
+                    None,
+                )
+                .into_response();
+            }
+        }
+    }
     // The authorization id and its times are fixed before the append, so the accepted record carries them.
     let prepared = if principal.is_some()
         && (event.event_type == "consequential_tool_call" || event.event_type == "tool_call")

@@ -154,6 +154,65 @@ fn is_hex_digest(s: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// Why an evidence write is refused against the anchor.
+#[derive(Debug, PartialEq, Eq)]
+pub enum InForceCheckError {
+    /// The anchor has moved past a revision this process serves, or the same revision has a different digest.
+    Superseded(String),
+    /// The anchor cannot be read, has no row for a served policy, or is behind a served revision. Refused, not guessed.
+    Unavailable(String),
+}
+
+/// Refuse a write while this process serves a revision the durable anchor has superseded.
+///
+/// A process loads its revision once, at startup. Another process can anchor a newer revision later, and the older process
+/// must stop writing evidence under the old rules. This is checked on each evidence write, against the database row, not
+/// against the filesystem record. A missing or unreadable anchor is also a refusal.
+pub async fn check_in_force_not_superseded(
+    pool: &DbPool,
+    in_force: &[PendingAnchor],
+) -> Result<(), InForceCheckError> {
+    for p in in_force {
+        let want = crate::policy_watermark::parse_version(&p.version_raw)
+            .map_err(InForceCheckError::Unavailable)?;
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "SELECT revision, digest_sha256 FROM policy_revision_anchor WHERE policy_id = $1",
+        )
+        .bind(&p.policy_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| InForceCheckError::Unavailable(db_err(e)))?;
+        let Some((anchored, digest)) = row else {
+            return Err(InForceCheckError::Unavailable(format!(
+                "no policy revision anchor row for {}",
+                p.policy_id
+            )));
+        };
+        let anchored = u64::try_from(anchored).map_err(|_| {
+            InForceCheckError::Unavailable(format!("anchored revision for {} is negative", p.policy_id))
+        })?;
+        if anchored > want {
+            return Err(InForceCheckError::Superseded(format!(
+                "policy {} revision {} is superseded by anchored revision {}; restart this process on the current revision",
+                p.policy_id, want, anchored
+            )));
+        }
+        if anchored == want && digest != p.digest_sha256 {
+            return Err(InForceCheckError::Superseded(format!(
+                "policy {} revision {} has a different digest in the anchor than the one this process serves",
+                p.policy_id, want
+            )));
+        }
+        if anchored < want {
+            return Err(InForceCheckError::Unavailable(format!(
+                "the anchor for {} is at revision {} but this process serves {}; the database is behind",
+                p.policy_id, anchored, want
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn db_err(e: sqlx::Error) -> String {
     let text = e.to_string();
     if text.contains("does not exist") {
