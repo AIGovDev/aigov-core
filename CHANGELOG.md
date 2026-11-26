@@ -7,6 +7,17 @@ and this project adheres to the [versioning policy](docs/releases/versioning-pol
 
 ## [Unreleased]
 
+### Security
+
+- Execution receipts are accepted only from an authenticated executor principal, and only for an authorization Core issued in the same run. Previously any key could record a receipt for an authorization that was never issued.
+- Production refuses to start without authenticated principals (`GOVAI_PRINCIPALS_JSON` or OIDC).
+- Crash-point instrumentation moved behind the non-default `fault-injection` Cargo feature; a normal build refuses to start if the fault-injection variables are set.
+
+### Fixed
+
+- The SDK wheel includes the PostgreSQL executor schema (`migrations/pg/0001_executor_pg.sql`).
+- `ai_discovery_reported` is allowed for the agent role when principals are configured.
+
 ### Changed
 
 - Repository slug and documentation branding: **`govai-core` → `aigov-core`** (GitHub rename prepared in-tree). Runtime package names unchanged (`aigov_audit`, `aigov-py`, `govai` CLI compat). Helm chart, Kubernetes manifests, Docker tags, and CI job `aigov-core-portable` use the new slug.

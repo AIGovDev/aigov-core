@@ -148,3 +148,13 @@ Explicit non-guarantees: no trusted timestamps; no federated operator identity; 
 compatibility. Core signs with the registry's single active key, and its seed files live on the Core host. Simultaneous
 compromise of PostgreSQL write access and the trust file is a residual threat that the registry code cannot detect (runbook,
 "Residual threat").
+
+## Release candidate additions (2026-11-26)
+
+| Threat | Control | Evidence | Residual |
+|---|---|---|---|
+| A key that is not an executor records a receipt for an authorization that was never issued | Receipts require an authenticated executor principal and an authorization issued in the same run (`execution_receipt` checks in `post_evidence`) | `test_receipt_provenance_core.py`; negative controls N1–N4 | Approvals without principals remain unauthenticated (R-1) |
+| Production starts without principals, so any key posts approvals and receipts | Production refuses to start before any database access | `rust/tests/prod_requires_principals.rs`; N7 | Staging does not refuse without principals (R-1) |
+| Crash-point code reaches a production binary | Crash points compile only with the non-default `fault-injection` feature; a normal build refuses to start with the variables set | N8; the Dockerfile builds without the feature | The crash tests are not in CI (R-5) |
+| A wheel without the PostgreSQL schema is installed downstream | Package data includes `migrations/pg/*.sql`; offline downstream check | N10 | Live downstream check runs in CI only |
+| Two instances authorize one approval | Ledger file lock across processes, approval check inside the lock | `test_approval_single_use_two_instances.py` (five rounds) | Hosts sharing a ledger directory are unsupported (R-4) |
