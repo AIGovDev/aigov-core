@@ -1,0 +1,59 @@
+# Local multi-instance example: two Core instances on one Docker host sharing one ledger volume, plus PostgreSQL for the
+# shared executor store, the policy anchor, and the key registry anchor.
+#
+# This is a local example only. It is not a deployment. It creates named volumes and containers on this machine.
+# Supported topology: several Core instances that share the ledger volume on ONE Docker host (the ledger is serialized by a
+# cross-process flock on that volume). Instances on different hosts must not share a ledger volume. See
+# docs/operations/distributed-execution-runbook.md.
+#
+#   docker compose -f examples/distributed-execution/docker-compose.yml up -d
+#   docker compose -f examples/distributed-execution/docker-compose.yml down -v     # removes this example's volumes only
+name: govai-distributed-example
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: govai
+      POSTGRES_PASSWORD: govai-local-example-only
+      POSTGRES_DB: govai
+    tmpfs:
+      - /var/lib/postgresql   # PostgreSQL 18 keeps its data under /var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U govai -d govai"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  core-a:
+    image: aigov-core:test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &core-env
+      AIGOV_ENVIRONMENT: dev
+      GOVAI_LEDGER_DIR: /var/lib/govai/ledger
+      GOVAI_DATABASE_URL: postgres://govai:govai-local-example-only@postgres:5432/govai
+      GOVAI_API_KEYS: example-agent-key
+      GOVAI_API_KEYS_JSON: '{"example-agent-key":"tenant-example"}'
+      GOVAI_PRINCIPALS_JSON: '{"example-agent-key":{"principal":"agent:example","identity":"agent:example","role":"agent","tenant":"tenant-example"}}'
+      AIGOV_BIND: 0.0.0.0:8088
+      GOVAI_AUTO_MIGRATE: "true"   # applies the Core migrations at start; sqlx serializes concurrent starts
+    volumes:
+      - ledger:/var/lib/govai/ledger
+    ports:
+      - "18181:8088"
+
+  core-b:
+    image: aigov-core:test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *core-env
+    volumes:
+      - ledger:/var/lib/govai/ledger
+    ports:
+      - "18182:8088"
+
+volumes:
+  ledger:

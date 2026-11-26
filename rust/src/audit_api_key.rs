@@ -105,6 +105,19 @@ pub fn resolve_ledger_tenant_id_for_bearer(token: &str) -> Option<String> {
         .and_then(|guard| guard.get(token).cloned())
 }
 
+/// Tenant ids configured through `GOVAI_API_KEYS_JSON` (values only, never keys).
+pub fn configured_env_tenants() -> Vec<String> {
+    API_KEY_TENANT_MAP
+        .get()
+        .map(|m| {
+            let mut v: Vec<String> = m.values().cloned().collect();
+            v.sort();
+            v.dedup();
+            v
+        })
+        .unwrap_or_default()
+}
+
 pub fn api_key_tenant_map_is_initialized() -> bool {
     API_KEY_TENANT_MAP.get().is_some()
 }
@@ -192,11 +205,88 @@ pub fn init_api_key_tenant_map(deployment_env: GovaiEnvironment) -> Result<(), S
         };
     }
 
+    check_tenant_ledger_collisions(&cleaned)?;
+
     API_KEY_TENANT_MAP
         .set(Arc::new(cleaned))
         .map_err(|_| "GOVAI_API_KEYS_JSON was initialized more than once".to_string())?;
     ensure_hosted_hash_map();
     Ok(())
+}
+
+/// Refuse maps whose tenant ids would share, or be ambiguous about, a ledger file.
+///
+/// * Two distinct tenants whose segments are equal ignoring ASCII case (case-insensitive file
+///   systems) are refused.
+/// * A tenant whose pre-v2 (lossy) ledger file exists on disk must be listed in
+///   `AIGOV_LEDGER_LEGACY_TENANTS`. Otherwise its evidence would silently appear empty. This is
+///   an explicit operator decision, and nothing is moved or overwritten.
+///
+/// Fails closed in every environment. Tenant ids are not secrets.
+pub fn check_tenant_ledger_collisions(map: &HashMap<String, String>) -> Result<(), String> {
+    let mut tenants: Vec<&String> = map.values().collect();
+    tenants.sort();
+    tenants.dedup();
+    let legacy = crate::project::legacy_tenant_ids();
+    let mut seen: HashMap<String, &String> = HashMap::new();
+    for tenant in tenants {
+        let segment = crate::project::ledger_segment_for_tenant(tenant);
+        let key = crate::project::segment_collision_key(&segment);
+        if let Some(prev) = seen.get(&key) {
+            return Err(format!(
+                "tenant ids {prev:?} and {tenant:?} would share one ledger file (names collide, \
+                 ignoring ASCII case); rename one tenant"
+            ));
+        }
+        seen.insert(key, tenant);
+
+        if !legacy.contains(tenant) {
+            let legacy_segment = crate::project::tenant_ledger_segment_legacy(tenant);
+            if legacy_segment != crate::project::tenant_ledger_segment(tenant) {
+                let legacy_file = crate::project::ledger_file_for_segment(
+                    crate::project::TENANT_LEDGER_BASE,
+                    &legacy_segment,
+                );
+                if std::path::Path::new(&legacy_file).exists() {
+                    return Err(format!(
+                        "tenant {tenant:?} has an existing pre-v2 ledger file; add it to \
+                         {} to keep reading that file, or migrate it explicitly",
+                        crate::project::LEGACY_TENANTS_ENV
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a new tenant id whose ledger file would collide with an existing tenant's file.
+/// Used when issuing database keys. `existing` should include environment-configured tenants.
+pub fn check_new_tenant_against_existing(new_tenant: &str, existing: &[String]) -> Result<(), String> {
+    let new_key = crate::project::segment_collision_key(&crate::project::ledger_segment_for_tenant(new_tenant));
+    for other in existing {
+        if other == new_tenant {
+            continue;
+        }
+        let other_key = crate::project::segment_collision_key(&crate::project::ledger_segment_for_tenant(other));
+        if other_key == new_key {
+            return Err("ledger_tenant_id would share a ledger file with an existing tenant".to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Tenant ids issued to database keys must use only characters that the ledger file name keeps
+/// unchanged, so two issued tenants can never collide.
+pub fn validate_issued_tenant_id(tenant_id: &str) -> Result<(), String> {
+    let ok = !tenant_id.is_empty()
+        && tenant_id.len() <= 128
+        && tenant_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if ok {
+        Ok(())
+    } else {
+        Err("ledger_tenant_id must be 1-128 characters from [A-Za-z0-9_-]".to_string())
+    }
 }
 
 /// Server-controlled tenant id for the tenant-isolated ledger.
@@ -359,27 +449,43 @@ pub fn validate_api_key_allowlist_consistency(
     let json_map = parse_api_key_tenant_map_from_env_value(&json_raw)?;
     let allowlist = parse_api_keys_allowlist(&allowlist_raw);
 
-    if json_map.is_empty() {
-        return Ok(());
-    }
-
+    // Orphans: tenant-mapped keys the bearer allowlist rejects (HTTP 401 INVALID_API_KEY).
     let orphans: Vec<String> = json_map
         .keys()
         .filter(|k| !allowlist.contains(*k))
         .map(|k| key_fingerprint(k))
         .collect();
+    // Unmapped: allowlisted keys with no tenant (ledger routes return TENANT_RESOLUTION_FAILED).
+    let unmapped: Vec<String> = allowlist
+        .iter()
+        .filter(|k| !json_map.contains_key(*k))
+        .map(|k| key_fingerprint(k))
+        .collect();
 
-    if orphans.is_empty() {
+    if orphans.is_empty() && unmapped.is_empty() {
         return Ok(());
     }
 
-    let summary = format!(
-        "GOVAI_API_KEYS_JSON contains {} key(s) not present in GOVAI_API_KEYS \
-         (sha256 fingerprints: {}). Audit routes will return HTTP 401 INVALID_API_KEY \
-         for these keys until both env vars include them. Never log raw API keys.",
-        orphans.len(),
-        orphans.join(",")
-    );
+    let mut problems = Vec::new();
+    if !orphans.is_empty() {
+        problems.push(format!(
+            "GOVAI_API_KEYS_JSON contains {} key(s) not present in GOVAI_API_KEYS \
+             (sha256 fingerprints: {}). Audit routes will return HTTP 401 INVALID_API_KEY \
+             for these keys until both env vars include them.",
+            orphans.len(),
+            orphans.join(",")
+        ));
+    }
+    if !unmapped.is_empty() {
+        problems.push(format!(
+            "GOVAI_API_KEYS lists {} key(s) with no tenant in GOVAI_API_KEYS_JSON \
+             (sha256 fingerprints: {}). Ledger routes return TENANT_RESOLUTION_FAILED for these keys; \
+             GOVAI_API_KEYS_JSON must map every allowlisted key to a tenant.",
+            unmapped.len(),
+            unmapped.join(",")
+        ));
+    }
+    let summary = format!("{} Never log raw API keys.", problems.join(" "));
 
     match deployment_env {
         GovaiEnvironment::Dev => {
@@ -454,6 +560,33 @@ pub async fn gate_audit_routes_with_state(
     let pool = st.pool.clone();
     let deployment_env = st.deployment_env;
 
+    // OIDC: a bearer token that is a JWT is verified here when OIDC is configured. A verified token gives its mapped
+    // principal and tenant and skips the API-key checks. A token that fails verification stops here with 401; it never
+    // falls back to API-key authentication.
+    if crate::oidc::configured() {
+        if let Some(tok) = crate::oidc::bearer(request.headers()).map(str::to_string) {
+            if crate::oidc::looks_like_jwt(&tok) {
+                let verifier = crate::oidc::verifier().expect("checked configured");
+                return match verifier.verify(&tok).await {
+                    Ok(v) => {
+                        let tenant = v.principal.tenant.clone();
+                        request.extensions_mut().insert(crate::oidc::AuthenticatedPrincipal(v.principal));
+                        request.extensions_mut().insert(ResolvedLedgerTenant(tenant));
+                        next.run(request).await
+                    }
+                    Err(e) => api_error(
+                        StatusCode::UNAUTHORIZED,
+                        e.code(),
+                        "The bearer token could not be verified.",
+                        "Request a token from the configured identity provider for this API, with the configured audience, and retry.",
+                        None,
+                    )
+                    .into_response(),
+                };
+            }
+        }
+    }
+
     let token = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -468,6 +601,18 @@ pub async fn gate_audit_routes_with_state(
     let map_initialized = api_key_tenant_map_is_initialized();
     let keys_configured = cfg.keys.is_some();
     let runtime_key_lookup = runtime_key_lookup_enabled();
+
+    if crate::oidc::configured() && !(map_initialized || keys_configured || runtime_key_lookup) {
+        // OIDC-only deployment: a token that is not a JWT has no way to authenticate.
+        return api_error(
+            StatusCode::UNAUTHORIZED,
+            "INVALID_AUTH_TOKEN",
+            "The bearer token is not an identity-provider token.",
+            "Request a token from the configured identity provider for this API.",
+            None,
+        )
+        .into_response();
+    }
 
     // Primary allowlist: env JSON map, configured API keys, and/or hosted DB-issued keys by hash lookup.
     if map_initialized || keys_configured || runtime_key_lookup {
@@ -807,5 +952,72 @@ mod tests {
         std::env::set_var("GOVAI_API_KEYS_JSON", r#"{"k1":"t1","k2":"t2"}"#);
         validate_api_key_allowlist_consistency(GovaiEnvironment::Prod)
             .expect("prod should pass when allowlist covers JSON keys (per-key caps stripped)");
+    }
+
+    #[test]
+    fn validate_api_key_allowlist_consistency_prod_fails_when_allowlisted_key_has_no_tenant() {
+        // Allowlist without a tenant map: the key passes the bearer gate but every ledger route
+        // returns TENANT_RESOLUTION_FAILED. Staging/prod must refuse to start.
+        let _g = validator_env_lock().lock().unwrap();
+        let _scoped = ScopedEnv::new(&["GOVAI_API_KEYS", "GOVAI_API_KEYS_JSON"]);
+        std::env::set_var("GOVAI_API_KEYS", "k-prod-1");
+        std::env::remove_var("GOVAI_API_KEYS_JSON");
+        let err = validate_api_key_allowlist_consistency(GovaiEnvironment::Prod)
+            .expect_err("prod must reject an allowlisted key without a tenant");
+        assert!(err.contains("no tenant"), "unexpected message: {err}");
+        assert!(!err.contains("k-prod-1"), "raw key must not be logged");
+    }
+
+    #[test]
+    fn validate_api_key_allowlist_consistency_dev_allowlist_without_tenant_warns_only() {
+        let _g = validator_env_lock().lock().unwrap();
+        let _scoped = ScopedEnv::new(&["GOVAI_API_KEYS", "GOVAI_API_KEYS_JSON"]);
+        std::env::set_var("GOVAI_API_KEYS", "k-dev-1");
+        std::env::remove_var("GOVAI_API_KEYS_JSON");
+        validate_api_key_allowlist_consistency(GovaiEnvironment::Dev)
+            .expect("dev stays warn-only for unmapped allowlisted keys");
+    }
+
+    #[test]
+    fn tenant_ledger_collision_accepts_dotted_and_underscored_names_under_injective_mapping() {
+        let map: HashMap<String, String> = [
+            ("k1".to_string(), "team.a".to_string()),
+            ("k2".to_string(), "team_a".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        check_tenant_ledger_collisions(&map).expect("distinct under the injective mapping");
+    }
+
+    #[test]
+    fn tenant_ledger_collision_refuses_names_equal_ignoring_case() {
+        let map: HashMap<String, String> = [
+            ("k1".to_string(), "Team".to_string()),
+            ("k2".to_string(), "team".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let err = check_tenant_ledger_collisions(&map).expect_err("case-only collision must refuse");
+        assert!(err.contains("ignoring ASCII case"), "{err}");
+    }
+
+    #[test]
+    fn tenant_ledger_collision_allows_distinct_safe_names_and_shared_tenant() {
+        let map: HashMap<String, String> = [
+            ("k1".to_string(), "tenant-a".to_string()),
+            ("k2".to_string(), "tenant-b".to_string()),
+            ("k3".to_string(), "tenant-a".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        check_tenant_ledger_collisions(&map).expect("distinct tenants and one tenant with two keys are fine");
+    }
+
+    #[test]
+    fn issued_tenant_id_must_use_only_stable_characters() {
+        assert!(validate_issued_tenant_id("team-alpha_01").is_ok());
+        for bad in ["", "team.a", "team a", "../x", "a/b", "é", &"x".repeat(129)] {
+            assert!(validate_issued_tenant_id(bad).is_err(), "must reject {bad:?}");
+        }
     }
 }

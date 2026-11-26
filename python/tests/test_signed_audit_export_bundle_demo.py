@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -65,7 +66,7 @@ def test_generate_script_roundtrip(tmp_path: Path) -> None:
     trust = tmp_path / "trust.json"
     proc = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(ROOT / "scripts/generate_signed_audit_export_bundle_demo.py"),
             "--out",
             str(out),

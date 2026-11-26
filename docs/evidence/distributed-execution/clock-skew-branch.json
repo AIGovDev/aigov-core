@@ -1,0 +1,11 @@
+{"applied": ["pg/0001_executor_pg.sql"], "schema_version": 1}
+{
+  "tree": "/Users/monikadvorackova/verdict-scratch/agentref",
+  "store": "pg",
+  "recovery_by_skewed_clock": "skipped",
+  "live_worker_result": "{\"reason\": \"executed\", \"executed\": true}",
+  "live_worker_stderr_tail": null,
+  "final_state": "succeeded",
+  "receipt_state": "recorded",
+  "side_effects": 1
+}

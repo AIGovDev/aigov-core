@@ -14,33 +14,28 @@ jobs:
   dependabot-config:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
-      - name: Install Python dependencies for config check
-        working-directory: python
-        run: |
-          set -euo pipefail
-          python -m venv .venv
-          . .venv/bin/activate
-          pip install -U pip
-          pip install -e ".[dev]"
+      # The Dependabot validator imports only PyYAML beyond the stdlib.
+      # Avoid installing the full Python SDK and dev dependency tree.
+      - name: Install YAML parser
+        run: python -m pip install 'PyYAML>=6,<7'
 
       - name: Validate Dependabot targets staging
         run: |
           set -euo pipefail
-          . python/.venv/bin/activate
           make dependabot-config-check
 
   cargo-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
 
       - name: Install cargo-audit
         run: |
@@ -62,9 +57,9 @@ jobs:
   pip-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 

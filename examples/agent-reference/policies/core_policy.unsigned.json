@@ -1,0 +1,196 @@
+{
+  "schema": "govai.policy.v1",
+  "policy_id": "aigov-agent-reference",
+  "version": "1",
+  "created_at_utc": "2026-11-25T00:00:00Z",
+  "issuer": {
+    "issuer_id": "aigov-reference-issuer",
+    "display_name": "AIGov agent reference (synthetic)"
+  },
+  "selectors": {
+    "tenants": [
+      "*"
+    ],
+    "environments": [
+      "*"
+    ]
+  },
+  "inherits": [],
+  "ingest_rules": {
+    "unknown_event_types": {
+      "behavior": "reject"
+    },
+    "event_types": {
+      "tool_approval_requested": {
+        "schema": {
+          "required_types": {},
+          "required_nonempty_strings": [
+            "tool_name",
+            "tool_call_id",
+            "args_binding_hash"
+          ]
+        },
+        "gates": []
+      },
+      "human_approved": {
+        "schema": {
+          "required_types": {},
+          "required_nonempty_strings": [
+            "approver",
+            "decision",
+            "scope",
+            "tool_name",
+            "tool_call_id",
+            "args_binding_hash",
+            "policy_revision",
+            "request_event_id"
+          ]
+        },
+        "gates": [
+          {
+            "type": "requires_approver_allowlist",
+            "field": "approver",
+            "allowlist": [
+              "maintainer@acme-corp.example",
+              "lead@acme-corp.example"
+            ],
+            "code": "approver_not_allowlisted",
+            "message_prefix": "policy_violation: human_approved approver"
+          },
+          {
+            "type": "requires_field_matches_field",
+            "field": "approver",
+            "other_field": "authenticated_identity",
+            "code": "approver_identity_mismatch",
+            "message": "policy_violation: approver does not match the authenticated identity"
+          },
+          {
+            "type": "requires_principal_relation",
+            "reference_field": "request_event_id",
+            "relation": "distinct",
+            "code": "self_approval_refused",
+            "message": "policy_violation: an approver may not approve their own request"
+          },
+          {
+            "type": "requires_timestamp_near_server_time",
+            "max_skew_seconds": 60,
+            "code": "approval_not_fresh",
+            "message": "policy_violation: approval timestamp is not near server time"
+          }
+        ]
+      },
+      "human_approval_revoked": {
+        "schema": {
+          "required_types": {},
+          "required_nonempty_strings": [
+            "approval_event_id",
+            "reason"
+          ]
+        },
+        "gates": [
+          {
+            "type": "requires_principal_relation",
+            "reference_field": "approval_event_id",
+            "relation": "same",
+            "code": "revocation_not_by_approver",
+            "message": "policy_violation: only the approver who gave the approval may revoke it"
+          }
+        ]
+      },
+      "tool_call_blocked": {
+        "schema": {
+          "required_types": {},
+          "required_nonempty_strings": [
+            "tool_name",
+            "tool_call_id",
+            "reason"
+          ]
+        },
+        "gates": []
+      },
+      "tool_call": {
+        "schema": {
+          "required_types": {},
+          "required_nonempty_strings": [
+            "tool_name",
+            "tool_call_id",
+            "args_binding_hash"
+          ]
+        },
+        "gates": [
+          {
+            "type": "requires_decision_enum",
+            "field": "tool_name",
+            "allowed": [
+              "read_repo_metadata"
+            ],
+            "code": "tool_not_permitted",
+            "message": "policy_violation: tool is not permitted for this agent"
+          }
+        ]
+      },
+      "consequential_tool_call": {
+        "schema": {
+          "required_types": {},
+          "required_nonempty_strings": [
+            "tool_name",
+            "approval_event_id",
+            "tool_call_id",
+            "args_binding_hash",
+            "policy_revision"
+          ]
+        },
+        "gates": [
+          {
+            "type": "requires_decision_enum",
+            "field": "tool_name",
+            "allowed": [
+              "create_file"
+            ],
+            "code": "tool_not_permitted",
+            "message": "policy_violation: tool is not permitted for this agent"
+          },
+          {
+            "type": "requires_unconsumed_approval",
+            "approval_field": "approval_event_id",
+            "scope": "tool_execution",
+            "max_age_seconds": 5,
+            "linkage_keys": [
+              "tool_name",
+              "tool_call_id",
+              "args_binding_hash",
+              "policy_revision"
+            ],
+            "code": "approval_required",
+            "message": "policy_violation: a human approval is required"
+          }
+        ]
+      },
+      "execution_receipt": {
+        "schema": {
+          "required_types": {},
+          "required_nonempty_strings": [
+            "execution_authorization_id",
+            "tool_name",
+            "args_binding_hash",
+            "outcome",
+            "result_digest"
+          ]
+        },
+        "gates": [
+          {
+            "type": "requires_issued_authorization",
+            "authorization_field": "execution_authorization_id",
+            "code": "authorization_not_issued",
+            "message": "policy_violation: no issued authorization matches this receipt"
+          }
+        ]
+      }
+    }
+  },
+  "verdict_rules": {
+    "required_evidence_codes": [],
+    "invalid_conditions": []
+  },
+  "signatures": []
+}

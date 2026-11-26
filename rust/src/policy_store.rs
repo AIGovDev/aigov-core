@@ -51,6 +51,10 @@ pub struct PolicyStore {
     policies: Arc<Vec<ResolvedPolicy>>,
     /// Legacy fallback compiled into a runtime policy (always present).
     legacy_fallback: Arc<ResolvedPolicy>,
+    /// Verified revisions waiting to be recorded. Recorded by `commit_revisions` after startup succeeds.
+    pending_revisions: Arc<std::sync::Mutex<Vec<crate::policy_anchor::PendingAnchor>>>,
+    /// The revisions this process serves, one per policy. Evidence writes are refused while the anchor has superseded any of them.
+    in_force: Vec<crate::policy_anchor::PendingAnchor>,
 }
 
 impl PolicyStore {
@@ -69,6 +73,9 @@ impl PolicyStore {
             .filter(|s| !s.trim().is_empty());
 
         let mut loaded: Vec<ResolvedPolicy> = Vec::new();
+        let mut pending_revisions: Vec<crate::policy_anchor::PendingAnchor> = Vec::new();
+        // Verified documents to anchor. Only accepted bundles are anchored; see the count check below.
+        let mut to_anchor: Vec<GovaiPolicyV1> = Vec::new();
 
         if let Some(p) = bundle_override {
             let p = PathBuf::from(p.trim());
@@ -81,6 +88,8 @@ impl PolicyStore {
                     return Err("Invalid policy configuration: refusing to start — AIGOV_POLICY_TRUST_ED25519_JSON required for signed policy verification".to_string());
                 }
                 policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
+                enforce_production_contract(deployment_env, &doc)?;
+                to_anchor.push(doc.clone());
             }
             let rp =
                 load_bundle_doc(&doc).map_err(|e| format!("policy bundle load failed: {e}"))?;
@@ -112,6 +121,8 @@ impl PolicyStore {
                         return Err("Invalid policy configuration: refusing to start — AIGOV_POLICY_TRUST_ED25519_JSON required for signed policy verification".to_string());
                     }
                     policy_signing::verify_policy_signatures(deployment_env, &trust, &doc)?;
+                    enforce_production_contract(deployment_env, &doc)?;
+                    to_anchor.push(doc.clone());
                 }
                 let rp = load_bundle_doc(&doc)
                     .map_err(|e| format!("policy bundle load failed {}: {e}", p.display()))?;
@@ -154,12 +165,38 @@ impl PolicyStore {
                 loaded.len()
             ));
         }
+        // Anchor only after the bundle set is accepted, so a refused startup never creates a pending revision.
+        for doc in &to_anchor {
+            pending_revisions.extend(enforce_anti_rollback(deployment_env, doc)?);
+        }
 
+        let in_force = pending_revisions.clone();
         Ok(Self {
             deployment_env,
             policies: Arc::new(loaded),
             legacy_fallback: Arc::new(legacy_resolved),
+            pending_revisions: Arc::new(std::sync::Mutex::new(pending_revisions)),
+            in_force,
         })
+    }
+
+    /// The revisions this process serves. Empty when no anchored bundle is configured (dev, or the unsigned legacy path).
+    pub fn in_force_revisions(&self) -> &[crate::policy_anchor::PendingAnchor] {
+        &self.in_force
+    }
+
+    /// Reconcile and commit the verified revisions this store serves, against the durable PostgreSQL anchor.
+    /// Call once, as the last step of startup, after the database pool, migrations, and the ledger are ready.
+    /// Any error refuses startup.
+    pub async fn commit_revisions(&self, pool: &crate::db::DbPool) -> Result<(), String> {
+        let items = {
+            let mut guard = self
+                .pending_revisions
+                .lock()
+                .map_err(|_| "policy revision state is unavailable (lock poisoned)".to_string())?;
+            std::mem::take(&mut *guard)
+        };
+        crate::policy_anchor::reconcile_all_and_commit(pool, &items).await
     }
 
     pub fn resolve_for_request(&self, tenant_id: &str) -> &ResolvedPolicy {
@@ -180,9 +217,120 @@ impl PolicyStore {
         enforce_ingest(&p.runtime, event, ledger)
     }
 
+    /// True when the active policy gates this event type on an unconsumed approval.
+    pub fn event_type_requires_unconsumed_approval(
+        &self,
+        tenant_id: &str,
+        event_type: &str,
+    ) -> bool {
+        let p = self.resolve_for_request(tenant_id);
+        p.runtime.event_rules.get(event_type).is_some_and(|rule| {
+            rule.gates.iter().any(|g| {
+                matches!(
+                    g,
+                    crate::policy_engine::Gate::RequiresUnconsumedApproval { .. }
+                )
+            })
+        })
+    }
+
     pub fn deployment_env(&self) -> GovaiEnvironment {
         self.deployment_env
     }
+}
+
+/// Revision anchoring for a verified bundle in staging and production. Records what must be anchored. The
+/// decision and the writes happen in `commit_revisions`, under the filesystem lock and the database transaction.
+/// A configured database URL is required: without it the anchor would silently disappear (a downgrade).
+fn enforce_anti_rollback(
+    deployment_env: GovaiEnvironment,
+    doc: &GovaiPolicyV1,
+) -> Result<Vec<crate::policy_anchor::PendingAnchor>, String> {
+    if matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Ok(Vec::new());
+    }
+    if crate::db::postgres_url_configured_nonempty().is_err() {
+        return Err(
+            "Invalid policy configuration: refusing to start — staging and production require a database URL (GOVAI_DATABASE_URL or DATABASE_URL) for the policy revision anchor"
+                .to_string(),
+        );
+    }
+    let Some(ledger) = crate::ledger_storage::configured_ledger_dir() else {
+        return Err(
+            "Invalid policy configuration: refusing to start — GOVAI_LEDGER_DIR is required for policy rollback protection"
+                .to_string(),
+        );
+    };
+    // Validate the revision shape now, so a malformed version is refused before any state is touched.
+    crate::policy_watermark::parse_version(&doc.version)?;
+    Ok(vec![crate::policy_anchor::PendingAnchor {
+        ledger_dir: ledger,
+        policy_id: doc.policy_id.clone(),
+        version_raw: doc.version.clone(),
+        digest_sha256: policy_signing::policy_payload_digest_sha256(doc),
+    }])
+}
+
+/// Production contract for a verified signed bundle. Refuses declared controls that this build does
+/// not enforce, so a signature can never vouch for a control that silently does nothing.
+///
+/// * `verdict_rules` are parsed but not evaluated: refused when non-empty.
+/// * `inherits` is not resolved: refused when non-empty.
+/// * `selectors` are not evaluated (resolution is global): tenants must be `["*"]`, and
+///   environments must include `"*"` or the deployment environment.
+/// * Any `human_approved` rule must constrain the approver with a `requires_approver_allowlist` gate.
+/// * `policy_id` and `version` must be present.
+pub fn enforce_production_contract(
+    deployment_env: GovaiEnvironment,
+    doc: &GovaiPolicyV1,
+) -> Result<(), String> {
+    if matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Ok(());
+    }
+    if doc.policy_id.trim().is_empty() || doc.version.trim().is_empty() {
+        return Err("production policy requires non-empty policy_id and version".to_string());
+    }
+    if !doc.inherits.is_empty() {
+        return Err(
+            "production policy: inherits is not supported by this build; remove it".to_string(),
+        );
+    }
+    if !doc.verdict_rules.required_evidence_codes.is_empty()
+        || !doc.verdict_rules.invalid_conditions.is_empty()
+    {
+        return Err(
+            "production policy: verdict_rules are not enforced by this build; remove them or they would have no effect"
+                .to_string(),
+        );
+    }
+    let env_label = deployment_env.as_str();
+    let tenants_global =
+        doc.selectors.tenants.iter().all(|t| t.trim() == "*") && !doc.selectors.tenants.is_empty();
+    let env_match = doc
+        .selectors
+        .environments
+        .iter()
+        .any(|e| e.trim() == "*" || e.trim() == env_label);
+    if !tenants_global || !env_match {
+        return Err(format!(
+            "production policy: selectors are not enforced by this build (tenants must be [\"*\"], environments must include \"*\" or {env_label})"
+        ));
+    }
+    if let Some(rule) = doc.ingest_rules.event_types.get("human_approved") {
+        let has_allowlist = rule.gates.iter().any(|g| {
+            g.get("type").and_then(|t| t.as_str()) == Some("requires_approver_allowlist")
+                && g.get("allowlist")
+                    .and_then(|a| a.as_array())
+                    .is_some_and(|a| !a.is_empty())
+        });
+        if !has_allowlist {
+            return Err(
+                "production policy: human_approved must include a requires_approver_allowlist gate with a non-empty allowlist"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn load_bundle_doc(doc: &GovaiPolicyV1) -> Result<RuntimePolicy, String> {
@@ -643,10 +791,93 @@ mod tests {
             deployment_env: GovaiEnvironment::Prod,
             policies: Arc::new(vec![]),
             legacy_fallback: Arc::new(store),
+            pending_revisions: Arc::new(std::sync::Mutex::new(Vec::new())),
+            in_force: Vec::new(),
         };
         let err = s
             .enforce_ingest_for_request("tenant", &ev, &ledger)
             .unwrap_err();
         assert_eq!(err.code, "unknown_event_type");
+    }
+}
+
+/// Which policies refuse a consequential call that names no approval. Core's own check is in
+/// `execution_authorization::approval_refusal` and the HTTP test in `tests/approval_before_authorization.rs`.
+#[cfg(test)]
+mod approval_policy_tests {
+    use super::*;
+    use crate::policy_engine::{enforce_ingest, LedgerView};
+
+    struct NoEvents;
+    impl LedgerView for NoEvents {
+        fn iter_events_for_run<'a>(
+            &'a self,
+            _run_id: &'a str,
+        ) -> Box<dyn Iterator<Item = EvidenceEvent> + 'a> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn call() -> EvidenceEvent {
+        EvidenceEvent {
+            event_id: "call-1".into(),
+            event_type: "consequential_tool_call".into(),
+            ts_utc: "2026-11-26T10:00:00Z".into(),
+            actor: "agent".into(),
+            system: "test".into(),
+            run_id: "run-1".into(),
+            environment: None,
+            payload: serde_json::json!({
+                "tool_name": "create_file",
+                "tool_call_id": "tc-1",
+                "approval_event_id": "appr-missing",
+                "args_binding_hash": "a".repeat(64),
+                "policy_revision": "rev-1",
+            }),
+            parent_run_id: None,
+            root_run_id: None,
+            delegated_from_event_id: None,
+            agent_id: None,
+            agent_role: None,
+            delegation_reason: None,
+        }
+    }
+
+    fn reference_bundle() -> GovaiPolicyV1 {
+        serde_json::from_str(include_str!(
+            "../../examples/agent-reference/policies/core_policy.unsigned.json"
+        ))
+        .expect("reference policy parses as govai.policy.v1")
+    }
+
+    #[test]
+    fn the_built_in_policy_refuses_consequential_calls_in_staging_and_prod_but_not_in_dev() {
+        let cfg = PolicyConfig::default();
+        let ledger = NoEvents;
+        // Staging and prod reject event types the policy does not define, so an unapproved call is refused there.
+        for env in [GovaiEnvironment::Staging, GovaiEnvironment::Prod] {
+            let p = runtime_policy_from_legacy(&cfg, env);
+            assert!(enforce_ingest(&p, &call(), &ledger).is_err(), "{env:?} accepted an undefined event type");
+        }
+        // Dev allows unknown event types and defines no approval gate. Core's own check is what refuses here.
+        let dev = runtime_policy_from_legacy(&cfg, GovaiEnvironment::Dev);
+        assert!(enforce_ingest(&dev, &call(), &ledger).is_ok());
+    }
+
+    #[test]
+    fn the_reference_bundle_refuses_a_call_that_names_no_real_approval() {
+        let p = load_bundle_doc(&reference_bundle()).expect("reference bundle loads");
+        let err = enforce_ingest(&p, &call(), &NoEvents).unwrap_err();
+        assert!(err.to_string().contains("approval_not_found"), "{err}");
+    }
+
+    #[test]
+    fn a_bundle_that_defines_the_call_without_the_approval_gate_is_accepted_by_policy_alone() {
+        // This is the case Core's own check exists for: the policy engine alone would let the call through.
+        let mut doc = reference_bundle();
+        let rule = doc.ingest_rules.event_types.get_mut("consequential_tool_call").expect("rule present");
+        rule.gates.retain(|g| g.get("type").and_then(|t| t.as_str()) != Some("requires_unconsumed_approval"));
+        let p = load_bundle_doc(&doc).expect("bundle loads");
+        assert!(enforce_ingest(&p, &call(), &NoEvents).is_ok());
     }
 }

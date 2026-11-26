@@ -1,7 +1,7 @@
 # First-party CLA v2. Never execute PR-head code in this privileged workflow.
-# Keep CLA Assistant enabled until this workflow is deployed on the default branch,
-# proven against fork PRs, and branch rulesets require "CLA v2 / agreement".
-name: CLA v2 production
+# Required status: "CLA v2 / agreement" (published by scripts/cla_v2_production.py).
+# The retired CLA Assistant workflow (cla.yml) has been deleted.
+name: CLA v2 — Enforcement
 
 on:
   pull_request_target:
@@ -24,7 +24,7 @@ permissions: {}
 
 jobs:
   cla-v2:
-    name: CLA-v2-enforcement
+    name: CLA enforcement engine (posts agreement status)
     if: >-
       github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request &&

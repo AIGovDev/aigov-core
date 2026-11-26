@@ -1,7 +1,7 @@
 # Trusted checker: always load executable code from protected staging, never PR head.
 # Activate only after this workflow is reviewed and merged to staging.
 # Never check out or execute PR-head code in this privileged event.
-name: CLA v2 trusted shadow
+name: CLA v2 — Audit
 
 on:
   pull_request_target:
@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   trusted-shadow:
-    name: CLA-v2-trusted-shadow
+    name: CLA independent audit (not a required status)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

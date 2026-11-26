@@ -1,0 +1,14 @@
+{
+  "active_execution_key": "exe-b",
+  "head_hash": "ad049e284ace7ed9be06b0d664e3f8eac82170e4380516c4aef2d8798916a080",
+  "operators": {
+    "ops-admin": "revoked",
+    "ops-admin-2": "active"
+  },
+  "statuses": {
+    "exe-a": "revoked",
+    "exe-b": "active",
+    "exe-c": "pending"
+  },
+  "version": 9
+}

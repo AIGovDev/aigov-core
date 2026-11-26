@@ -1,10 +1,10 @@
 # AIGov Core
 
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/MonikaDvorackova/aigov-core/govai-ci.yml)](https://github.com/AIGovDev/aigov-core/actions/workflows/govai-ci.yml) [![GitHub License](https://img.shields.io/github/license/MonikaDvorackova/aigov-core)](https://github.com/AIGovDev/aigov-core/blob/main/LICENSE) [![Crates.io](https://img.shields.io/badge/crates.io-not%20published-lightgrey)]() [![PyPI Version](https://img.shields.io/pypi/v/aigov-py)](https://pypi.org/project/aigov-py/) [![Documentation](https://img.shields.io/badge/docs-GitHub-blue)](https://github.com/AIGovDev/aigov-core/tree/main/docs)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/AIGovDev/aigov-core/govai-ci.yml)](https://github.com/AIGovDev/aigov-core/actions/workflows/govai-ci.yml) [![GitHub License](https://img.shields.io/github/license/AIGovDev/aigov-core)](https://github.com/AIGovDev/aigov-core/blob/main/LICENSE) [![Crates.io](https://img.shields.io/badge/crates.io-not%20published-lightgrey)]() [![PyPI Version](https://img.shields.io/pypi/v/aigov-py)](https://pypi.org/project/aigov-py/) [![Documentation](https://img.shields.io/badge/docs-GitHub-blue)](https://github.com/AIGovDev/aigov-core/tree/main/docs)
 
 AIGov Core is the **open-source**, ledger-authoritative audit runtime for reconstructible AI governance. The `aigov_audit` service appends evidence to tenant-scoped ledgers, enforces policy at ingest, derives **VALID / INVALID / BLOCKED** from ledger projection (`GET /compliance-summary`), exports `aigov.audit_export.v1`, and verifies hash chains.
 
-**Quickstart:** [`docs/quickstart-runtime.md`](docs/quickstart-runtime.md) · **Architecture and data flow:** [`ARCHITECTURE.md`](ARCHITECTURE.md) · **Mounted API contract:** [`docs/runtime-api-contract.md`](docs/runtime-api-contract.md) · **Repository scope:** [`OPEN_SOURCE_SCOPE.md`](OPEN_SOURCE_SCOPE.md) · **Verification and release checks:** [`docs/releases/release-checklist.md`](docs/releases/release-checklist.md) · **Test scope and limits:** [`docs/test-scope.md`](docs/test-scope.md)
+**Quickstart:** [`docs/quickstart-5min.md`](docs/quickstart-5min.md) · [full runtime walkthrough](docs/quickstart-runtime.md) · **Architecture and data flow:** [`ARCHITECTURE.md`](ARCHITECTURE.md) · **Mounted API contract:** [`docs/runtime-api-contract.md`](docs/runtime-api-contract.md) · **Repository scope:** [`OPEN_SOURCE_SCOPE.md`](OPEN_SOURCE_SCOPE.md) · **Verification and release checks:** [`docs/releases/release-checklist.md`](docs/releases/release-checklist.md) · **Test scope and limits:** [`docs/test-scope.md`](docs/test-scope.md)
 
 ## What this repository is
 
@@ -244,6 +244,17 @@ More context: **`examples/docker-compose-local-demo/README.md`**, canonical cont
 - **Troubleshooting matrix (customers + operators)**: `docs/troubleshooting.md`
 - **Operator runbook (hosted/self-hosted)**: `docs/operator-runbook.md`
 - **Runtime governance (preview / `POST /v1/runtime/evaluate`)**: default **`GOVAI_RUNTIME_GOVERNANCE_ENFORCEMENT=off`**; optional **`shadow`** or **`enforced`** — see `docs/governance/runtime_enforcement_gate.md` and `docs/governance/runtime_integration.md`. Tenant allowlist (**`GOVAI_RUNTIME_GOVERNANCE_ENFORCEMENT_TENANTS`**) scopes hard blocking under **`enforced`**. Operational snapshot: **`GET /ready`** and **`GET /status`** include **`runtime_governance_enforcement`** (informational; not an infra readiness signal on its own).
+
+## Customer pilot (synthetic data, one command)
+
+To evaluate AIGov Core on a synthetic enterprise workflow, with no account or external service:
+
+```bash
+python examples/customer-pilot/pilot.py run
+```
+
+It starts Core, runs read, approval, refusal, impersonation, execution, replay, and outage scenarios, verifies the
+evidence, writes `pilot-output/<timestamp>/pilot-report.md`, and cleans up. See [docs/customer-pilot.md](docs/customer-pilot.md).
 
 ## Quickstart (5 minutes)
 

@@ -1,0 +1,330 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "scenario": "1-concurrent-workers",
+      "check": "exactly one of eight concurrent workers performs the action",
+      "ok": true,
+      "detail": "1 executed"
+    },
+    {
+      "scenario": "1-concurrent-workers",
+      "check": "the side effect ran once",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "1-concurrent-workers",
+      "check": "every other worker is refused",
+      "ok": true,
+      "detail": "authorization_receipt_recorded, executed"
+    },
+    {
+      "scenario": "1-concurrent-workers",
+      "check": "Core holds one receipt for the authorization",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before reservation: process terminated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before reservation: no record written",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before reservation: retry runs the action once",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash after reservation: process terminated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash after reservation: the reservation survived",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "restarted executor resumes the reservation",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "resumed action ran once",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "receipt reached Core once",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before the side effect: process terminated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before the side effect: outcome recorded as unknown",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before the side effect: a second restart does not retry",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash during the side effect: process terminated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash during the side effect: the action had started",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash during the side effect: unknown, and not repeated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash after the side effect: process terminated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash after the side effect: outcome unknown, action not repeated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before the receipt: process terminated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before the receipt: Core holds no receipt yet",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before the receipt: receipt delivered on restart",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "crash before the receipt: action not repeated, one receipt",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "receipt acknowledgement lost: process terminated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "receipt acknowledgement lost: Core already holds the receipt",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "receipt acknowledgement lost: settled from Core's export",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "receipt acknowledgement lost: no duplicate receipt, action not repeated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "recovery killed mid-resume: process terminated",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "2-crash-boundaries",
+      "check": "recovery killed mid-resume: the next restart resumes once",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "external system fails mid-call: outcome recorded as unknown",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "unknown outcome: not retried by recovery",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "rejected: forged signature by an unregistered key",
+      "ok": true,
+      "detail": "reconciliation_signature_invalid"
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "rejected: unlisted reconciler identity",
+      "ok": true,
+      "detail": "reconciler_not_authorized"
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "rejected: evidence bound to another tool",
+      "ok": true,
+      "detail": "reconciliation_binding_mismatch"
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "rejected evidence changes nothing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "authorized reconciler's evidence is applied",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "reconciled outcome receipt delivered to Core",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "Core's receipt names the reconciled outcome",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "history keeps the unknown outcome and the reconciliation",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "history verifies",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "3-reconciliation",
+      "check": "action ran once, reconciliation did not repeat it",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "4-core-unavailable",
+      "check": "reservation made before the outage",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "4-core-unavailable",
+      "check": "new call refused while Core is down",
+      "ok": true,
+      "detail": "core_unavailable"
+    },
+    {
+      "scenario": "4-core-unavailable",
+      "check": "refused call left no reservation",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "4-core-unavailable",
+      "check": "restart while Core is down defers, performs nothing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "4-core-unavailable",
+      "check": "Core back: the deferred reservation resumes once",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "5-schema-upgrade",
+      "check": "v1 store refused before upgrade",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "5-schema-upgrade",
+      "check": "upgrade takes a backup",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "5-schema-upgrade",
+      "check": "upgrade preserves every v1 record",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "5-schema-upgrade",
+      "check": "upgraded history verifies",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "scenario": "6-visibility",
+      "check": "report covers every live execution with a record",
+      "ok": true,
+      "detail": "{'executions': 11, 'unknown': 0, 'backlog': 3}"
+    },
+    {
+      "scenario": "6-visibility",
+      "check": "every store's history verifies",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "timings": {
+    "core_ready_seconds": 1.04,
+    "recover_after_reserve_ms": 190.6,
+    "total_seconds": 35.0
+  },
+  "mode": "binary",
+  "core_image": "binary"
+}

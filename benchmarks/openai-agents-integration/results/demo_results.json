@@ -1,0 +1,93 @@
+{
+  "run_at": 1795364502.942291,
+  "scenarios_total": 7,
+  "scenarios_passed": 7,
+  "scenarios_failed": 0,
+  "authorized_executions": 4,
+  "blocked_executions": 0,
+  "unauthorized_side_effects": 0,
+  "results": [
+    {
+      "scenario": "S1-authorized-read",
+      "description": "Authorized read of annual-report",
+      "status": "PASS",
+      "outcome": {
+        "pass": true,
+        "decision": "allow",
+        "version": 1
+      },
+      "error": null,
+      "elapsed_ms": 0.56
+    },
+    {
+      "scenario": "S2-authorized-update",
+      "description": "Authorized update increments version",
+      "status": "PASS",
+      "outcome": {
+        "pass": true,
+        "decision": "allow",
+        "new_version": 2
+      },
+      "error": null,
+      "elapsed_ms": 1.02
+    },
+    {
+      "scenario": "S3-no-approval-deny",
+      "description": "Call without pre-approval is denied",
+      "status": "PASS",
+      "outcome": {
+        "pass": true,
+        "decision": "no_approval"
+      },
+      "error": null,
+      "elapsed_ms": 0.01
+    },
+    {
+      "scenario": "S4-prompt-injection-deny",
+      "description": "Prompt-injection doc_id mismatch blocked",
+      "status": "PASS",
+      "outcome": {
+        "pass": true,
+        "decision": "no_approval",
+        "pending_approvals": 1
+      },
+      "error": null,
+      "elapsed_ms": 0.01
+    },
+    {
+      "scenario": "S5-replay-deny",
+      "description": "Approval replay blocked; store not mutated",
+      "status": "PASS",
+      "outcome": {
+        "pass": true,
+        "first_decision": "allow",
+        "replay_decision": "no_approval"
+      },
+      "error": null,
+      "elapsed_ms": 0.95
+    },
+    {
+      "scenario": "S6-authorized-delete",
+      "description": "Authorized delete soft-deletes with audit row",
+      "status": "PASS",
+      "outcome": {
+        "pass": true,
+        "decision": "allow",
+        "audit_row_present": true
+      },
+      "error": null,
+      "elapsed_ms": 2.15
+    },
+    {
+      "scenario": "S7-cross-tenant-deny",
+      "description": "Cross-tenant resource access blocked",
+      "status": "PASS",
+      "outcome": {
+        "pass": true,
+        "decision": "no_approval"
+      },
+      "error": null,
+      "elapsed_ms": 0.6
+    }
+  ]
+}

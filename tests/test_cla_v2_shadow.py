@@ -122,5 +122,58 @@ class ShadowTests(unittest.TestCase):
             with self.assertRaises(cla.AuditError):
                 cla.audit("owner/repo", 3)
 
+class AiAttributionPolicyTests(unittest.TestCase):
+    """Exact-match AI attribution policy: positive and negative cases."""
+
+    def _run(self, message, login="alice", uid=42):
+        commit = {"author": {"login": login, "id": uid}, "commit": {"message": f"Change\n\n{message}"}}
+        with patch.object(cla, "pages", return_value=[commit]):
+            return cla.contributors("owner/repo", 1, expected_count=1)
+
+    def test_exact_haiku_attribution_accepted_in_both_casings(self):
+        for trailer in ("Co-authored-by: Claude Haiku 5.5 <noreply@anthropic.com>",
+                        "Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"):
+            with self.subTest(trailer=trailer):
+                self.assertEqual(self._run(trailer, "MonikaDvorackova", 95243292),
+                                 {"MonikaDvorackova": 95243292})
+
+    def test_haiku_attribution_does_not_sign_for_author(self):
+        # The AI trailer is metadata. The human author still needs a signature.
+        with patch.object(cla, "get", return_value={"user": {"login": "alice", "id": 42}, "commits": 1}), \
+             patch.object(cla, "contributors", return_value=self._run("Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>")), \
+             patch.object(cla, "signatures", return_value=set()):
+            self.assertEqual(cla.audit("owner/repo", 1)["unsigned"], ["alice"])
+
+    def test_negative_cases_fail_closed(self):
+        rejected = [
+            "Co-authored-by: Claude Haiku 5.5 <attacker@example.com>",        # spoofed address
+            "Co-authored-by: Claude Haiku 5.5 <noreply@anthropic.com.evil.test>",  # lookalike domain
+            "Co-authored-by: Claude Haiku 5.6 <noreply@anthropic.com>",       # unknown version
+            "Co-authored-by: Claude Haiku 5 <noreply@anthropic.com>",         # truncated version
+            "Co-authored-by: Claude Haiku 5.5 (fast) <noreply@anthropic.com>",  # variant suffix
+            "Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",        # other model family
+            "Co-authored-by: Claude Haiku <noreply@anthropic.com>",           # family without version
+            "Co-authored-by:Claude Haiku 5.5 <noreply@anthropic.com>",        # malformed: missing space
+            "CO-AUTHORED-BY: Claude Haiku 5.5 <noreply@anthropic.com>",       # unlisted casing
+            "Co-authored-by: Claude Haiku 5.5 <noreply@anthropic.com> extra", # trailing text
+            "Co-authored-by: Claude Haiku 5.5",                               # missing address
+        ]
+        for trailer in rejected:
+            with self.subTest(trailer=trailer):
+                with self.assertRaises(cla.AuditError):
+                    self._run(trailer)
+
+    def test_haiku_plus_human_coauthor_still_blocks(self):
+        message = ("Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>\n"
+                   "Co-authored-by: Bob <bob@example.com>")
+        with self.assertRaises(cla.AuditError):
+            self._run(message)
+
+    def test_haiku_trailer_spoofed_as_human_author_still_needs_signature(self):
+        # A human-looking author with the AI trailer is not exempted, and the
+        # trailer does not create a signer for anyone else.
+        self.assertEqual(self._run("Co-authored-by: Claude Haiku 5.5 <noreply@anthropic.com>", "bob", 7), {"bob": 7})
+
+
 if __name__ == "__main__":
     unittest.main()

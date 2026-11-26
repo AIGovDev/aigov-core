@@ -1,0 +1,106 @@
+{
+  "started_utc": "2026-11-26T13:49:15Z",
+  "platform": "macOS-26.2-arm64-arm-64bit",
+  "cpu_count": 12,
+  "load_average_start": [
+    12.96435546875,
+    9.76123046875,
+    6.904296875
+  ],
+  "settings": {
+    "max_concurrent_requests": 16,
+    "request_timeout_secs": 3.0,
+    "seconds_per_level": 15.0
+  },
+  "levels": [
+    {
+      "concurrency": 64,
+      "seconds": 15.34,
+      "requests": 86605,
+      "ok_200": 755,
+      "throughput_ok_per_s": 49.2,
+      "latency_ok_ms": {
+        "p50": 328.37,
+        "p95": 349.09,
+        "p99": 355.07,
+        "n": 755
+      },
+      "latency_all_ms": {
+        "p50": 7.71,
+        "p95": 16.51,
+        "p99": 28.39
+      },
+      "status_codes": {
+        "503": 85850,
+        "200": 755
+      },
+      "non_200_fraction": 0.9913,
+      "client_timeouts": 0,
+      "rss_kb_max": 15952,
+      "rss_kb_end": 15952
+    },
+    {
+      "concurrency": 256,
+      "seconds": 15.36,
+      "requests": 82416,
+      "ok_200": 701,
+      "throughput_ok_per_s": 45.6,
+      "latency_ok_ms": {
+        "p50": 381.12,
+        "p95": 431.85,
+        "p99": 676.27,
+        "n": 701
+      },
+      "latency_all_ms": {
+        "p50": 39.58,
+        "p95": 85.33,
+        "p99": 134.16
+      },
+      "status_codes": {
+        "503": 81715,
+        "200": 701
+      },
+      "non_200_fraction": 0.9915,
+      "client_timeouts": 0,
+      "rss_kb_max": 20656,
+      "rss_kb_end": 20656
+    }
+  ],
+  "recovery_probe_c1": {
+    "concurrency": 1,
+    "seconds": 10.02,
+    "requests": 360,
+    "ok_200": 360,
+    "throughput_ok_per_s": 35.9,
+    "latency_ok_ms": {
+      "p50": 27.97,
+      "p95": 30.11,
+      "p99": 32.11,
+      "n": 360
+    },
+    "latency_all_ms": {
+      "p50": 27.97,
+      "p95": 30.11,
+      "p99": 32.11
+    },
+    "status_codes": {
+      "200": 360
+    },
+    "non_200_fraction": 0.0,
+    "client_timeouts": 0,
+    "rss_kb_max": 21040,
+    "rss_kb_end": 21040
+  },
+  "process_alive_after_sweep": true,
+  "ledger": {
+    "chain_ok": true,
+    "records": 1816,
+    "records_without_200_response": 0
+  },
+  "load_average_end": [
+    13.3759765625,
+    10.33642578125,
+    7.24951171875
+  ],
+  "process_exit_code": -15
+}

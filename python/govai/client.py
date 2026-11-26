@@ -34,6 +34,23 @@ class GovAIAPIError(GovAIError):
         self.payload = payload
 
 
+def _json_or_none(response: requests.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
+def _is_run_not_found(status_code: int, payload: Any) -> bool:
+    """True for the server's 404 run_not_found body (``{"ok": false, "error": "run_not_found", ...}``)."""
+    return (
+        status_code == 404
+        and isinstance(payload, dict)
+        and payload.get("ok") is False
+        and payload.get("error") == "run_not_found"
+    )
+
+
 class GovAIClient:
     """
     Thin HTTP client for the GovAI audit API (Rust core).
@@ -103,6 +120,14 @@ class GovAIClient:
         body_text = response.text if response.text else None
 
         if not response.ok:
+            payload = _json_or_none(response)
+            if _is_run_not_found(response.status_code, payload):
+                # The server returns HTTP 404 for an unknown run (the intended status).
+                # Keep the pre-404 client contract for this case: callers that asked for
+                # ok:false errors still get GovAIAPIError, others still get the body.
+                if raise_on_body_ok_false:
+                    raise GovAIAPIError(payload["error"], payload)
+                return payload
             message = f"HTTP {response.status_code}"
             if body_text:
                 message = f"{message}: {body_text[:2000]}"
@@ -207,3 +232,10 @@ class GovAIClient:
     ) -> Any:
         path = f"/api/functions/v2/{run_id}/governance-scorecard"
         return self.request_json("GET", path, headers=extra_headers, timeout=timeout)
+
+
+# Canonical AIGov alias — new code should prefer AIGovClient.
+AIGovClient = GovAIClient
+AIGovError = GovAIError
+AIGovHTTPError = GovAIHTTPError
+AIGovAPIError = GovAIAPIError

@@ -7,7 +7,7 @@ use crate::audit_api_key::{
     AuditKeyGateState, ResolvedLedgerTenant,
 };
 use crate::audit_export::build_audit_export_v1;
-use crate::audit_store::{append_record_atomic_with_run_count, verify_chain};
+use crate::audit_store::verify_chain;
 use crate::bundle::{
     bundle_document_value, bundle_sha256, collect_events_for_run, find_model_artifact_path,
     portable_evidence_digest_v1,
@@ -45,6 +45,7 @@ const LEDGER_STEM: &str = "audit_log.jsonl";
 #[derive(Clone)]
 pub struct AppState {
     pub deployment_env: GovaiEnvironment,
+    pub request_limits: crate::request_limits::RequestLimits,
     pub policy_store: Arc<PolicyStore>,
     pub legacy_policy: PolicyConfig,
     pub policy_source: PolicySource,
@@ -62,8 +63,10 @@ struct RunIdQuery {
 
 async fn pool_from_env() -> Result<DbPool, String> {
     if db::postgres_url_configured_nonempty().is_err() {
+        // No database is configured. A key lookup that reaches this pool must fail fast, not wait for the default 30 s.
         return PgPoolOptions::new()
             .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(2))
             .connect_lazy("postgres://localhost:5432/govai_unused")
             .map_err(|e| format!("lazy pool: {e}"));
     }
@@ -80,24 +83,167 @@ async fn pool_from_env() -> Result<DbPool, String> {
     Ok(pool)
 }
 
+/// Whether a signed policy bundle is configured for this environment. Mirrors the loader's lookup:
+/// `AIGOV_POLICY_BUNDLE_FILE`, then `policy.bundle.<env>.json` or `policy.bundle.json` in `AIGOV_POLICY_DIR`.
+pub fn signed_bundle_configured(env: GovaiEnvironment) -> bool {
+    let set = |k: &str| {
+        std::env::var(k)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    };
+    let dir = std::env::var("AIGOV_POLICY_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    set("AIGOV_POLICY_BUNDLE_FILE")
+        || dir
+            .join(format!("policy.bundle.{}.json", env.as_str()))
+            .exists()
+        || dir.join("policy.bundle.json").exists()
+}
+
+/// Staging and production fail closed on the legacy policy path once a signed bundle is configured.
+///
+/// Production always requires a signed bundle. Staging requires one only when it is configured, so
+/// staging without a bundle keeps its existing (opt-in) behavior. Environment overrides and legacy
+/// policy files cannot participate in verdicts when the signed bundle governs.
+pub fn enforce_signed_bundle_only(env: GovaiEnvironment) -> Result<(), String> {
+    let label = match env {
+        GovaiEnvironment::Prod => "production",
+        GovaiEnvironment::Staging => "staging",
+        GovaiEnvironment::Dev => return Ok(()),
+    };
+    let set = |k: &str| {
+        std::env::var(k)
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    };
+    if set("AIGOV_POLICY_FILE") {
+        return Err(format!(
+            "refusing to start: AIGOV_POLICY_FILE is not permitted in {label}; use a signed policy bundle"
+        ));
+    }
+    if std::env::var_os("AIGOV_ALLOW_UNSIGNED_POLICY_FILE").is_some() {
+        return Err(format!(
+            "refusing to start: AIGOV_ALLOW_UNSIGNED_POLICY_FILE is not permitted in {label}"
+        ));
+    }
+    if set("AIGOV_APPROVER_ALLOWLIST") {
+        return Err(format!(
+            "refusing to start: AIGOV_APPROVER_ALLOWLIST is not permitted in {label}; express the allowlist in the signed bundle"
+        ));
+    }
+    if matches!(env, GovaiEnvironment::Prod) && !signed_bundle_configured(env) {
+        return Err(
+            "refusing to start: production requires a signed policy bundle (AIGOV_POLICY_BUNDLE_FILE, or policy.bundle.prod.json / policy.bundle.json in AIGOV_POLICY_DIR)"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Staging and production must not run verdicts from an unsigned policy *file*.
+///
+/// Built-in defaults are part of the code and are allowed. A file from `AIGOV_POLICY_FILE` or the
+/// environment-named file is refused unless the operator sets `AIGOV_ALLOW_UNSIGNED_POLICY_FILE=1`,
+/// which prints a warning. Migration: sign the policy as a bundle and load it with
+/// `AIGOV_POLICY_BUNDLE_FILE` (see docs/operations/policy-signing.md).
+pub fn enforce_policy_file_trust(
+    deployment_env: GovaiEnvironment,
+    source: &policy_config::PolicySource,
+) -> Result<(), String> {
+    if matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Ok(());
+    }
+    if matches!(source.kind, policy_config::PolicySourceKind::Defaults) {
+        return Ok(());
+    }
+    let allowed = std::env::var("AIGOV_ALLOW_UNSIGNED_POLICY_FILE")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+    if allowed {
+        eprintln!(
+            "warning: running staging/prod verdicts from an unsigned policy file (AIGOV_ALLOW_UNSIGNED_POLICY_FILE=1)"
+        );
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to start: unsigned policy file ({:?}) in {}; sign the policy as a bundle and set \
+         AIGOV_POLICY_BUNDLE_FILE, or set AIGOV_ALLOW_UNSIGNED_POLICY_FILE=1 explicitly",
+        source.kind,
+        deployment_env.as_str()
+    ))
+}
+
 pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
-    let resolved = policy_config::load_for_deployment(deployment_env)?;
+    refuse_fault_injection_outside_test(deployment_env)?;
+    // Fail closed: a limit that cannot be read stops startup, before any other configuration is used.
+    let request_limits = crate::request_limits::RequestLimits::from_env()?;
+    crate::principals::init_principals(deployment_env)?;
+    let bundle_only = match deployment_env {
+        GovaiEnvironment::Prod => true,
+        GovaiEnvironment::Staging => signed_bundle_configured(deployment_env),
+        GovaiEnvironment::Dev => false,
+    };
+    let resolved = if bundle_only {
+        // The verified signed bundle is the only policy source. No legacy file is read.
+        enforce_signed_bundle_only(deployment_env)?;
+        policy_config::ResolvedPolicyConfig {
+            config: policy_config::PolicyConfig::default(),
+            source: policy_config::PolicySource {
+                kind: policy_config::PolicySourceKind::Defaults,
+                path: None,
+            },
+        }
+    } else {
+        let resolved = policy_config::load_for_deployment(deployment_env)?;
+        enforce_policy_file_trust(deployment_env, &resolved.source)?;
+        resolved
+    };
     let policy_store = Arc::new(PolicyStore::load_for_deployment(
         deployment_env,
         resolved.clone(),
     )?);
     let _ = ledger_storage::validate_startup(deployment_env)?;
+    crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
+    // Staging and production authenticate every write. Without configured principals, any holder of a key can post any
+    // event type, including approvals and execution evidence, so these environments refuse to start in that configuration.
+    if matches!(deployment_env, GovaiEnvironment::Prod | GovaiEnvironment::Staging)
+        && !crate::principals::principals_configured()
+    {
+        return Err(format!(
+            "Invalid configuration: {} requires GOVAI_PRINCIPALS_JSON (or OIDC); refusing to start without authenticated principals",
+            deployment_env.as_str()
+        ));
+    }
+    crate::oidc::init_from_env(deployment_env)?;
+    crate::execution_authorization::init_from_env()?;
+    if crate::execution_authorization::enabled()
+        && !crate::principals::principals_configured()
+    {
+        return Err(
+            "Invalid configuration: execution authorization requires GOVAI_PRINCIPALS_JSON (separate agent, approver, and executor keys)"
+                .to_string(),
+        );
+    }
     let pool = pool_from_env().await?;
+    if crate::db::postgres_url_configured_nonempty().is_ok() {
+        crate::tenant_api_keys::check_db_tenants_against_env(&pool).await?;
+    }
     let usage = ApiUsageState::from_env(&pool)?;
     let api_key_cfg = AuditApiKeyConfig::from_env();
     let base_url = std::env::var("GOVAI_BASE_URL")
         .or_else(|_| std::env::var("AIGOV_BASE_URL"))
         .ok()
         .filter(|s| !s.trim().is_empty());
+    // The policy revision is committed by `crate::run` after the listener is bound, so a bind failure never
+    // advances the anchor. See `PolicyStore::commit_revisions`.
     Ok(AppState {
+        request_limits,
         deployment_env,
         policy_store,
         legacy_policy: resolved.config,
@@ -119,14 +265,45 @@ fn gate_state(st: &AppState) -> AuditKeyGateState {
     }
 }
 
+/// Admit a request to a slot, or refuse it with 503 OVERLOADED. A refused request was not read past its headers and recorded nothing.
+async fn shed_over_limit(
+    State(shedder): State<std::sync::Arc<crate::request_limits::Shedder>>,
+    req: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    match shedder.try_acquire() {
+        Some(_slot) => next.run(req).await,
+        None => {
+            // The body is not read for a refused request, so the connection cannot be reused safely: say so.
+            let mut resp = api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "OVERLOADED",
+                "The service is at its concurrency limit. Nothing was recorded for this request.",
+                "Retry after a short delay. The request was not processed.",
+                None,
+            )
+            .into_response();
+            resp.headers_mut().insert(axum::http::header::CONNECTION, axum::http::HeaderValue::from_static("close"));
+            resp.headers_mut().insert(axum::http::header::RETRY_AFTER, axum::http::HeaderValue::from_static("1"));
+            resp
+        }
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     let gate = gate_state(&state);
+    let limits = state.request_limits;
+    let shedder = crate::request_limits::Shedder::new(limits.max_concurrent);
     let ledger_routes = Router::new()
         .route("/evidence", post(post_evidence))
         .route("/bundle", get(get_bundle_query))
         .route("/bundle/{run_id}", get(get_bundle_path))
         .route("/bundle-hash", get(get_bundle_hash_query))
         .route("/bundle-hash/{run_id}", get(get_bundle_hash_path))
+        .route(
+            "/execution-authorizations/{run_id}/{authorization_id}/status",
+            get(get_execution_authorization_status),
+        )
         .route("/compliance-summary", get(get_compliance_summary_query))
         .route("/compliance-summary/{run_id}", get(get_compliance_summary_path))
         .route("/api/export/{run_id}", get(get_api_export))
@@ -135,7 +312,15 @@ pub fn build_router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(
             gate,
             gate_audit_routes_with_state,
-        ));
+        ))
+        // No queue. A request that finds the in-flight count at its limit is refused at once with 503 OVERLOADED, before any
+        // handler runs, so nothing is recorded for it. Inside that, the time limit covers the body read and the handler.
+        .layer(middleware::from_fn_with_state(shedder, shed_over_limit))
+        .layer(
+            tower::ServiceBuilder::new()
+                .layer(tower_http::timeout::TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, limits.timeout))
+                .layer(axum::extract::DefaultBodyLimit::max(limits.max_body_bytes)),
+        );
 
     Router::new()
         .route("/", get(get_root))
@@ -247,6 +432,159 @@ async fn get_ready(State(st): State<AppState>) -> impl IntoResponse {
     .into_response()
 }
 
+/// Executor status check for an authorization. Requires the executor principal for this tenant.
+/// `revoked` wins over `authorized`. `receipt_recorded` means an execution receipt exists for it.
+async fn get_execution_authorization_status(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    extensions: axum::http::Extensions,
+    Path((run_id, authorization_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let tenant_id = match resolve_tenant(&st, &headers, &extensions).await {
+        Ok(t) => t,
+        Err(e) => return e.into_response(),
+    };
+    let principal = match crate::principals::request_principal(&headers, &extensions) {
+        Some(p) => p,
+        None => {
+            return api_error(
+                StatusCode::UNAUTHORIZED,
+                "PRINCIPAL_REQUIRED",
+                "Status checks need the executor principal.",
+                "Send the executor key.",
+                None,
+            )
+            .into_response();
+        }
+    };
+    if principal.role != crate::principals::Role::Executor || principal.tenant != tenant_id {
+        return api_error(
+            StatusCode::FORBIDDEN,
+            "ROLE_NOT_PERMITTED",
+            "Only the executor for this tenant may check authorizations.",
+            "Use the executor key.",
+            None,
+        )
+        .into_response();
+    }
+    let log_path = ledger_path_for_tenant(&tenant_id);
+    let events = match collect_events_for_run(&log_path, &run_id) {
+        Ok(e) => e,
+        Err(e) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "LEDGER_READ_ERROR",
+                &e,
+                "Retry later.",
+                None,
+            )
+            .into_response();
+        }
+    };
+    let Some(issued) = events.iter().find(|e| {
+        (e.event_type == "consequential_tool_call" || e.event_type == "tool_call")
+            && e.payload
+                .get("execution_authorization_id")
+                .and_then(|v| v.as_str())
+                == Some(authorization_id.as_str())
+    }) else {
+        return api_error(
+            StatusCode::NOT_FOUND,
+            "AUTHORIZATION_NOT_FOUND",
+            "No authorization with this id in this run.",
+            "Check the run and authorization id.",
+            None,
+        )
+        .into_response();
+    };
+    let field = |k: &str| {
+        issued
+            .payload
+            .get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let approval_event_id = field("approval_event_id");
+    let expires_at = field("execution_authorization_expires_at_utc");
+    let revoked = !approval_event_id.is_empty()
+        && events.iter().any(|e| {
+            e.event_type == "human_approval_revoked"
+                && e.payload.get("approval_event_id").and_then(|v| v.as_str())
+                    == Some(approval_event_id.as_str())
+        });
+    let receipted = events.iter().any(|e| {
+        e.event_type == "execution_receipt"
+            && e.payload
+                .get("execution_authorization_id")
+                .and_then(|v| v.as_str())
+                == Some(authorization_id.as_str())
+    });
+    let now = chrono::Utc::now();
+    let expired = chrono::DateTime::parse_from_rfc3339(&expires_at)
+        .map(|t| now > t.with_timezone(&chrono::Utc))
+        .unwrap_or(true);
+    let state = if receipted {
+        "receipt_recorded"
+    } else if revoked {
+        "revoked"
+    } else if expired {
+        "expired"
+    } else {
+        "authorized"
+    };
+    (
+        StatusCode::OK,
+        Json(json!({
+            "ok": true,
+            "authorization_id": authorization_id,
+            "state": state,
+            "run_id": run_id,
+            "approval_event_id": approval_event_id,
+            "tool_name": field("tool_name"),
+            "args_binding_hash": field("args_binding_hash"),
+            "expires_at_utc": expires_at,
+            "checked_at_utc": now.to_rfc3339(),
+        })),
+    )
+        .into_response()
+}
+
+/// Test-only process-termination points for the issuance path. Compiled only with the `fault-injection` Cargo feature, which
+/// is off by default and is not enabled by the Dockerfile or any release build. Without the feature, `crash_point` is a
+/// no-op and a set `AIGOV_TEST_FAULT_INJECTION` makes Core refuse to start.
+#[cfg(feature = "fault-injection")]
+fn crash_point(name: &str) {
+    if std::env::var("AIGOV_TEST_FAULT_INJECTION").as_deref() != Ok("1") {
+        return;
+    }
+    if std::env::var("AIGOV_TEST_CRASH_AT").as_deref() == Ok(name) {
+        std::process::exit(137);
+    }
+}
+
+#[cfg(not(feature = "fault-injection"))]
+#[inline(always)]
+fn crash_point(_name: &str) {}
+
+/// Refuse to start with fault injection enabled: outside a test build, or outside the dev environment.
+#[cfg(feature = "fault-injection")]
+fn refuse_fault_injection_outside_test(deployment_env: GovaiEnvironment) -> Result<(), String> {
+    let enabled = std::env::var("AIGOV_TEST_FAULT_INJECTION").as_deref() == Ok("1");
+    if enabled && !matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Err("AIGOV_TEST_FAULT_INJECTION is set; refusing to start outside the dev environment".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "fault-injection"))]
+fn refuse_fault_injection_outside_test(_deployment_env: GovaiEnvironment) -> Result<(), String> {
+    if std::env::var("AIGOV_TEST_FAULT_INJECTION").is_ok() || std::env::var("AIGOV_TEST_CRASH_AT").is_ok() {
+        return Err("fault-injection variables are set but this build has no fault-injection feature; refusing to start".to_string());
+    }
+    Ok(())
+}
+
 async fn post_evidence(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -259,6 +597,129 @@ async fn post_evidence(
     };
     let log_path = ledger_path_for_tenant(&tenant_id);
     let policy_version = active_policy_version(&st, &tenant_id);
+
+    // Authenticated principals. When configured, the caller's key decides the principal, its role, and the event
+    // types it may post. Core writes the authenticated fields itself, so a client cannot choose its own identity.
+    let principal = if crate::principals::principals_configured() {
+        match crate::principals::request_principal(&headers, &extensions) {
+            Some(p) => Some(p),
+            None => {
+                return api_error(
+                    StatusCode::UNAUTHORIZED,
+                    "PRINCIPAL_REQUIRED",
+                    "This ingest requires an authenticated principal configured in GOVAI_PRINCIPALS_JSON.",
+                    "Send the API key assigned to your role.",
+                    None,
+                )
+                .into_response();
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(p) = &principal {
+        if p.tenant != tenant_id {
+            return api_error(
+                StatusCode::FORBIDDEN,
+                "TENANT_MISMATCH",
+                "The principal is not configured for this ledger tenant.",
+                "Use the key configured for this tenant.",
+                None,
+            )
+            .into_response();
+        }
+        if !crate::principals::role_may_post(p.role, event.event_type.as_str()) {
+            return api_error(
+                StatusCode::FORBIDDEN,
+                "ROLE_NOT_PERMITTED",
+                &format!(
+                    "role {} may not post event_type {}",
+                    p.role.as_str(),
+                    event.event_type
+                ),
+                "Post with the key for the role that owns this event type.",
+                None,
+            )
+            .into_response();
+        }
+        let Some(payload) = event.payload.as_object_mut() else {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "PAYLOAD_NOT_OBJECT",
+                "Authenticated events must carry a JSON object payload.",
+                "Send payload as a JSON object.",
+                None,
+            )
+            .into_response();
+        };
+        payload.insert("authenticated_principal".into(), json!(p.principal_id));
+        payload.insert("authenticated_identity".into(), json!(p.identity));
+        payload.insert("authenticated_role".into(), json!(p.role.as_str()));
+        if matches!(
+            event.event_type.as_str(),
+            "consequential_tool_call" | "tool_approval_requested" | "tool_call"
+        ) {
+            // Stamped by Core: approvals must claim the revision that is actually in force.
+            payload.insert("policy_revision".into(), json!(policy_version));
+        }
+    }
+    // A process that serves a superseded revision (or cannot confirm its revision) writes nothing. Checked before the append.
+    if !st.policy_store.in_force_revisions().is_empty() {
+        match crate::policy_anchor::check_in_force_not_superseded(&st.pool, st.policy_store.in_force_revisions()).await {
+            Ok(()) => {}
+            Err(crate::policy_anchor::InForceCheckError::Superseded(m)) => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "POLICY_REVISION_SUPERSEDED",
+                    &m,
+                    "Restart this process on the anchored revision, or send the event to a process that serves it.",
+                    None,
+                )
+                .into_response();
+            }
+            Err(crate::policy_anchor::InForceCheckError::Unavailable(m)) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "POLICY_ANCHOR_UNAVAILABLE",
+                    &m,
+                    "Retry when the database is reachable and the policy anchor is in place.",
+                    None,
+                )
+                .into_response();
+            }
+        }
+    }
+    // The authorization id and its times are fixed before the append, so the accepted record carries them.
+    let prepared = if principal.is_some()
+        && (event.event_type == "consequential_tool_call" || event.event_type == "tool_call")
+    {
+        match crate::execution_authorization::prepare(chrono::Utc::now()).await {
+            Ok(p) => p,
+            // Refused before the append: no record is written for a call that cannot be authorized.
+            Err(e) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "AUTHORIZATION_KEY_UNAVAILABLE",
+                    &e,
+                    "Activate an execution authorization key in the trusted key registry, then retry.",
+                    None,
+                )
+                .into_response();
+            }
+        }
+    } else {
+        None
+    };
+    if let (Some(prep), Some(payload)) = (&prepared, event.payload.as_object_mut()) {
+        payload.insert(
+            "execution_authorization_id".into(),
+            json!(prep.authorization_id),
+        );
+        payload.insert(
+            "execution_authorization_expires_at_utc".into(),
+            json!(prep.expires_at.to_rfc3339()),
+        );
+    }
 
     let existing = match collect_events_for_run(&log_path, &event.run_id) {
         Ok(e) => e,
@@ -274,6 +735,44 @@ async fn post_evidence(
         }
     };
 
+    // An execution receipt is evidence that an authorized call ran. It is accepted only from an authenticated executor
+    // principal, and only for an authorization that Core issued for this run. Without these checks any key could record a
+    // receipt for an authorization that never existed, or for a real one it did not execute.
+    if event.event_type == "execution_receipt" {
+        let authenticated_executor = principal
+            .as_ref()
+            .is_some_and(|p| p.role == crate::principals::Role::Executor);
+        if !authenticated_executor {
+            return api_error(
+                StatusCode::FORBIDDEN,
+                "RECEIPT_REQUIRES_EXECUTOR",
+                "An execution receipt must come from an authenticated executor principal.",
+                "Configure GOVAI_PRINCIPALS_JSON and send the executor key.",
+                None,
+            )
+            .into_response();
+        }
+        let receipt_auth = event
+            .payload
+            .get("execution_authorization_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let issued_for_run = existing.iter().any(|e| {
+            (e.event_type == "consequential_tool_call" || e.event_type == "tool_call")
+                && !receipt_auth.is_empty()
+                && e.payload.get("execution_authorization_id").and_then(|v| v.as_str()) == Some(receipt_auth)
+        });
+        if !issued_for_run {
+            return api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "RECEIPT_FOR_UNISSUED_AUTHORIZATION",
+                "The receipt names an execution authorization that Core did not issue for this run.",
+                "Send the receipt for the authorization returned to the executor.",
+                None,
+            )
+            .into_response();
+        }
+    }
     if let Err(e) =
         govai_environment::stamp_event_environment_for_ingest(&mut event, st.deployment_env, &existing)
     {
@@ -289,9 +788,66 @@ async fn post_evidence(
         return policy_violation_response(&policy_version, &v.to_string());
     }
 
-    let append_result = append_record_atomic_with_run_count(&log_path, event.clone());
+    // Events gated on an approval are checked again under the ledger lock, so a single approval cannot be
+    // consumed twice by concurrent requests. Other events keep the existing path.
+    let needs_locked_check = principal.is_some()
+        || st
+            .policy_store
+            .event_type_requires_unconsumed_approval(&tenant_id, &event.event_type);
+    crash_point("before_append");
+    // The append waits on the ledger lock and on disk. It runs on the blocking pool, so a request waiting for it does not hold
+    // a runtime worker, and the in-flight limit counts it. The check that runs under the lock is an owned copy of the one that
+    // was used before.
+    let check_store = st.policy_store.clone();
+    let check_tenant = tenant_id.clone();
+    let check_event = event.clone();
+    let check_prepared = prepared.clone();
+    let check_needed = needs_locked_check;
+    let append_path = log_path.clone();
+    let append_event = event.clone();
+    let append_join = tokio::task::spawn_blocking(move || {
+        let locked_check = move |path: &str| -> Result<(), String> {
+            if !check_needed {
+                return Ok(());
+            }
+            let view = FileLedgerView::new(path);
+            check_store
+                .enforce_ingest_for_request(&check_tenant, &check_event, &view)
+                .map_err(|v| v.to_string())?;
+            // With issuance enabled, Core issues an authorization only for a consequential call that names a real approval,
+            // whatever the policy says. Checked under the lock, so two calls cannot both use one approval.
+            if check_prepared.is_some() && check_event.event_type == "consequential_tool_call" {
+                let events = collect_events_for_run(path, &check_event.run_id)?;
+                if let Some(reason) = crate::execution_authorization::approval_refusal(&events, &check_event) {
+                    return Err(format!("policy_violation: a human approval is required reason={reason}"));
+                }
+            }
+            Ok(())
+        };
+        crate::audit_store::append_record_checked(&append_path, append_event, &locked_check)
+    })
+    .await;
+    let append_result = match append_join {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(crate::audit_store::CheckedAppendError::Rejected(msg))) => {
+            return policy_violation_response(&policy_version, &msg);
+        }
+        Ok(Err(crate::audit_store::CheckedAppendError::Store(msg))) => Err(msg),
+        // The blocking task did not finish. Whether the record was written is then unknown to the client: say so.
+        Err(join_err) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "LEDGER_WRITE_ABORTED",
+                &format!("the ledger write did not complete: {join_err}"),
+                "The outcome is not confirmed. Retry with the same event_id; a duplicate is refused rather than recorded twice.",
+                None,
+            )
+            .into_response();
+        }
+    };
     match append_result {
         Ok((rec, pre_count)) => {
+            crash_point("after_append_before_sign");
             runtime_metrics::inc_evidence_ingest("appended");
             ops_log::evidence_ingest("appended", 200, &tenant_id);
             let mut body = json!({
@@ -300,6 +856,34 @@ async fn post_evidence(
                 "policy_version": policy_version,
                 "environment": st.deployment_env.as_str(),
             });
+            if let Some(prep) = &prepared {
+                let str_field =
+                    |k: &str| event.payload.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                let call = crate::execution_authorization::CallBinding {
+                    run_id: &event.run_id,
+                    tool_name: str_field("tool_name"),
+                    args_binding_hash: str_field("args_binding_hash"),
+                    policy_revision: &policy_version,
+                    approval_event_id: str_field("approval_event_id"),
+                    consequential_record_hash: &rec.record_hash,
+                };
+                match crate::execution_authorization::sign_prepared(prep, &call).await {
+                    Ok(Some(signed)) => body["execution_authorization"] = json!(signed),
+                    Ok(None) => {}
+                    // The record is already appended, but no authorization is issued: the executor will not run the call.
+                    Err(e) => {
+                        return api_error(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "AUTHORIZATION_SIGNING_REFUSED",
+                            &e,
+                            "The record was accepted but no execution authorization was issued. Do not execute this call; resolve the key state and resubmit under a new event id.",
+                            Some(json!({ "record_hash": rec.record_hash })),
+                        )
+                        .into_response();
+                    }
+                }
+            }
+            crash_point("after_sign_before_response");
             if metering::metering_enabled() {
                 if let Some(extra) = metering::ingest_success_extras(
                     &tenant_id,
@@ -405,14 +989,17 @@ async fn bundle_for_run(
     };
 
     if events.is_empty() {
-        return Json(json!({
-            "ok": false,
-            "error": "run_not_found",
-            "message": "No events for run_id in tenant ledger.",
-            "policy_version": policy_version,
-            "run_id": run_id,
-        }))
-        .into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "ok": false,
+                "error": "run_not_found",
+                "message": "No events for run_id in tenant ledger.",
+                "policy_version": policy_version,
+                "run_id": run_id,
+            })),
+        )
+            .into_response();
     }
 
     let doc = bundle_document_value(run_id, &policy_version, &log_path, &events);
@@ -548,14 +1135,17 @@ async fn compliance_summary_for_run(
     };
 
     if events.is_empty() {
-        return Json(compliance_summary_error_json(
-            run_id,
-            &policy_version,
-            "run_not_found",
-            "No events for run_id in tenant ledger.",
-            None,
-        ))
-        .into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(compliance_summary_error_json(
+                run_id,
+                &policy_version,
+                "run_not_found",
+                "No events for run_id in tenant ledger.",
+                None,
+            )),
+        )
+            .into_response();
     }
 
     let artifact = find_model_artifact_path(&events);
@@ -665,13 +1255,16 @@ async fn verify_ledger(
             if let Some(rid) = run_id_filter {
                 let events = collect_events_for_run(&log_path, rid).unwrap_or_default();
                 if events.is_empty() {
-                    return Json(json!({
-                        "ok": false,
-                        "error": "run_not_found",
-                        "message": "No events for run_id in tenant ledger.",
-                        "run_id": rid,
-                    }))
-                    .into_response();
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({
+                            "ok": false,
+                            "error": "run_not_found",
+                            "message": "No events for run_id in tenant ledger.",
+                            "run_id": rid,
+                        })),
+                    )
+                        .into_response();
                 }
             }
             Json(json!({ "ok": true, "message": "chain valid" })).into_response()

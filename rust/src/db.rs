@@ -7,7 +7,7 @@ use uuid::Uuid;
 pub type DbPool = PgPool;
 
 /// Count of `.sql` files under `rust/migrations/`. Updated when migrations are added; tests assert parity.
-pub const EXPECTED_SQLX_MIGRATION_COUNT: i64 = 2;
+pub const EXPECTED_SQLX_MIGRATION_COUNT: i64 = 4;
 
 pub fn postgres_url_configured_nonempty() -> Result<(), String> {
     let url = std::env::var("GOVAI_DATABASE_URL")
@@ -50,13 +50,12 @@ pub async fn verify_sqlx_migrations_complete(pool: &DbPool) -> Result<(), String
     Ok(())
 }
 
-/// Apply SQL migrations from `rust/migrations` using runtime discovery (PostgreSQL-only).
+/// Apply the SQL migrations embedded in this binary at compile time (PostgreSQL-only).
+///
+/// The migrations are compiled into the binary, so a runtime image does not need the source tree
+/// and does not depend on any build-time path.
 pub async fn run_sqlx_migrations(pool: &DbPool) -> Result<(), String> {
-    let migrations_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
-    let migrator = sqlx_core::migrate::Migrator::new(migrations_dir)
-        .await
-        .map_err(|e| format!("migration source error: {e}"))?;
-    migrator
+    sqlx::migrate!("./migrations")
         .run(pool)
         .await
         .map_err(|e| format!("migration failed: {e}"))
@@ -71,6 +70,8 @@ pub async fn init_pool_from_env() -> Result<DbPool, String> {
         })?;
     PgPoolOptions::new()
         .max_connections(10)
+        // Bounded wait for a connection: a database that cannot serve fails the request instead of queuing it.
+        .acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&database_url)
         .await
         .map_err(|e| format!("DB connect failed: {}", e))

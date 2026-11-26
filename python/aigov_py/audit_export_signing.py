@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -88,6 +89,56 @@ def audit_export_payload_digest_sha256_hex(export_doc: dict[str, Any]) -> str:
 
     payload = canonical_audit_export_signing_payload(export_doc)
     return hashlib.sha256(canonical_bytes(payload.as_dict())).hexdigest()
+
+
+PAYLOAD_VERSION_V2 = 2
+
+
+def audit_export_signing_digest_v2(
+    export_doc: dict[str, Any],
+    *,
+    issuer_id: str,
+    signer: str,
+    created_at_utc: str,
+    expires_at_utc: str | None,
+) -> str:
+    """v2 digest binding issuer, signer, creation time, expiry and the whole document (mirror of Rust)."""
+    obj: dict[str, Any] = dict(canonical_audit_export_signing_payload(export_doc).as_dict())
+    obj["payload_version"] = PAYLOAD_VERSION_V2
+    obj["issuer_id"] = issuer_id.strip()
+    obj["signer"] = signer.strip()
+    obj["created_at_utc"] = created_at_utc.strip()
+    obj["expires_at_utc"] = expires_at_utc.strip() if expires_at_utc is not None else None
+    obj["document_sha256"] = document_digest_sha256(export_doc)
+    return hashlib.sha256(canonical_bytes(obj)).hexdigest()
+
+
+def _reject_floats(value: Any) -> None:
+    if isinstance(value, float):
+        raise ValueError("signed exports must not contain floating-point numbers")
+    if isinstance(value, dict):
+        for v in value.values():
+            _reject_floats(v)
+    elif isinstance(value, list):
+        for v in value:
+            _reject_floats(v)
+
+
+def document_digest_sha256(export_doc: dict[str, Any]) -> str:
+    """SHA-256 of canonical JSON of the export without its ``signatures`` array (mirror of Rust)."""
+    doc = {k: v for k, v in export_doc.items() if k != "signatures"}
+    _reject_floats(doc)
+    return hashlib.sha256(canonical_bytes(doc)).hexdigest()
+
+
+def _parse_rfc3339_utc(value: str) -> datetime:
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp must include a timezone offset")
+    return parsed.astimezone(timezone.utc)
 
 
 def _require_sha256_hex(label: str, value: str) -> str:
@@ -186,7 +237,13 @@ def sign_audit_export_ed25519(
         raise ValueError("audit export must be a JSON object")
     validate_signed_audit_export_integrity(doc)
 
-    digest = audit_export_payload_digest_sha256_hex(doc)
+    digest = audit_export_signing_digest_v2(
+        doc,
+        issuer_id=issuer_id,
+        signer=signer,
+        created_at_utc=created_at_utc,
+        expires_at_utc=expires_at_utc,
+    )
     sk = SigningKey(base64.b64decode(private_key_base64.strip()))
     sig_bytes = sk.sign(digest.encode("utf-8")).signature
     sig_b64 = base64.b64encode(sig_bytes).decode("ascii")
@@ -194,10 +251,11 @@ def sign_audit_export_ed25519(
 
     sig_record: dict[str, Any] = {
         "kind": SIGNATURE_KIND_ED25519,
+        "payload_version": PAYLOAD_VERSION_V2,
         "issuer_id": issuer_id.strip(),
         "signer": signer.strip(),
-        "created_at_utc": created_at_utc,
-        "expires_at_utc": expires_at_utc,
+        "created_at_utc": created_at_utc.strip(),
+        "expires_at_utc": expires_at_utc.strip() if expires_at_utc is not None else None,
         "payload_digest_sha256": digest,
         "canonical_payload": payload.as_dict(),
         "signature": {"encoding": "base64", "value": sig_b64},
@@ -221,15 +279,17 @@ def verify_audit_export_ed25519_signature(
     *,
     trust: Iterable[TrustEd25519],
 ) -> None:
-    """Verify at least one valid Ed25519 signature on the export canonical digest."""
+    """Verify at least one valid, unexpired Ed25519 signature on the export.
 
+    v2 records bind issuer, signer, creation time and expiry. Legacy (unversioned) records bind
+    only the content, so they must not carry an expiry.
+    """
     validate_signed_audit_export_integrity(export_doc)
-    digest = audit_export_payload_digest_sha256_hex(export_doc)
-
     sigs = export_doc.get("signatures")
     if not isinstance(sigs, list) or not sigs:
         raise ValueError("export is unsigned (signatures missing or empty)")
 
+    now = datetime.now(timezone.utc)
     last_err: str | None = None
     for s in sigs:
         if not isinstance(s, dict):
@@ -238,12 +298,39 @@ def verify_audit_export_ed25519_signature(
         if str(s.get("kind") or "") != SIGNATURE_KIND_ED25519:
             last_err = "unsupported signature kind"
             continue
-        if str(s.get("payload_digest_sha256") or "").strip().lower() != digest:
-            last_err = "payload digest mismatch"
-            continue
         issuer_id = str(s.get("issuer_id") or "").strip()
         if not issuer_id:
             last_err = "signature issuer_id missing"
+            continue
+        expires_raw = s.get("expires_at_utc")
+        if expires_raw is not None and (not isinstance(expires_raw, str) or not expires_raw.strip()):
+            last_err = "signature expires_at_utc must be a non-empty string or null"
+            continue
+        version = s.get("payload_version")
+        if version == PAYLOAD_VERSION_V2:
+            signer = str(s.get("signer") or "").strip()
+            created = str(s.get("created_at_utc") or "").strip()
+            if not signer or not created:
+                last_err = "signature signer and created_at_utc are required"
+                continue
+            digest = audit_export_signing_digest_v2(
+                export_doc,
+                issuer_id=issuer_id,
+                signer=signer,
+                created_at_utc=created,
+                expires_at_utc=expires_raw,
+            )
+        elif version is None:
+            if expires_raw is not None:
+                last_err = "legacy signature cannot carry an expiry (its metadata is not signed)"
+                continue
+            digest = audit_export_payload_digest_sha256_hex(export_doc)
+        else:
+            last_err = f"unsupported signature payload_version {version!r}"
+            continue
+
+        if str(s.get("payload_digest_sha256") or "").strip().lower() != digest:
+            last_err = "payload digest mismatch"
             continue
         sig = s.get("signature")
         if not isinstance(sig, dict) or str(sig.get("encoding") or "") != "base64":
@@ -267,8 +354,18 @@ def verify_audit_export_ed25519_signature(
                 break
             except Exception as e:  # noqa: BLE001
                 last_err = str(e) or "verify failed"
-        if ok:
-            return
+        if not ok:
+            continue
+        if expires_raw is not None:
+            try:
+                expires_at = _parse_rfc3339_utc(expires_raw)
+            except ValueError:
+                last_err = "signature expires_at_utc is not RFC 3339"
+                continue
+            if now >= expires_at:
+                last_err = f"signature expired at {expires_raw.strip()}"
+                continue
+        return
     raise ValueError(last_err or "no valid export signature found")
 
 

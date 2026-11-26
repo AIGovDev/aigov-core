@@ -1,0 +1,140 @@
+name: staging-policy-verify
+
+# Verifies signed Ed25519 v2 policy bundles and the verdict path.
+#
+# Two jobs, reported separately:
+#   local-simulation: always runs. Disposable keys, synthetic policies, the release binary started
+#                     per scenario. Evidence is labelled scope=local_simulation.
+#   live-staging:     runs only when the repository variable GOVAI_STAGING_BASE_URL is set and the job
+#                     is started manually (workflow_dispatch). It targets the `staging` environment and
+#                     checks only infrastructure behavior. Evidence is labelled scope=live_staging.
+#                     Without a configured staging service this job does not run, and nothing is
+#                     reported as passed.
+#
+# This workflow is not a required check. It does not modify CLA workflows, does not deploy, and does not
+# write to any branch. Evidence is uploaded as a workflow artifact.
+
+on:
+  pull_request:
+    branches: [staging]
+    paths:
+      - "rust/src/**"
+      - "rust/tests/tb_*.rs"
+      - "rust/tests/common/**"
+      - "python/aigov_py/policy_bundle_signing.py"
+      - "python/tests/test_staging_policy_verify.py"
+      - "scripts/staging_policy_verify.py"
+      - ".github/workflows/staging-policy-verify.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-simulation:
+    name: local-simulation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Throwaway PostgreSQL 18 for the revision anchor. The password exists only inside this ephemeral service.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: aigov_test
+          POSTGRES_PASSWORD: aigov_ci_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aigov_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      AIGOV_HARNESS_PG_ADMIN_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/postgres
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: rust -> target
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Build release audit binary
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build --release --locked
+
+      - name: Install Python package
+        working-directory: python
+        run: |
+          set -euo pipefail
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -U pip
+          pip install -e ".[dev,runs-postgres]"
+
+      - name: Harness unit tests
+        working-directory: python
+        run: |
+          set -euo pipefail
+          . .venv/bin/activate
+          pytest -q tests/test_staging_policy_verify.py
+
+      - name: Local staging simulation
+        run: |
+          set -euo pipefail
+          python/.venv/bin/python scripts/staging_policy_verify.py \
+            --skip-live \
+            --out artifacts/staging-verify/local-evidence.json
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-policy-verify-local
+          path: artifacts/staging-verify/
+          if-no-files-found: warn
+
+  live-staging:
+    name: live-staging
+    if: github.event_name == 'workflow_dispatch' && vars.GOVAI_STAGING_BASE_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Live staging checks
+        env:
+          GOVAI_STAGING_BASE_URL: ${{ vars.GOVAI_STAGING_BASE_URL }}
+          GOVAI_STAGING_API_KEY: ${{ secrets.GOVAI_STAGING_API_KEY }}
+        run: |
+          set -euo pipefail
+          python scripts/staging_policy_verify.py \
+            --skip-local \
+            --require-live \
+            --out artifacts/staging-verify/live-evidence.json
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-policy-verify-live
+          path: artifacts/staging-verify/
+          if-no-files-found: warn

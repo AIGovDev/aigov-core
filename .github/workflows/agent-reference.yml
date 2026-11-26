@@ -1,0 +1,521 @@
+# AIGov agent reference integration. Two jobs, both required to run (no skip counts as a pass):
+#   - in-process: the deterministic regression tests (no Core, no database).
+#   - core-service: trusted execution against a release AIGov Core built in this job (separate agent, approver, and
+#     executor identities; Core-issued authorizations; executor verification), with a PostgreSQL 18 service.
+#   - customer-pilot: the customer pilot end to end (synthetic data) against a release Core, with its own PostgreSQL 18
+#     service. It must pass every check and produce its report. It also runs the executor recovery validation.
+#
+# Both jobs fail if a test is skipped or missing: the JUnit counts are checked against the expected numbers.
+
+name: agent-reference
+
+on:
+  pull_request:
+    branches: [main, staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  in-process:
+    name: agent-reference-in-process
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install AIGov with the agent-reference extra
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e "./python[dev,agent-reference]"
+
+      - name: Run the 20 in-process reference tests
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_agent_reference_integration.py -q --junitxml="${RUNNER_TEMP}/inproc.xml"
+
+      - name: Require every in-process test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/inproc.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 20, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"in-process reference tests: expected {expected}, got {counts}")
+          print("in-process reference tests: all 20 executed and passed")
+          PY
+
+      - name: Run the customer pilot unit tests (no Core)
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_customer_pilot.py -q --junitxml="${RUNNER_TEMP}/pilot-unit.xml"
+
+      - name: Require every customer pilot unit test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/pilot-unit.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 6, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"customer pilot unit tests: expected {expected}, got {counts}")
+          print("customer pilot unit tests: all 6 executed and passed")
+          PY
+
+      - name: Run the customer integration unit tests (no Core)
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_customer_integration.py -q --junitxml="${RUNNER_TEMP}/integration-unit.xml"
+
+      - name: Require every customer integration unit test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/integration-unit.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 10, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"customer integration unit tests: expected {expected}, got {counts}")
+          print("customer integration unit tests: all 10 executed and passed")
+          PY
+
+      - name: Run the trusted-execution SDK unit tests (no Core)
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_trusted_sdk.py -q --junitxml="${RUNNER_TEMP}/sdk-unit.xml"
+
+      - name: Require every SDK unit test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/sdk-unit.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 27, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"SDK unit tests: expected {expected}, got {counts}")
+          print("SDK unit tests: all 27 executed and passed")
+          PY
+
+      - name: Run the executor lifecycle, crash-recovery, reconciliation, and migration tests (no Core)
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_executor_lifecycle.py -q --junitxml="${RUNNER_TEMP}/lifecycle.xml"
+
+      - name: Require every lifecycle test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/lifecycle.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 43, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"lifecycle tests: expected {expected}, got {counts}")
+          print("lifecycle tests: all 43 executed and passed")
+          PY
+
+  core-service:
+    name: agent-reference-core-service
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: govai
+          POSTGRES_USER: aigov_test
+          POSTGRES_PASSWORD: aigov_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aigov_test -d govai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Install AIGov with the agent-reference extra
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e "./python[dev,agent-reference]"
+
+      - name: Build the release Core
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin aigov_audit
+
+      - name: Start Core with the signed reference policy
+        run: |
+          set -euo pipefail
+          python examples/agent-reference/service/start_core_binary.py \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "${DATABASE_URL}" \
+            --port 18088 \
+            --state-dir "${RUNNER_TEMP}/aigov-ref-core"
+
+      - name: Run the 27 service-backed tests against the live trusted Core
+        env:
+          AIGOV_REF_REQUIRE_CORE: "1"
+        run: |
+          set -euo pipefail
+          python -m pytest python/tests/test_agent_reference_core.py -q --junitxml="${RUNNER_TEMP}/core.xml"
+
+      - name: Require every service-backed test to execute
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/core.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root[0]
+          counts = {k: int(suite.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
+          expected = {"tests": 27, "failures": 0, "errors": 0, "skipped": 0}
+          if counts != expected:
+              sys.exit(f"service-backed reference tests: expected {expected}, got {counts}")
+          print("service-backed reference tests: all 27 executed and passed")
+          PY
+
+      - name: Trusted-execution demonstration and benchmark (small)
+        run: |
+          set -euo pipefail
+          python examples/agent-reference/run_core_demo.py --cases 2 --results-dir "${RUNNER_TEMP}/core-results" --workdir "${RUNNER_TEMP}/trusted-workdir"
+
+      - name: Upload the service-backed results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent-reference-core-results
+          path: ${{ runner.temp }}/core-results
+          if-no-files-found: error
+
+  customer-pilot:
+    name: customer-pilot-end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: govai
+          POSTGRES_USER: aigov_test
+          POSTGRES_PASSWORD: aigov_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aigov_test -d govai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Install AIGov with the agent-reference extra
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e "./python[dev,agent-reference,runs-postgres]"
+
+      - name: Build the release Core
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin aigov_audit
+
+      - name: Run the customer pilot end to end (synthetic data, release Core, no Docker)
+        run: |
+          set -euo pipefail
+          python examples/customer-pilot/pilot.py run \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "${DATABASE_URL}" \
+            --port 18188 \
+            --out "${RUNNER_TEMP}/customer-pilot"
+
+      - name: Require the pilot report and every acceptance criterion to pass
+        run: |
+          set -euo pipefail
+          test -s "${RUNNER_TEMP}/customer-pilot/pilot-report.md"
+          if grep -q "| FAIL |" "${RUNNER_TEMP}/customer-pilot/pilot-report.md"; then
+            echo "customer pilot report contains a failing check"; exit 1
+          fi
+          echo "customer pilot report written and free of failing checks"
+
+      - name: Upload the pilot output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: customer-pilot-output
+          path: ${{ runner.temp }}/customer-pilot
+          if-no-files-found: error
+
+      - name: Create isolated databases for the integration runs
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import psycopg
+
+          with psycopg.connect("postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai", autocommit=True) as conn:
+              for name in ("govai_acme_validation", "govai_quickstart"):
+                  conn.execute(f"DROP DATABASE IF EXISTS {name}")
+                  conn.execute(f"CREATE DATABASE {name}")
+          print("created isolated databases")
+          PY
+
+      - name: Customer integration - Acme validation against a release Core
+        run: |
+          set -euo pipefail
+          python examples/customer-integration/acme/validate.py run \
+            --mode binary \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_acme_validation" \
+            --port 18288 \
+            --out "${RUNNER_TEMP}/acme-validation"
+          python - "${RUNNER_TEMP}/acme-validation/validation.json" <<'PY'
+          import json
+          import sys
+
+          data = json.load(open(sys.argv[1]))
+          if not data["passed"]:
+              sys.exit("Acme validation reported failing cases")
+          checks = sum(len(c["checks"]) for c in data["cases"])
+          print(f"Acme validation: {len(data['cases'])} cases, {checks} checks, all passed")
+          PY
+
+      - name: Customer integration - minimal quickstart against a release Core
+        run: |
+          set -euo pipefail
+          python examples/customer-integration/quickstart.py \
+            --mode binary \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_quickstart" \
+            --port 18299
+
+      - name: Create an isolated database for the recovery validation
+        run: |
+          set -euo pipefail
+          python -m pip install -q "psycopg[binary]>=3.3.9"
+          python - <<'PY'
+          import psycopg
+
+          with psycopg.connect("postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai", autocommit=True) as conn:
+              conn.execute("DROP DATABASE IF EXISTS govai_recovery")
+              conn.execute("CREATE DATABASE govai_recovery")
+          print("created govai_recovery")
+          PY
+
+      - name: Executor recovery against a release Core and PostgreSQL (crashes, reconciliation, outage, upgrades)
+        run: |
+          set -euo pipefail
+          python scripts/executor_recovery_live.py \
+            --mode binary \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_recovery" \
+            --port 18455 \
+            --out "${RUNNER_TEMP}/executor-recovery"
+          python - "${RUNNER_TEMP}/executor-recovery/recovery-live.json" <<'PY'
+          import json
+          import sys
+
+          data = json.load(open(sys.argv[1]))
+          failed = [c for c in data["checks"] if not c["ok"]]
+          if not data["passed"] or failed:
+              sys.exit(f"executor recovery: {len(failed)} check(s) failed: {failed[:3]}")
+          print(f"executor recovery: {len(data['checks'])} checks passed against a release Core")
+          PY
+
+      - name: Upload the executor recovery results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: executor-recovery-results
+          path: ${{ runner.temp }}/executor-recovery
+          if-no-files-found: error
+
+      - name: Upload the integration validation output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: customer-integration-validation
+          path: ${{ runner.temp }}/acme-validation
+          if-no-files-found: error
+
+  crash-consistency:
+    name: crash-consistency-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Install AIGov with the test extras
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e "./python[dev,agent-reference]"
+
+      - name: Crash-consistency gate (fault-injection build; receipts; approval single use)
+        run: |
+          set -euo pipefail
+          make crash-consistency-gate PY=python
+
+      - name: The release artifact contains no crash points
+        run: |
+          set -euo pipefail
+          make fault-absence-check PY=python
+
+  sdk-wheel:
+    name: sdk-wheel-downstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: govai
+          POSTGRES_USER: aigov_test
+          POSTGRES_PASSWORD: aigov_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aigov_test -d govai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Build the SDK wheel
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip build
+          python -m build --wheel --outdir "${RUNNER_TEMP}/dist" python
+          ls "${RUNNER_TEMP}/dist"
+
+      - name: Check the wheel contains the SDK and nothing from examples
+        run: |
+          set -euo pipefail
+          python - "${RUNNER_TEMP}/dist" <<'PY'
+          import pathlib
+          import sys
+          import zipfile
+
+          wheel = next(pathlib.Path(sys.argv[1]).glob("aigov_py-*.whl"))
+          names = zipfile.ZipFile(wheel).namelist()
+          trusted = [n for n in names if n.startswith("aigov_py/trusted/") and n.endswith(".py")]
+          if len(trusted) < 12:
+              sys.exit(f"expected the trusted-execution modules in the wheel, found {len(trusted)}")
+          leaked = [n for n in names if "examples" in n or "agent_reference" in n or "customer" in n]
+          if leaked:
+              sys.exit(f"the wheel contains repository code: {leaked[:3]}")
+          print(f"wheel ok: {len(trusted)} trusted modules, no examples or reference code")
+          PY
+
+      - name: Install the wheel into a clean environment (outside the repository)
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/clean-venv"
+          "${RUNNER_TEMP}/clean-venv/bin/python" -m pip install -q -U pip
+          "${RUNNER_TEMP}/clean-venv/bin/python" -m pip install -q "${RUNNER_TEMP}"/dist/aigov_py-*.whl
+          mkdir -p "${RUNNER_TEMP}/downstream"
+          cp scripts/trusted_sdk_downstream_check.py "${RUNNER_TEMP}/downstream/"
+          cd "${RUNNER_TEMP}/downstream"
+          "${RUNNER_TEMP}/clean-venv/bin/python" -c "import aigov_py, sys; print(aigov_py.__file__)"
+
+      - name: Downstream check, offline (installed wheel)
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/downstream"
+          "${RUNNER_TEMP}/clean-venv/bin/python" trusted_sdk_downstream_check.py offline
+
+      - name: Build the release Core
+        working-directory: rust
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --bin aigov_audit
+
+      - name: Downstream check, live against a release Core (installed wheel, its own database)
+        env:
+          DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
+        run: |
+          set -euo pipefail
+          python -m pip install -q "psycopg[binary]>=3.3.9"
+          python - <<'PY'
+          import psycopg
+
+          with psycopg.connect("postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai", autocommit=True) as conn:
+              conn.execute("DROP DATABASE IF EXISTS govai_downstream")
+              conn.execute("CREATE DATABASE govai_downstream")
+          print("created govai_downstream")
+          PY
+          cd "${RUNNER_TEMP}/downstream"
+          "${RUNNER_TEMP}/clean-venv/bin/python" trusted_sdk_downstream_check.py live \
+            --mode binary \
+            --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" \
+            --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_downstream" \
+            --port 18377

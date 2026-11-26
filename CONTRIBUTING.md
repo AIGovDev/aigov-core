@@ -50,7 +50,7 @@ External code contributions to this Covered Project require acceptance of an AIM
 - **Individuals:** [Individual CLA](legal/published/individual-contributor-license-agreement.md)
 - **Organizations:** [Corporate CLA](legal/published/corporate-contributor-license-agreement.md)
 
-Sign by commenting on the pull request (see **[docs/community/cla.md](docs/community/cla.md)**). The status check name is `CLAAssistant`.
+Sign by commenting on the pull request (see **[docs/community/cla.md](docs/community/cla.md)**). The required status check name is `CLA v2 / agreement`.
 
 ## Development workflow
 

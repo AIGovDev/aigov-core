@@ -85,6 +85,61 @@ pub fn canonical_audit_export_signing_payload(export: &Value) -> AuditExportSign
     }
 }
 
+/// Payload version of signature records that bind their own metadata. Records without
+/// `payload_version` are legacy (v1): they cover only the content payload.
+pub const PAYLOAD_VERSION_V2: u64 = 2;
+
+/// v2 digest: binds issuer, signer, creation time, expiry and the content payload.
+/// Trims the metadata the same way the signer and verifier both do.
+pub fn audit_export_signing_digest_v2(
+    export: &Value,
+    issuer_id: &str,
+    signer: &str,
+    created_at_utc: &str,
+    expires_at_utc: Option<&str>,
+) -> Result<String, String> {
+    let payload = canonical_audit_export_signing_payload(export);
+    let mut obj = serde_json::to_value(&payload).expect("payload json");
+    let document_sha256 = document_digest_sha256(export)?;
+    if let Some(map) = obj.as_object_mut() {
+        map.insert("payload_version".to_string(), json!(PAYLOAD_VERSION_V2));
+        map.insert("issuer_id".to_string(), json!(issuer_id.trim()));
+        map.insert("signer".to_string(), json!(signer.trim()));
+        map.insert("created_at_utc".to_string(), json!(created_at_utc.trim()));
+        map.insert(
+            "expires_at_utc".to_string(),
+            match expires_at_utc {
+                Some(e) => json!(e.trim()),
+                None => Value::Null,
+            },
+        );
+        map.insert("document_sha256".to_string(), json!(document_sha256));
+    }
+    Ok(sha256_hex_bytes(&canonical_json_bytes(&obj)))
+}
+
+/// SHA-256 of the canonical JSON of the whole export, excluding its `signatures` array.
+/// Binds every unsigned-before field (log_chain, run metadata, decision details, ...).
+/// Floating-point numbers are refused: the Rust and Python serializers may format them differently.
+pub fn document_digest_sha256(export: &Value) -> Result<String, String> {
+    fn reject_floats(v: &Value) -> Result<(), String> {
+        match v {
+            Value::Number(n) if !n.is_i64() && !n.is_u64() => {
+                Err("signed exports must not contain floating-point numbers".to_string())
+            }
+            Value::Array(a) => a.iter().try_for_each(reject_floats),
+            Value::Object(o) => o.values().try_for_each(reject_floats),
+            _ => Ok(()),
+        }
+    }
+    let mut doc = export.clone();
+    if let Some(obj) = doc.as_object_mut() {
+        obj.remove("signatures");
+    }
+    reject_floats(&doc)?;
+    Ok(sha256_hex_bytes(&canonical_json_bytes(&doc)))
+}
+
 pub fn audit_export_payload_digest_sha256_hex(export: &Value) -> String {
     let payload = canonical_audit_export_signing_payload(export);
     sha256_hex_bytes(&canonical_json_bytes(&payload))
@@ -195,7 +250,6 @@ pub fn verify_audit_export_ed25519_signature(
     expected_issuer_id: Option<&str>,
 ) -> Result<String, String> {
     validate_signed_audit_export_integrity(export)?;
-    let digest = audit_export_payload_digest_sha256_hex(export);
 
     let sigs = export
         .get("signatures")
@@ -203,29 +257,15 @@ pub fn verify_audit_export_ed25519_signature(
         .filter(|a| !a.is_empty())
         .ok_or_else(|| "export is unsigned (signatures missing or empty)".to_string())?;
 
+    let now = chrono::Utc::now();
     let mut last_err = "no valid export signature found".to_string();
     for s in sigs {
         let Some(sig_obj) = s.as_object() else {
             last_err = "signature record must be an object".to_string();
             continue;
         };
-        if sig_obj
-            .get("kind")
-            .and_then(|v| v.as_str())
-            != Some(SIGNATURE_KIND_ED25519)
-        {
+        if sig_obj.get("kind").and_then(|v| v.as_str()) != Some(SIGNATURE_KIND_ED25519) {
             last_err = "unsupported signature kind".to_string();
-            continue;
-        }
-        if sig_obj
-            .get("payload_digest_sha256")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase()
-            != digest
-        {
-            last_err = "payload digest mismatch".to_string();
             continue;
         }
         let issuer_id = sig_obj
@@ -243,6 +283,64 @@ pub fn verify_audit_export_ed25519_signature(
                 continue;
             }
         }
+
+        // Recompute the digest from the record's own metadata. Any change to signer, creation
+        // time or expiry changes the digest and fails the check.
+        let expires_field = sig_obj.get("expires_at_utc").cloned().unwrap_or(Value::Null);
+        let expires: Option<String> = match &expires_field {
+            Value::Null => None,
+            Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+            _ => {
+                last_err = "signature expires_at_utc must be a non-empty string or null".to_string();
+                continue;
+            }
+        };
+        let version = sig_obj.get("payload_version").and_then(|v| v.as_u64());
+        let expected_digest = match version {
+            Some(PAYLOAD_VERSION_V2) => {
+                let signer = sig_obj.get("signer").and_then(|v| v.as_str()).unwrap_or("").trim();
+                let created = sig_obj
+                    .get("created_at_utc")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+                if signer.is_empty() || created.is_empty() {
+                    last_err = "signature signer and created_at_utc are required".to_string();
+                    continue;
+                }
+                match audit_export_signing_digest_v2(export, issuer_id, signer, created, expires.as_deref()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        last_err = e;
+                        continue;
+                    }
+                }
+            }
+            None => {
+                // Legacy (v1) records do not cover expiry, so an expiry on them cannot be trusted.
+                if expires.is_some() {
+                    last_err = "legacy signature cannot carry an expiry (its metadata is not signed)".to_string();
+                    continue;
+                }
+                audit_export_payload_digest_sha256_hex(export)
+            }
+            Some(other) => {
+                last_err = format!("unsupported signature payload_version {other}");
+                continue;
+            }
+        };
+
+        let recorded = sig_obj
+            .get("payload_digest_sha256")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if recorded != expected_digest {
+            last_err = "payload digest mismatch".to_string();
+            continue;
+        }
+
         let sig = sig_obj.get("signature").and_then(|v| v.as_object());
         let Some(sig) = sig else {
             last_err = "signature object missing".to_string();
@@ -270,12 +368,32 @@ pub fn verify_audit_export_ed25519_signature(
                 continue;
             }
         };
+        let mut signature_ok = false;
         for vk in keys {
-            if vk.verify(digest.as_bytes(), &signature).is_ok() {
-                return Ok(issuer_id.to_string());
+            if vk.verify(expected_digest.as_bytes(), &signature).is_ok() {
+                signature_ok = true;
+                break;
             }
-            last_err = "ed25519 verify failed".to_string();
         }
+        if !signature_ok {
+            last_err = "ed25519 verify failed".to_string();
+            continue;
+        }
+
+        if let Some(exp) = expires.as_deref() {
+            let exp_time = match chrono::DateTime::parse_from_rfc3339(exp) {
+                Ok(t) => t.with_timezone(&chrono::Utc),
+                Err(_) => {
+                    last_err = "signature expires_at_utc is not RFC 3339".to_string();
+                    continue;
+                }
+            };
+            if now >= exp_time {
+                last_err = format!("signature expired at {exp}");
+                continue;
+            }
+        }
+        return Ok(issuer_id.to_string());
     }
     Err(last_err)
 }
@@ -289,17 +407,24 @@ pub fn sign_audit_export_ed25519(
     expires_at_utc: Option<&str>,
 ) -> Result<(), String> {
     validate_signed_audit_export_integrity(export)?;
-    let digest = audit_export_payload_digest_sha256_hex(export);
+    let digest = audit_export_signing_digest_v2(
+        export,
+        issuer_id,
+        signer,
+        created_at_utc,
+        expires_at_utc,
+    )?;
     let payload = canonical_audit_export_signing_payload(export);
     let sig_bytes = signing_key.sign(digest.as_bytes());
     let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig_bytes.to_bytes());
 
     let sig_record = json!({
         "kind": SIGNATURE_KIND_ED25519,
+        "payload_version": PAYLOAD_VERSION_V2,
         "issuer_id": issuer_id.trim(),
         "signer": signer.trim(),
-        "created_at_utc": created_at_utc,
-        "expires_at_utc": expires_at_utc,
+        "created_at_utc": created_at_utc.trim(),
+        "expires_at_utc": expires_at_utc.map(|e| e.trim()),
         "payload_digest_sha256": digest,
         "canonical_payload": sort_json_value(serde_json::to_value(&payload).expect("payload json")),
         "signature": {"encoding": "base64", "value": sig_b64},
@@ -320,6 +445,51 @@ pub fn sign_audit_export_ed25519(
         }
     }
     Ok(())
+}
+
+/// Strict Ed25519 seed parse: exactly 64 hex characters (32 bytes), surrounding whitespace allowed.
+/// Errors never include the input, so a malformed seed cannot leak into logs.
+pub fn parse_seed_hex_strict(s: &str) -> Result<[u8; 32], String> {
+    let t = s.trim();
+    if t.len() != 64 || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("seed must be exactly 64 hex characters (32 bytes)".to_string());
+    }
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&t[2 * i..2 * i + 2], 16)
+            .map_err(|_| "seed must be exactly 64 hex characters (32 bytes)".to_string())?;
+    }
+    Ok(out)
+}
+
+/// Read a seed from a file. On Unix the file must not be readable by group or others.
+pub fn read_seed_hex_file(path: &std::path::Path) -> Result<[u8; 32], String> {
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("cannot read seed file: {}", e.kind()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o077 != 0 {
+            return Err(
+                "seed file must not be readable by group or others (chmod 600)".to_string(),
+            );
+        }
+    }
+    let _ = meta;
+    let txt = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read seed file: {}", e.kind()))?;
+    parse_seed_hex_strict(&txt)
+}
+
+/// Read one seed line from a reader (used for stdin). Input is capped at 1 KiB.
+pub fn read_seed_hex_from_reader<R: std::io::Read>(reader: R) -> Result<[u8; 32], String> {
+    use std::io::Read;
+    let mut buf = String::new();
+    reader
+        .take(1024)
+        .read_to_string(&mut buf)
+        .map_err(|e| format!("cannot read seed from stdin: {}", e.kind()))?;
+    parse_seed_hex_strict(&buf)
 }
 
 pub fn signing_key_from_seed(seed: &[u8; 32]) -> SigningKey {

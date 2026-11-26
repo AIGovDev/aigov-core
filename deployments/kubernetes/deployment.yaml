@@ -29,6 +29,14 @@ spec:
           ports:
             - name: http
               containerPort: 8088
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
           envFrom:
             - configMapRef:
                 name: aigov-core
@@ -37,6 +45,8 @@ spec:
           volumeMounts:
             - name: ledger
               mountPath: /var/lib/govai/ledger
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /health
@@ -61,6 +71,9 @@ spec:
               cpu: "2"
               memory: 1Gi
       volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
         - name: ledger
           persistentVolumeClaim:
             claimName: govai-ledger

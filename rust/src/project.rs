@@ -49,6 +49,78 @@ pub async fn require_tenant_id_for_ledger_async(
     crate::tenant_api_keys::resolve_ledger_tenant_for_bearer(pool, headers, deployment_env).await
 }
 
+/// Base ledger file name used for tenant ledgers (`audit_log.jsonl` → `audit_log__<segment>.jsonl`).
+pub const TENANT_LEDGER_BASE: &str = "audit_log.jsonl";
+
+/// Env var listing tenants that intentionally keep reading their pre-v2 (lossy) ledger file.
+pub const LEGACY_TENANTS_ENV: &str = "AIGOV_LEDGER_LEGACY_TENANTS";
+
+const MAX_IDENTITY_LEN: usize = 128;
+
+/// True when the tenant id is used as its own ledger segment unchanged.
+fn is_identity_segment(tenant_id: &str) -> bool {
+    !tenant_id.is_empty()
+        && tenant_id.len() <= MAX_IDENTITY_LEN
+        && tenant_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut acc, b| {
+        let _ = write!(acc, "{b:02x}");
+        acc
+    })
+}
+
+/// Injective ledger segment (v2) for a tenant id.
+///
+/// * Ids made only of `[A-Za-z0-9_-]` (up to 128 characters) map to themselves, so existing
+///   ledger files for those tenants keep working.
+/// * Every other id maps to `~h` + lowercase hex of its UTF-8 bytes (or `~s` + SHA-256 hex when
+///   the hex would be too long). `~` is never produced by the identity rule, so no two distinct
+///   ids share a segment. The output contains no `.`, `/` or `\`, so it cannot traverse paths.
+pub fn tenant_ledger_segment(tenant_id: &str) -> String {
+    if is_identity_segment(tenant_id) {
+        return tenant_id.to_string();
+    }
+    let bytes = tenant_id.as_bytes();
+    if bytes.len() <= 100 {
+        format!("~h{}", hex_lower(bytes))
+    } else {
+        use sha2::{Digest, Sha256};
+        format!("~s{}", hex_lower(&Sha256::digest(bytes)))
+    }
+}
+
+/// Pre-v2 segment: lossy character replacement (kept only for explicitly listed legacy tenants).
+pub fn tenant_ledger_segment_legacy(tenant_id: &str) -> String {
+    sanitize_project_segment(tenant_id)
+}
+
+/// Tenants listed in `AIGOV_LEDGER_LEGACY_TENANTS` (comma-separated, trimmed).
+pub fn legacy_tenant_ids() -> std::collections::HashSet<String> {
+    std::env::var(LEGACY_TENANTS_ENV)
+        .unwrap_or_default()
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+/// Segment actually used for a tenant's ledger file.
+pub fn ledger_segment_for_tenant(tenant_id: &str) -> String {
+    if legacy_tenant_ids().contains(tenant_id) {
+        tenant_ledger_segment_legacy(tenant_id)
+    } else {
+        tenant_ledger_segment(tenant_id)
+    }
+}
+
+/// Key used to detect collisions on case-insensitive file systems (macOS default).
+pub fn segment_collision_key(segment: &str) -> String {
+    segment.to_ascii_lowercase()
+}
+
 fn sanitize_project_segment(project_id: &str) -> String {
     let s: String = project_id
         .chars()
@@ -65,16 +137,10 @@ fn sanitize_project_segment(project_id: &str) -> String {
     }
 }
 
-/// Deterministic tenant-scoped ledger path.
-///
-/// `ledger_base` is e.g. `audit_log.jsonl`. Always returns a tenant-specific `.jsonl` file.
-pub fn resolve_ledger_path(ledger_base: &str, tenant_id: &str) -> String {
+/// Directory and file name for a tenant ledger segment (no directory creation).
+pub fn ledger_file_for_segment(ledger_base: &str, segment: &str) -> String {
     let stem = ledger_base.strip_suffix(".jsonl").unwrap_or(ledger_base);
-    let safe = sanitize_project_segment(tenant_id);
-    let filename = format!("{}__{}.jsonl", stem, safe);
-
-    // Optional base directory override for deployments and tests.
-    // Applied only when `ledger_base` is a simple filename (no parent directory).
+    let filename = format!("{}__{}.jsonl", stem, segment);
     let has_parent_dir = std::path::Path::new(ledger_base)
         .parent()
         .is_some_and(|p| !p.as_os_str().is_empty() && p != std::path::Path::new("."));
@@ -82,15 +148,18 @@ pub fn resolve_ledger_path(ledger_base: &str, tenant_id: &str) -> String {
         if let Ok(dir) = std::env::var("GOVAI_LEDGER_DIR") {
             let dir = dir.trim();
             if !dir.is_empty() {
-                return std::path::Path::new(dir)
-                    .join(filename)
-                    .to_string_lossy()
-                    .to_string();
+                return std::path::Path::new(dir).join(filename).to_string_lossy().to_string();
             }
         }
     }
-
     filename
+}
+
+/// Deterministic tenant-scoped ledger path.
+///
+/// `ledger_base` is e.g. `audit_log.jsonl`. Always returns a tenant-specific `.jsonl` file.
+pub fn resolve_ledger_path(ledger_base: &str, tenant_id: &str) -> String {
+    ledger_file_for_segment(ledger_base, &ledger_segment_for_tenant(tenant_id))
 }
 
 #[cfg(test)]
@@ -186,5 +255,81 @@ mod tests {
             resolve_ledger_path("audit_log.jsonl", "default"),
             "audit_log__default.jsonl"
         );
+    }
+
+    #[test]
+    fn tenant_segments_are_injective_for_adversarial_ids() {
+        let long = "x".repeat(129);
+        let mut cases: Vec<&str> = vec![
+            "team.a", "team_a", "a/b", "a_b", "a\\b", "../x", "x/../y", "café", "cafe\u{301}",
+            "Team", "team", "team a", "team\n", "", "~h74", "~h",
+        ];
+        cases.push(&long);
+        let mut seen = std::collections::HashMap::new();
+        for id in cases {
+            let seg = tenant_ledger_segment(id);
+            assert!(!seg.contains('.') && !seg.contains('/') && !seg.contains('\\'), "unsafe segment {seg:?} for {id:?}");
+            assert!(!seg.is_empty() && seg.len() <= 120 || seg.starts_with("~s"), "segment length for {id:?}");
+            if let Some(prev) = seen.insert(seg.clone(), id) {
+                assert_eq!(prev, id, "distinct ids {prev:?} and {id:?} share segment {seg:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn dotted_and_underscored_tenants_no_longer_share_a_file() {
+        assert_ne!(tenant_ledger_segment("team.a"), tenant_ledger_segment("team_a"));
+        assert_ne!(tenant_ledger_segment("a/b"), tenant_ledger_segment("a_b"));
+        assert_eq!(tenant_ledger_segment("team_a"), "team_a", "safe ids keep their existing files");
+    }
+
+    #[test]
+    fn unicode_normalization_variants_stay_distinct() {
+        // NFC vs NFD are different byte strings, so they must not collide.
+        assert_ne!(tenant_ledger_segment("café"), tenant_ledger_segment("cafe\u{301}"));
+    }
+
+    #[test]
+    fn case_variants_are_flagged_by_collision_key() {
+        assert_eq!(
+            segment_collision_key(&tenant_ledger_segment("Team")),
+            segment_collision_key(&tenant_ledger_segment("team"))
+        );
+        assert_ne!(tenant_ledger_segment("Team"), tenant_ledger_segment("team"));
+    }
+
+    #[test]
+    fn long_ids_do_not_truncate_into_each_other() {
+        let a = format!("{}x", "y".repeat(140));
+        let b = format!("{}z", "y".repeat(140));
+        assert_ne!(tenant_ledger_segment(&a), tenant_ledger_segment(&b));
+    }
+
+    #[test]
+    fn legacy_segment_is_only_used_for_listed_tenants() {
+        let _g = env_lock().lock().unwrap();
+        std::env::remove_var(LEGACY_TENANTS_ENV);
+        assert_eq!(ledger_segment_for_tenant("team.a"), tenant_ledger_segment("team.a"));
+        std::env::set_var(LEGACY_TENANTS_ENV, " team.a , other ");
+        assert_eq!(ledger_segment_for_tenant("team.a"), "team_a");
+        assert_eq!(ledger_segment_for_tenant("team_a"), "team_a");
+        std::env::remove_var(LEGACY_TENANTS_ENV);
+    }
+
+    /// Shared vectors: the Python mirror (`python/aigov_py/tenant_ledger.py`) asserts the same values.
+    #[test]
+    fn tenant_segment_vectors_match_python_mirror() {
+        assert_eq!(tenant_ledger_segment("team.a"), "~h7465616d2e61");
+        assert_eq!(tenant_ledger_segment("team_a"), "team_a");
+        assert_eq!(tenant_ledger_segment("a/b"), "~h612f62");
+        assert_eq!(tenant_ledger_segment("a_b"), "a_b");
+        assert_eq!(tenant_ledger_segment("café"), "~h636166c3a9");
+        assert_eq!(tenant_ledger_segment("cafe\u{301}"), "~h63616665cc81");
+        assert_eq!(tenant_ledger_segment("Team"), "Team");
+        assert_eq!(tenant_ledger_segment("../x"), "~h2e2e2f78");
+        assert_eq!(tenant_ledger_segment(""), "~h");
+        assert_eq!(tenant_ledger_segment_legacy("team.a"), "team_a");
+        assert_eq!(tenant_ledger_segment_legacy("café"), "caf_");
+        assert_eq!(tenant_ledger_segment_legacy(""), "_");
     }
 }

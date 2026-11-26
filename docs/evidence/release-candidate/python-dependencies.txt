@@ -1,0 +1,7 @@
+# Declared Python runtime dependencies (python/pyproject.toml; version floors, not a lock)
+requests>=2.31.0
+scikit-learn>=1.7.2
+joblib>=1.6.0
+PyYAML>=6.0.0
+PyNaCl>=1.6.2
+sigstore>=4.2.0
