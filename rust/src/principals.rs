@@ -63,6 +63,7 @@ struct RawPrincipal {
 pub fn allowed_event_types(role: Role) -> &'static [&'static str] {
     match role {
         Role::Agent => &[
+            "ai_discovery_reported",
             "tool_call",
             "tool_approval_requested",
             "consequential_tool_call",

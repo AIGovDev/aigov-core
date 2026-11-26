@@ -175,6 +175,8 @@ pub fn enforce_policy_file_trust(
 
 pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
+    refuse_fault_injection_outside_test(deployment_env)?;
+    crate::principals::init_principals(deployment_env)?;
     let bundle_only = match deployment_env {
         GovaiEnvironment::Prod => true,
         GovaiEnvironment::Staging => signed_bundle_configured(deployment_env),
@@ -203,7 +205,14 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
-    crate::principals::init_principals(deployment_env)?;
+    // Production authenticates every write. Without configured principals, any holder of a key can post any event type,
+    // including approvals and receipts, so production refuses to start in that configuration.
+    if matches!(deployment_env, GovaiEnvironment::Prod) && !crate::principals::principals_configured() {
+        return Err(
+            "Invalid configuration: production requires GOVAI_PRINCIPALS_JSON (or OIDC); refusing to start without authenticated principals"
+                .to_string(),
+        );
+    }
     crate::oidc::init_from_env(deployment_env)?;
     crate::execution_authorization::init_from_env()?;
     if crate::execution_authorization::enabled()
@@ -498,6 +507,41 @@ async fn get_execution_authorization_status(
         .into_response()
 }
 
+/// Test-only process-termination points for the issuance path. Compiled only with the `fault-injection` Cargo feature, which
+/// is off by default and is not enabled by the Dockerfile or any release build. Without the feature, `crash_point` is a
+/// no-op and a set `AIGOV_TEST_FAULT_INJECTION` makes Core refuse to start.
+#[cfg(feature = "fault-injection")]
+fn crash_point(name: &str) {
+    if std::env::var("AIGOV_TEST_FAULT_INJECTION").as_deref() != Ok("1") {
+        return;
+    }
+    if std::env::var("AIGOV_TEST_CRASH_AT").as_deref() == Ok(name) {
+        std::process::exit(137);
+    }
+}
+
+#[cfg(not(feature = "fault-injection"))]
+#[inline(always)]
+fn crash_point(_name: &str) {}
+
+/// Refuse to start with fault injection enabled: outside a test build, or outside the dev environment.
+#[cfg(feature = "fault-injection")]
+fn refuse_fault_injection_outside_test(deployment_env: GovaiEnvironment) -> Result<(), String> {
+    let enabled = std::env::var("AIGOV_TEST_FAULT_INJECTION").as_deref() == Ok("1");
+    if enabled && !matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Err("AIGOV_TEST_FAULT_INJECTION is set; refusing to start outside the dev environment".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "fault-injection"))]
+fn refuse_fault_injection_outside_test(_deployment_env: GovaiEnvironment) -> Result<(), String> {
+    if std::env::var("AIGOV_TEST_FAULT_INJECTION").is_ok() || std::env::var("AIGOV_TEST_CRASH_AT").is_ok() {
+        return Err("fault-injection variables are set but this build has no fault-injection feature; refusing to start".to_string());
+    }
+    Ok(())
+}
+
 async fn post_evidence(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -622,6 +666,44 @@ async fn post_evidence(
         }
     };
 
+    // An execution receipt is evidence that an authorized call ran. It is accepted only from an authenticated executor
+    // principal, and only for an authorization that Core issued for this run. Without these checks any key could record a
+    // receipt for an authorization that never existed, or for a real one it did not execute.
+    if event.event_type == "execution_receipt" {
+        let authenticated_executor = principal
+            .as_ref()
+            .is_some_and(|p| p.role == crate::principals::Role::Executor);
+        if !authenticated_executor {
+            return api_error(
+                StatusCode::FORBIDDEN,
+                "RECEIPT_REQUIRES_EXECUTOR",
+                "An execution receipt must come from an authenticated executor principal.",
+                "Configure GOVAI_PRINCIPALS_JSON and send the executor key.",
+                None,
+            )
+            .into_response();
+        }
+        let receipt_auth = event
+            .payload
+            .get("execution_authorization_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let issued_for_run = existing.iter().any(|e| {
+            (e.event_type == "consequential_tool_call" || e.event_type == "tool_call")
+                && !receipt_auth.is_empty()
+                && e.payload.get("execution_authorization_id").and_then(|v| v.as_str()) == Some(receipt_auth)
+        });
+        if !issued_for_run {
+            return api_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "RECEIPT_FOR_UNISSUED_AUTHORIZATION",
+                "The receipt names an execution authorization that Core did not issue for this run.",
+                "Send the receipt for the authorization returned to the executor.",
+                None,
+            )
+            .into_response();
+        }
+    }
     if let Err(e) =
         govai_environment::stamp_event_environment_for_ingest(&mut event, st.deployment_env, &existing)
     {
@@ -661,6 +743,7 @@ async fn post_evidence(
         }
         Ok(())
     };
+    crash_point("before_append");
     let append_result =
         match crate::audit_store::append_record_checked(&log_path, event.clone(), &locked_check) {
             Ok(v) => Ok(v),
@@ -671,6 +754,7 @@ async fn post_evidence(
         };
     match append_result {
         Ok((rec, pre_count)) => {
+            crash_point("after_append_before_sign");
             runtime_metrics::inc_evidence_ingest("appended");
             ops_log::evidence_ingest("appended", 200, &tenant_id);
             let mut body = json!({
@@ -706,6 +790,7 @@ async fn post_evidence(
                     }
                 }
             }
+            crash_point("after_sign_before_response");
             if metering::metering_enabled() {
                 if let Some(extra) = metering::ingest_success_extras(
                     &tenant_id,

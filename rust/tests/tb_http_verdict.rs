@@ -11,11 +11,13 @@ use tower::ServiceExt;
 
 const KEY: &str = "tb-key-admin";
 
+/// Posts with the agent key by default; approvals are posted with the approver key.
 async fn post(app: &axum::Router, ev: &Value) -> (u16, Value) {
+    let key = if ev["event_type"] == "human_approved" { "tb-key-approver" } else { KEY };
     let req = Request::builder()
         .method("POST")
         .uri("/evidence")
-        .header("Authorization", format!("Bearer {KEY}"))
+        .header("Authorization", format!("Bearer {key}"))
         .header("content-type", "application/json")
         .body(Body::from(ev.to_string()))
         .unwrap();
