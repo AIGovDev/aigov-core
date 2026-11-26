@@ -263,6 +263,10 @@ class KeyRegistry:
     def load(cls, path: Path) -> KeyRegistry:
         return cls(path)
 
+    def refresh(self) -> None:
+        """Re-read and re-verify the log. Call before any decision that must see the latest revocation or rotation."""
+        self.state, self.events, self.snapshot_matches = self._replay()
+
     @property
     def version(self) -> int:
         return self.state.version

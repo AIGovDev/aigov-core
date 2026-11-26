@@ -4,7 +4,7 @@ Scope: the Ed25519 keys that GovAI uses to sign and verify. Four purposes are de
 
 | Purpose | Domain prefix | Signer | Verified by |
 |---|---|---|---|
-| `execution_authorization` | `govai.execution_authorization.v1\0` | Core (`AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX`, key id `AIGOV_EXECUTION_AUTH_KEY_ID`) | executor (`verify_authorization_with_registry`) |
+| `execution_authorization` | `govai.execution_authorization.v1\0` | Core (the registry's active key; see [Core signing](#core-signing-execution-authorization)) | executor (`verify_authorization_with_registry`) |
 | `reconciliation_evidence` | `govai.reconciliation.v1\0` | the reconciler's own signer | executor, reconciliation |
 | `policy_bundle` | `govai.policy_bundle.v1\0` | the policy owner | Core policy trust store |
 | `audit_export` | `govai.audit_export.v1\0` | Core export signer | external verifiers |
@@ -12,10 +12,10 @@ Scope: the Ed25519 keys that GovAI uses to sign and verify. Four purposes are de
 The registry (`aigov_py.trusted.keys`) holds **public keys only**. Private seeds belong to their signers and are never
 written to the registry, to logs, or to chat.
 
-Implemented: the registry, the operator tool (`python -m aigov_py.trusted.key_admin`), the signer interface, and
-registry-based verification in the executor. Verified locally: see the audit report
-(`docs/reports/identity-key-management-2026-11-26.md`). Not implemented: Core does not read the registry. Core still signs
-with the one seed and key id from its environment, so a Core key rotation is a configuration change plus a restart.
+Implemented: the registry, the operator tool (`python -m aigov_py.trusted.key_admin`), the signer interface, registry-based
+verification in the executor, and Core issuance from the registry. Verified locally: see the audit report
+(`docs/reports/identity-key-management-2026-11-26.md`). Core reads the registry's event log on every issuance, so a rotation
+or revocation takes effect without a restart.
 
 ## Concepts
 
@@ -30,6 +30,31 @@ with the one seed and key id from its environment, so a Core key rotation is a c
   a view and is checked against the log on load (`snapshot_matches`).
 - **Signed requests.** Every change is an operator-signed request that carries the expected registry version and a nonce.
   A request applies once, to the version it names.
+
+## Core signing (execution authorization)
+
+Core signs execution authorizations with the registry's single active `execution_authorization` key. Configure one mode:
+
+- **Registry mode**: `AIGOV_KEY_REGISTRY_PATH` (the registry's `registry.json`) and `AIGOV_EXECUTION_AUTH_SIGNING_SEEDS_DIR`.
+  Core reads the active key from the event log `registry.json.events.jsonl` and loads its seed from
+  `<seeds dir>/<kid>.seed`.
+- **Legacy single-key mode**: `AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX` with `AIGOV_EXECUTION_AUTH_KEY_ID`. Unchanged.
+
+Setting both modes is refused at startup. Neither is set: issuance is disabled, as before.
+
+In registry mode:
+
+- Core picks the active key when it prepares an authorization, and re-checks that the key is still active when it signs.
+  A rotation or revocation in between refuses the signature.
+- A seed file must be readable only by its owner (no group or other bits). It holds the base64 form of the 32-byte Ed25519
+  seed, the format `new_signing_seed` returns. It must derive the public key registered for its kid, or Core refuses to sign.
+  The key owner generates the seed and places the file on the Core host; the operator tool does not write it.
+- With no active key, a consequential call is refused with `503 AUTHORIZATION_KEY_UNAVAILABLE` before anything is written to
+  the ledger.
+- If the call is accepted but signing is refused, Core returns `503 AUTHORIZATION_SIGNING_REFUSED` with the record hash. The
+  record stays in the ledger, no authorization is issued, and the call must not run. Resolve the key state and resubmit under a
+  new event id.
+- Core decides from the event log only. It does not use the snapshot `registry.json`.
 
 ## Procedures
 
@@ -84,8 +109,9 @@ python -m aigov_py.trusted.key_admin --registry R apply rev.json
 
 Immediately after revocation:
 
-1. Stop Core from signing with the revoked key: replace `AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX` and
-   `AIGOV_EXECUTION_AUTH_KEY_ID` with the successor's, and restart Core. Core does not consult the registry (see above).
+1. Core stops signing with the revoked key at once. Its next consequential call re-reads the log, finds no active key, and is
+   refused with `503 AUTHORIZATION_KEY_UNAVAILABLE` until a successor is registered and activated. No restart is needed. In
+   legacy single-key mode, replace `AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX` and `AIGOV_EXECUTION_AUTH_KEY_ID` and restart Core.
 2. Treat authorizations issued by the revoked key between `compromised-from` and the revocation as suspect. The verdict
    for a signature made after `compromised-from` is `untrusted`. For a signature made before it, the verdict is
    `uncertain` and is refused by default. Review those authorizations with a person; do not accept them automatically.
@@ -116,5 +142,5 @@ matches it. A snapshot mismatch is a signal to investigate, not a normal state.
   claims. A signer that lies about time can move a signature into or out of a key's validity window. Use an independent
   timestamp source if that matters for your evidence.
 - The registry is not a federated identity system. Operators are pinned keys.
-- Core signs from one configured key at a time (see above).
+- Core's seed files sit on the Core host. Whoever can read the active seed can sign until that key is revoked (see above).
 - No compatibility with any external key-management service is claimed or tested.

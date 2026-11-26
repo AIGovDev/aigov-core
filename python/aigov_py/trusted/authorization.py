@@ -59,6 +59,10 @@ def verify_authorization_with_registry(signed: dict[str, Any], registry: Any, *,
         sig = signed["signature"]
     except KeyError as exc:
         raise Refused("authorization_signature_invalid") from exc
+    # Re-read the log: a revocation or rotation written by another process must apply to this decision at once.
+    refresh = getattr(registry, "refresh", None)
+    if refresh is not None:
+        refresh()
     kwargs = {"purpose": "execution_authorization", "kid": kid, "payload": canonical_bytes(payload),
               "signature_b64": sig, "signed_at_utc": signed_at}
     if now is not None:

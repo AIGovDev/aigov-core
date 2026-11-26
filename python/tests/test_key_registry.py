@@ -17,6 +17,8 @@ from nacl.signing import SigningKey
 from aigov_py.trusted import keys as K
 from aigov_py.trusted.signers import ExternalSigner, LocalEd25519Signer, SignerError
 
+_PUB = K.new_signing_seed()[1]
+
 
 @pytest.fixture
 def tmpdir_path():
@@ -394,7 +396,7 @@ def test_external_signer_timeout_fails_closed():
         time.sleep(2)
         return base64.b64encode(b"\x00" * 64).decode()
 
-    signer = ExternalSigner(slow, key_id="pol-1", purpose="policy_bundle", timeout_seconds=0.2)
+    signer = ExternalSigner(slow, key_id="pol-1", purpose="policy_bundle", public_key_b64=_PUB, timeout_seconds=0.2)
     with pytest.raises(SignerError) as exc:
         signer.sign(b"m")
     assert exc.value.code == "signer_timeout"
@@ -404,7 +406,7 @@ def test_external_signer_exception_fails_closed_without_leaking_content():
     def boom(kid, purpose, msg):
         raise RuntimeError("secret detail that must not surface")
 
-    signer = ExternalSigner(boom, key_id="pol-1", purpose="policy_bundle")
+    signer = ExternalSigner(boom, key_id="pol-1", purpose="policy_bundle", public_key_b64=_PUB)
     with pytest.raises(SignerError) as exc:
         signer.sign(b"m")
     assert exc.value.code == "signer_failed"
@@ -412,7 +414,7 @@ def test_external_signer_exception_fails_closed_without_leaking_content():
 
 
 def test_external_signer_rejects_malformed_reply():
-    signer = ExternalSigner(lambda k, p, m: "not-a-signature", key_id="pol-1", purpose="policy_bundle")
+    signer = ExternalSigner(lambda k, p, m: "not-a-signature", key_id="pol-1", purpose="policy_bundle", public_key_b64=_PUB)
     with pytest.raises(SignerError) as exc:
         signer.sign(b"m")
     assert exc.value.code == "signer_reply_invalid"
@@ -420,6 +422,31 @@ def test_external_signer_rejects_malformed_reply():
 
 def test_external_signer_refuses_an_unknown_purpose_and_bad_timeouts():
     with pytest.raises(SignerError):
-        ExternalSigner(lambda k, p, m: "", key_id="x", purpose="made_up")
+        ExternalSigner(lambda k, p, m: "", key_id="x", purpose="made_up", public_key_b64=_PUB)
     with pytest.raises(SignerError):
-        ExternalSigner(lambda k, p, m: "", key_id="x", purpose="policy_bundle", timeout_seconds=0)
+        ExternalSigner(lambda k, p, m: "", key_id="x", purpose="policy_bundle", public_key_b64=_PUB, timeout_seconds=0)
+
+
+def test_external_signer_accepts_a_reply_that_verifies_under_its_key():
+    seed, pub = K.new_signing_seed()
+    key = SigningKey(base64.b64decode(seed))
+
+    def provider(kid, purpose, msg):
+        return base64.b64encode(key.sign(msg).signature).decode()
+
+    signer = ExternalSigner(provider, key_id="pol-1", purpose="policy_bundle", public_key_b64=pub)
+    result = signer.sign(b"m")
+    assert result.key_id == "pol-1"
+
+
+def test_external_signer_refuses_a_reply_signed_by_another_key():
+    _, pub = K.new_signing_seed()
+    other = SigningKey(base64.b64decode(K.new_signing_seed()[0]))
+
+    def provider(kid, purpose, msg):
+        return base64.b64encode(other.sign(msg).signature).decode()
+
+    signer = ExternalSigner(provider, key_id="pol-1", purpose="policy_bundle", public_key_b64=pub)
+    with pytest.raises(SignerError) as exc:
+        signer.sign(b"m")
+    assert exc.value.code == "signer_reply_invalid"

@@ -107,68 +107,150 @@ pub fn valid_key_id(raw: &str) -> bool {
         && raw.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
 }
 
-static ISSUER: OnceCell<Option<IssuerConfig>> = OnceCell::new();
+/// Where authorizations are signed from.
+///
+/// `EnvKey`: one seed from the environment, as before. The key id is fixed for the life of the process.
+/// `Registry`: the trusted key registry decides the active key on every issuance and re-checks it before signing, so a
+/// rotation or revocation takes effect without a restart. The seed for each key is read from `<seeds_dir>/<kid>.seed`
+/// and must match the public key the registry holds for that key id.
+#[derive(Debug, Clone)]
+enum Mode {
+    EnvKey(IssuerConfig),
+    Registry(RegistryIssuer),
+}
 
-/// Load issuance settings from the environment. Without a signing seed, issuance is disabled and
-/// consequential calls are accepted without an authorization (the pre-existing behaviour).
-pub fn init_from_env() -> Result<(), String> {
-    let seed = crate::aigov_env::required(
-        "AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX",
-        "GOVAI_EXECUTION_AUTH_SIGNING_SEED_HEX",
-    )
-    .unwrap_or_default();
-    let cfg = if seed.trim().is_empty() {
-        None
+#[derive(Debug, Clone)]
+pub struct RegistryIssuer {
+    pub registry_path: std::path::PathBuf,
+    pub seeds_dir: std::path::PathBuf,
+    pub executor_audience: String,
+    pub ttl_seconds: i64,
+}
+
+static MODE: OnceCell<Option<Mode>> = OnceCell::new();
+
+fn env_value(primary: &str, alias: &str) -> String {
+    crate::aigov_env::required(primary, alias)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn read_audience() -> String {
+    let audience = env_value("AIGOV_EXECUTOR_AUDIENCE", "GOVAI_EXECUTOR_AUDIENCE");
+    if audience.is_empty() {
+        "executor".to_string()
     } else {
-        let bytes = crate::audit_export_signing::parse_seed_hex_strict(seed.trim())?;
-        let audience =
-            crate::aigov_env::required("AIGOV_EXECUTOR_AUDIENCE", "GOVAI_EXECUTOR_AUDIENCE")
-                .unwrap_or_default();
-        let audience = if audience.trim().is_empty() {
-            "executor".to_string()
-        } else {
-            audience.trim().to_string()
-        };
-        let ttl = crate::aigov_env::required(
-            "AIGOV_EXECUTION_AUTH_TTL_SECONDS",
-            "GOVAI_EXECUTION_AUTH_TTL_SECONDS",
-        )
-        .unwrap_or_default();
-        let ttl_seconds = if ttl.trim().is_empty() {
-            60
-        } else {
-            ttl.trim()
-                .parse::<i64>()
-                .ok()
-                .filter(|t| (1..=3600).contains(t))
-                .ok_or_else(|| {
-                    "GOVAI_EXECUTION_AUTH_TTL_SECONDS must be an integer from 1 to 3600".to_string()
-                })?
-        };
-        let key_id = crate::aigov_env::required(
-            "AIGOV_EXECUTION_AUTH_KEY_ID",
-            "GOVAI_EXECUTION_AUTH_KEY_ID",
-        )
-        .unwrap_or_default();
-        let key_id = match key_id.trim() {
-            "" => None,
-            id if valid_key_id(id) => Some(id.to_string()),
-            _ => return Err("GOVAI_EXECUTION_AUTH_KEY_ID must be 1 to 64 characters from A-Z a-z 0-9 . _ -".to_string()),
-        };
-        Some(IssuerConfig {
-            key: crate::audit_export_signing::signing_key_from_seed(&bytes),
-            key_id,
-            executor_audience: audience,
-            ttl_seconds,
+        audience
+    }
+}
+
+fn read_ttl() -> Result<i64, String> {
+    let ttl = env_value("AIGOV_EXECUTION_AUTH_TTL_SECONDS", "GOVAI_EXECUTION_AUTH_TTL_SECONDS");
+    if ttl.is_empty() {
+        return Ok(60);
+    }
+    ttl.parse::<i64>()
+        .ok()
+        .filter(|t| (1..=3600).contains(t))
+        .ok_or_else(|| "GOVAI_EXECUTION_AUTH_TTL_SECONDS must be an integer from 1 to 3600".to_string())
+}
+
+/// Issuance settings as read from the environment, before they are checked.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IssuerSettings {
+    pub seed_hex: String,
+    pub key_id: String,
+    pub registry_path: String,
+    pub seeds_dir: String,
+    pub audience: String,
+    pub ttl_seconds: i64,
+}
+
+impl IssuerSettings {
+    fn from_env() -> Result<Self, String> {
+        Ok(Self {
+            seed_hex: env_value(
+                "AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX",
+                "GOVAI_EXECUTION_AUTH_SIGNING_SEED_HEX",
+            ),
+            key_id: env_value("AIGOV_EXECUTION_AUTH_KEY_ID", "GOVAI_EXECUTION_AUTH_KEY_ID"),
+            registry_path: env_value("AIGOV_KEY_REGISTRY_PATH", "GOVAI_KEY_REGISTRY_PATH"),
+            seeds_dir: env_value(
+                "AIGOV_EXECUTION_AUTH_SIGNING_SEEDS_DIR",
+                "GOVAI_EXECUTION_AUTH_SIGNING_SEEDS_DIR",
+            ),
+            audience: read_audience(),
+            ttl_seconds: read_ttl()?,
         })
-    };
-    let _ = ISSUER.set(cfg);
+    }
+}
+
+/// Choose the issuance mode from checked settings. Pure, so the configuration rules are testable. Both a seed and a
+/// registry is refused: that would make the signing key ambiguous.
+fn mode_from_settings(s: &IssuerSettings) -> Result<Option<Mode>, String> {
+    match (!s.seed_hex.is_empty(), !s.registry_path.is_empty()) {
+        (true, true) => Err(
+            "configure either AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX or AIGOV_KEY_REGISTRY_PATH, not both".to_string(),
+        ),
+        (false, false) => Ok(None),
+        (true, false) => {
+            let bytes = crate::audit_export_signing::parse_seed_hex_strict(&s.seed_hex)?;
+            let key_id = match s.key_id.as_str() {
+                "" => None,
+                id if valid_key_id(id) => Some(id.to_string()),
+                _ => {
+                    return Err(
+                        "GOVAI_EXECUTION_AUTH_KEY_ID must be 1 to 64 characters from A-Z a-z 0-9 . _ -".to_string(),
+                    )
+                }
+            };
+            Ok(Some(Mode::EnvKey(IssuerConfig {
+                key: crate::audit_export_signing::signing_key_from_seed(&bytes),
+                key_id,
+                executor_audience: s.audience.clone(),
+                ttl_seconds: s.ttl_seconds,
+            })))
+        }
+        (false, true) => {
+            if s.seeds_dir.is_empty() {
+                return Err(
+                    "AIGOV_EXECUTION_AUTH_SIGNING_SEEDS_DIR is required when AIGOV_KEY_REGISTRY_PATH is set".to_string(),
+                );
+            }
+            Ok(Some(Mode::Registry(RegistryIssuer {
+                registry_path: s.registry_path.clone().into(),
+                seeds_dir: s.seeds_dir.clone().into(),
+                executor_audience: s.audience.clone(),
+                ttl_seconds: s.ttl_seconds,
+            })))
+        }
+    }
+}
+
+/// Load issuance settings from the environment. Without a seed or a registry, issuance is disabled and consequential calls
+/// are accepted without an authorization (the pre-existing behaviour).
+pub fn init_from_env() -> Result<(), String> {
+    let mode = mode_from_settings(&IssuerSettings::from_env()?)?;
+    let _ = MODE.set(mode);
     Ok(())
 }
 
-/// The configured issuer, if execution authorization is enabled.
+fn mode() -> Option<&'static Mode> {
+    MODE.get().and_then(|m| m.as_ref())
+}
+
+/// True when execution authorization is enabled by either mode.
+pub fn enabled() -> bool {
+    mode().is_some()
+}
+
+/// The environment-seed issuer, if that mode is configured.
 pub fn issuer() -> Option<&'static IssuerConfig> {
-    ISSUER.get().and_then(|c| c.as_ref())
+    match mode() {
+        Some(Mode::EnvKey(cfg)) => Some(cfg),
+        _ => None,
+    }
 }
 
 /// Identifiers and times fixed before the ledger append, so the accepted record can carry them.
@@ -177,46 +259,137 @@ pub struct Prepared {
     pub authorization_id: String,
     pub issued_at: chrono::DateTime<chrono::Utc>,
     pub expires_at: chrono::DateTime<chrono::Utc>,
+    /// The registry key chosen for this authorization. `None` in environment-seed mode.
+    pub signing_kid: Option<String>,
 }
 
-/// Reserve an authorization id and its times before the append. `None` when issuance is disabled.
-pub fn prepare(now: chrono::DateTime<chrono::Utc>) -> Option<Prepared> {
-    let cfg = issuer()?;
-    Some(Prepared {
+/// The active authorization key in the registry, read from the authoritative log.
+fn active_registry_key(r: &RegistryIssuer) -> Result<crate::key_registry::RegistryKey, String> {
+    let view = crate::key_registry::load(&r.registry_path)?;
+    crate::key_registry::active_for(&view, crate::key_registry::PURPOSE_EXECUTION_AUTHORIZATION)
+        .cloned()
+        .ok_or_else(|| "no active execution authorization key in the trusted key registry".to_string())
+}
+
+/// The signing key for `kid`, provided the registry still lists it as active and the seed matches its public key.
+fn signing_key_for(r: &RegistryIssuer, kid: &str) -> Result<SigningKey, String> {
+    if !valid_key_id(kid) {
+        return Err("registry key id is not valid".to_string());
+    }
+    let view = crate::key_registry::load(&r.registry_path)?;
+    let rec = view
+        .keys
+        .get(kid)
+        .ok_or_else(|| format!("authorization key {kid} is not in the registry"))?;
+    if rec.purpose != crate::key_registry::PURPOSE_EXECUTION_AUTHORIZATION {
+        return Err(format!("key {kid} is not an execution authorization key"));
+    }
+    if rec.status != "active" {
+        return Err(format!("authorization key {kid} is {}", rec.status));
+    }
+    let path = r.seeds_dir.join(format!("{kid}.seed"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path)
+            .map_err(|_| format!("seed file for {kid} is missing"))?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            return Err(format!("seed file for {kid} must be readable only by its owner"));
+        }
+    }
+    // The operator tool (`aigov_py.trusted.keys.new_signing_seed`) writes seeds as base64 of the 32-byte Ed25519 seed.
+    let text = std::fs::read_to_string(&path).map_err(|_| format!("seed file for {kid} is unreadable"))?;
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(text.trim())
+        .map_err(|_| format!("seed for {kid} is not base64"))?;
+    let bytes: [u8; 32] = raw
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("seed for {kid} must be 32 bytes"))?;
+    let key = crate::audit_export_signing::signing_key_from_seed(&bytes);
+    let derived = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
+    if derived != rec.public_key_b64 {
+        return Err(format!("seed for {kid} does not match the registry public key"));
+    }
+    Ok(key)
+}
+
+/// Reserve an authorization id and its times before the append. `Ok(None)` when issuance is disabled. An error means
+/// issuance is enabled but no usable key exists: the caller refuses the request before anything is appended.
+pub fn prepare(now: chrono::DateTime<chrono::Utc>) -> Result<Option<Prepared>, String> {
+    prepare_with(mode(), now)
+}
+
+fn prepare_with(mode: Option<&Mode>, now: chrono::DateTime<chrono::Utc>) -> Result<Option<Prepared>, String> {
+    let (ttl, signing_kid) = match mode {
+        None => return Ok(None),
+        Some(Mode::EnvKey(cfg)) => (cfg.ttl_seconds, None),
+        Some(Mode::Registry(r)) => (r.ttl_seconds, Some(active_registry_key(r)?.kid)),
+    };
+    Ok(Some(Prepared {
         authorization_id: format!("auth_{}", uuid::Uuid::new_v4().simple()),
         issued_at: now,
-        expires_at: now + chrono::Duration::seconds(cfg.ttl_seconds),
-    })
+        expires_at: now + chrono::Duration::seconds(ttl),
+        signing_kid,
+    }))
 }
 
-/// Sign the authorization for a call that the ledger has accepted. `consequential_record_hash` is the hash of
-/// that accepted record, so the authorization is bound to the ledger entry.
-pub fn sign_prepared(
+/// The call's facts as bound into an authorization.
+#[derive(Debug, Clone, Copy)]
+pub struct CallBinding<'a> {
+    pub run_id: &'a str,
+    pub tool_name: &'a str,
+    pub args_binding_hash: &'a str,
+    pub policy_revision: &'a str,
+    pub approval_event_id: &'a str,
+    /// Hash of the accepted ledger record for the call.
+    pub consequential_record_hash: &'a str,
+}
+
+/// Sign the authorization for a call that the ledger has accepted, so the authorization is bound to the ledger entry.
+/// In registry mode the key is re-checked here: a revocation or rotation since `prepare` refuses the signature.
+pub fn sign_prepared(prepared: &Prepared, call: &CallBinding<'_>) -> Result<Option<SignedAuthorization>, String> {
+    sign_prepared_with(mode(), prepared, call)
+}
+
+fn sign_prepared_with(
+    mode: Option<&Mode>,
     prepared: &Prepared,
-    run_id: &str,
-    tool_name: &str,
-    args_binding_hash: &str,
-    policy_revision: &str,
-    approval_event_id: &str,
-    consequential_record_hash: &str,
-) -> Option<SignedAuthorization> {
-    let cfg = issuer()?;
-    let payload = AuthorizationPayload {
+    call: &CallBinding<'_>,
+) -> Result<Option<SignedAuthorization>, String> {
+    let build = |audience: &str, key_id: Option<String>| AuthorizationPayload {
         schema: SCHEMA.to_string(),
         authorization_id: prepared.authorization_id.clone(),
-        run_id: run_id.to_string(),
-        tool_name: tool_name.to_string(),
-        args_binding_hash: args_binding_hash.to_string(),
-        policy_revision: policy_revision.to_string(),
-        executor_audience: cfg.executor_audience.clone(),
-        approval_event_id: approval_event_id.to_string(),
-        consequential_record_hash: consequential_record_hash.to_string(),
+        run_id: call.run_id.to_string(),
+        tool_name: call.tool_name.to_string(),
+        args_binding_hash: call.args_binding_hash.to_string(),
+        policy_revision: call.policy_revision.to_string(),
+        executor_audience: audience.to_string(),
+        approval_event_id: call.approval_event_id.to_string(),
+        consequential_record_hash: call.consequential_record_hash.to_string(),
         issued_at_utc: prepared.issued_at.to_rfc3339(),
         expires_at_utc: prepared.expires_at.to_rfc3339(),
-        signing_key_id: cfg.key_id.clone(),
+        signing_key_id: key_id,
     };
-    Some(sign(&cfg.key, payload))
+    match mode {
+        None => Ok(None),
+        Some(Mode::EnvKey(cfg)) => Ok(Some(sign(
+            &cfg.key,
+            build(&cfg.executor_audience, cfg.key_id.clone()),
+        ))),
+        Some(Mode::Registry(r)) => {
+            let kid = prepared
+                .signing_kid
+                .clone()
+                .ok_or("prepared authorization carries no registry key")?;
+            let key = signing_key_for(r, &kid)?;
+            Ok(Some(sign(&key, build(&r.executor_audience, Some(kid)))))
+        }
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -304,5 +477,364 @@ mod tests {
     #[test]
     fn signed_message_starts_with_the_domain_prefix() {
         assert!(signed_message(&payload()).starts_with(DOMAIN_PREFIX));
+    }
+}
+
+#[cfg(test)]
+mod registry_issuance_tests {
+    use super::*;
+    use crate::key_registry::test_support::append;
+    use base64::engine::general_purpose::STANDARD;
+    use serde_json::json;
+
+    const TS: &str = "2026-11-26T10:00:00+00:00";
+
+    fn seed(byte: u8) -> SigningKey {
+        SigningKey::from_bytes(&[byte; 32])
+    }
+
+    fn pub_b64(k: &SigningKey) -> String {
+        STANDARD.encode(k.verifying_key().to_bytes())
+    }
+
+    /// A registry directory with a seed file per key. Returns the snapshot path and the seeds directory.
+    fn world(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        let snap = dir.join("registry.json");
+        let seeds = dir.join("seeds");
+        std::fs::create_dir_all(&seeds).unwrap();
+        (snap, seeds)
+    }
+
+    fn write_seed(seeds: &std::path::Path, kid: &str, key: &SigningKey, mode: u32) {
+        write_seed_text(seeds, kid, &STANDARD.encode(key.to_bytes()), mode);
+    }
+
+    fn write_seed_text(seeds: &std::path::Path, kid: &str, text: &str, mode: u32) {
+        let path = seeds.join(format!("{kid}.seed"));
+        std::fs::write(&path, text).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+        #[cfg(not(unix))]
+        let _ = mode;
+    }
+
+    #[test]
+    fn a_seed_written_by_the_python_operator_tool_signs_under_its_registry_key() {
+        // Seed and public key from `aigov_py.trusted.keys.new_signing_seed()`: the cross-language seed format.
+        let seed_b64 = "j+FLD+n3Bk33xM/eBOK2jDgmw66Sm5gEIHSzcnVk3Zc=";
+        let pub_b64 = "yRdGm2ydP9LemYP/xO2gGmdsR6zoC8+GkNfC5Hlx8HM=";
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        append(&snap, "register", "exe-py", Some("execution_authorization"),
+            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64, "owner": "authz"}), TS);
+        append(&snap, "activate", "exe-py", None, json!({}), TS);
+        write_seed_text(&seeds, "exe-py", seed_b64, 0o600);
+        let m = Mode::Registry(issuer(snap, seeds));
+        let p = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
+        let signed = sign_prepared_with(Some(&m), &p, &call(&"a".repeat(64))).unwrap().unwrap();
+        let pk: [u8; 32] = STANDARD.decode(pub_b64).unwrap().try_into().unwrap();
+        assert!(verify_signature(&VerifyingKey::from_bytes(&pk).unwrap(), &signed).is_ok());
+    }
+
+    #[test]
+    fn a_hex_seed_file_is_refused_because_the_operator_format_is_base64() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(26);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed_text(&seeds, "exe-k1", &hex::encode(k1.to_bytes()), 0o600);
+        let err = signing_key_for(&issuer(snap, seeds), "exe-k1").unwrap_err();
+        assert!(err.contains("must be 32 bytes"), "{err}");
+    }
+
+    fn register_active(snap: &std::path::Path, kid: &str, key: &SigningKey) {
+        append(
+            snap,
+            "register",
+            kid,
+            Some("execution_authorization"),
+            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64(key), "owner": "authz"}),
+            TS,
+        );
+        append(snap, "activate", kid, None, json!({}), TS);
+    }
+
+    fn issuer(snap: std::path::PathBuf, seeds: std::path::PathBuf) -> RegistryIssuer {
+        RegistryIssuer {
+            registry_path: snap,
+            seeds_dir: seeds,
+            executor_audience: "executor".into(),
+            ttl_seconds: 60,
+        }
+    }
+
+    fn prepared(kid: &str) -> Prepared {
+        Prepared {
+            authorization_id: "auth_test".into(),
+            issued_at: chrono::Utc::now(),
+            expires_at: chrono::Utc::now() + chrono::Duration::seconds(60),
+            signing_kid: Some(kid.into()),
+        }
+    }
+
+    #[test]
+    fn the_active_key_signs_and_its_signature_verifies_under_the_registry_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(11);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-k1", &k1, 0o600);
+        let r = issuer(snap, seeds);
+        let key = signing_key_for(&r, "exe-k1").expect("active key signs");
+        let p = prepared("exe-k1");
+        let payload = AuthorizationPayload {
+            schema: SCHEMA.into(),
+            authorization_id: p.authorization_id.clone(),
+            run_id: "run-1".into(),
+            tool_name: "refund".into(),
+            args_binding_hash: "a".repeat(64),
+            policy_revision: "rev-1".into(),
+            executor_audience: "executor".into(),
+            approval_event_id: "human_approved-1".into(),
+            consequential_record_hash: "b".repeat(64),
+            issued_at_utc: p.issued_at.to_rfc3339(),
+            expires_at_utc: p.expires_at.to_rfc3339(),
+            signing_key_id: Some("exe-k1".into()),
+        };
+        let signed = sign(&key, payload);
+        assert_eq!(signed.payload.signing_key_id.as_deref(), Some("exe-k1"));
+        let verifying = VerifyingKey::from_bytes(&k1.verifying_key().to_bytes()).unwrap();
+        assert!(verify_signature(&verifying, &signed).is_ok());
+    }
+
+    #[test]
+    fn a_revoked_key_cannot_sign_even_though_its_seed_is_still_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(12);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-k1", &k1, 0o600);
+        append(&snap, "revoke", "exe-k1", None, json!({"reason": "exposed", "compromised_from_utc": TS}), TS);
+        let err = signing_key_for(&issuer(snap, seeds), "exe-k1").unwrap_err();
+        assert!(err.contains("revoked"), "{err}");
+    }
+
+    #[test]
+    fn rotation_retires_the_old_key_at_once_and_activates_the_successor() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(13);
+        let k2 = seed(14);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-k1", &k1, 0o600);
+        write_seed(&seeds, "exe-k2", &k2, 0o600);
+        append(&snap, "register", "exe-k2", Some("execution_authorization"),
+            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64(&k2), "owner": "authz"}), TS);
+        append(&snap, "retire", "exe-k1", None, json!({"rotation_group": "g1"}), TS);
+        append(&snap, "activate", "exe-k2", None, json!({"rotation_group": "g1"}), TS);
+        let r = issuer(snap, seeds);
+        assert!(signing_key_for(&r, "exe-k1").unwrap_err().contains("retired"));
+        assert!(signing_key_for(&r, "exe-k2").is_ok());
+        assert_eq!(active_registry_key(&r).unwrap().kid, "exe-k2");
+    }
+
+    #[test]
+    fn a_seed_that_does_not_match_the_registry_key_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(15);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-k1", &seed(16), 0o600);
+        let err = signing_key_for(&issuer(snap, seeds), "exe-k1").unwrap_err();
+        assert!(err.contains("does not match"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_seed_readable_by_other_users_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(17);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-k1", &k1, 0o644);
+        let err = signing_key_for(&issuer(snap, seeds), "exe-k1").unwrap_err();
+        assert!(err.contains("owner"), "{err}");
+    }
+
+    #[test]
+    fn with_no_active_key_there_is_nothing_to_issue_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(18);
+        append(&snap, "register", "exe-k1", Some("execution_authorization"),
+            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64(&k1), "owner": "authz"}), TS);
+        let err = active_registry_key(&issuer(snap, seeds)).unwrap_err();
+        assert!(err.contains("no active execution authorization key"), "{err}");
+    }
+
+    #[test]
+    fn a_seed_file_for_an_unregistered_kid_is_not_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(19);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-ghost", &k1, 0o600);
+        let err = signing_key_for(&issuer(snap, seeds), "exe-ghost").unwrap_err();
+        assert!(err.contains("not in the registry"), "{err}");
+    }
+
+    fn call(hash: &str) -> CallBinding<'_> {
+        CallBinding {
+            run_id: "run-1",
+            tool_name: "refund",
+            args_binding_hash: "a",
+            policy_revision: "rev-1",
+            approval_event_id: "human_approved-1",
+            consequential_record_hash: hash,
+        }
+    }
+
+    #[test]
+    fn core_issues_from_the_active_key_and_the_signature_verifies() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(21);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-k1", &k1, 0o600);
+        let m = Mode::Registry(issuer(snap, seeds));
+        let p = prepare_with(Some(&m), chrono::Utc::now()).unwrap().expect("issuance enabled");
+        assert_eq!(p.signing_kid.as_deref(), Some("exe-k1"));
+        let signed = sign_prepared_with(Some(&m), &p, &call(&"b".repeat(64)))
+            .unwrap()
+            .expect("signed");
+        assert_eq!(signed.payload.signing_key_id.as_deref(), Some("exe-k1"));
+        assert_eq!(signed.payload.executor_audience, "executor");
+        let v = VerifyingKey::from_bytes(&k1.verifying_key().to_bytes()).unwrap();
+        assert!(verify_signature(&v, &signed).is_ok());
+    }
+
+    #[test]
+    fn rotation_between_prepare_and_sign_refuses_the_retired_key_and_the_successor_signs() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(22);
+        let k2 = seed(23);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-k1", &k1, 0o600);
+        write_seed(&seeds, "exe-k2", &k2, 0o600);
+        let m = Mode::Registry(issuer(snap.clone(), seeds));
+        let old = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
+        // Rotation lands after the prepare, with no restart of Core.
+        append(&snap, "register", "exe-k2", Some("execution_authorization"),
+            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64(&k2), "owner": "authz"}), TS);
+        append(&snap, "retire", "exe-k1", None, json!({"rotation_group": "g1"}), TS);
+        append(&snap, "activate", "exe-k2", None, json!({"rotation_group": "g1"}), TS);
+        let err = sign_prepared_with(Some(&m), &old, &call(&"c".repeat(64))).unwrap_err();
+        assert!(err.contains("retired"), "{err}");
+        let new = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
+        assert_eq!(new.signing_kid.as_deref(), Some("exe-k2"));
+        let signed = sign_prepared_with(Some(&m), &new, &call(&"c".repeat(64))).unwrap().unwrap();
+        assert_eq!(signed.payload.signing_key_id.as_deref(), Some("exe-k2"));
+    }
+
+    #[test]
+    fn revocation_between_prepare_and_sign_refuses_the_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let k1 = seed(24);
+        register_active(&snap, "exe-k1", &k1);
+        write_seed(&seeds, "exe-k1", &k1, 0o600);
+        let m = Mode::Registry(issuer(snap.clone(), seeds));
+        let p = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
+        append(&snap, "revoke", "exe-k1", None, json!({"reason": "exposed", "compromised_from_utc": TS}), TS);
+        let err = sign_prepared_with(Some(&m), &p, &call(&"d".repeat(64))).unwrap_err();
+        assert!(err.contains("revoked"), "{err}");
+    }
+
+    #[test]
+    fn with_no_active_key_core_refuses_before_anything_is_appended() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        let m = Mode::Registry(issuer(snap, seeds));
+        let err = prepare_with(Some(&m), chrono::Utc::now()).unwrap_err();
+        assert!(err.contains("no active execution authorization key"), "{err}");
+    }
+
+    #[test]
+    fn an_active_key_without_its_seed_file_refuses_the_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let (snap, seeds) = world(dir.path());
+        register_active(&snap, "exe-k1", &seed(25));
+        let m = Mode::Registry(issuer(snap, seeds));
+        let p = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
+        let err = sign_prepared_with(Some(&m), &p, &call(&"e".repeat(64))).unwrap_err();
+        assert!(err.contains("seed file for exe-k1 is missing"), "{err}");
+    }
+
+    #[test]
+    fn with_issuance_disabled_nothing_is_reserved_or_signed() {
+        let p = prepared("exe-k1");
+        assert!(prepare_with(None, chrono::Utc::now()).unwrap().is_none());
+        assert!(sign_prepared_with(None, &p, &call(&"f".repeat(64))).unwrap().is_none());
+    }
+
+    #[test]
+    fn settings_with_neither_seed_nor_registry_disable_issuance() {
+        assert!(matches!(mode_from_settings(&IssuerSettings::default()), Ok(None)));
+    }
+
+    #[test]
+    fn settings_with_both_a_seed_and_a_registry_are_refused() {
+        let s = IssuerSettings {
+            seed_hex: hex::encode([11u8; 32]),
+            registry_path: "/tmp/registry.json".into(),
+            seeds_dir: "/tmp/seeds".into(),
+            audience: "executor".into(),
+            ttl_seconds: 60,
+            ..Default::default()
+        };
+        let err = mode_from_settings(&s).unwrap_err();
+        assert!(err.contains("not both"), "{err}");
+    }
+
+    #[test]
+    fn a_registry_without_a_seeds_directory_is_refused() {
+        let s = IssuerSettings {
+            registry_path: "/tmp/registry.json".into(),
+            audience: "executor".into(),
+            ttl_seconds: 60,
+            ..Default::default()
+        };
+        let err = mode_from_settings(&s).unwrap_err();
+        assert!(err.contains("SEEDS_DIR is required"), "{err}");
+    }
+
+    #[test]
+    fn registry_settings_select_registry_mode() {
+        let s = IssuerSettings {
+            registry_path: "/tmp/registry.json".into(),
+            seeds_dir: "/tmp/seeds".into(),
+            audience: "executor".into(),
+            ttl_seconds: 60,
+            ..Default::default()
+        };
+        assert!(matches!(mode_from_settings(&s), Ok(Some(Mode::Registry(_)))));
+    }
+
+    #[test]
+    fn seed_settings_with_an_invalid_key_id_are_refused_and_valid_ones_select_env_mode() {
+        let base = IssuerSettings {
+            seed_hex: hex::encode([12u8; 32]),
+            audience: "executor".into(),
+            ttl_seconds: 60,
+            ..Default::default()
+        };
+        let bad = IssuerSettings { key_id: "bad id!".into(), ..base.clone() };
+        assert!(mode_from_settings(&bad).unwrap_err().contains("KEY_ID"));
+        let good = IssuerSettings { key_id: "exe-k1".into(), ..base };
+        assert!(matches!(mode_from_settings(&good), Ok(Some(Mode::EnvKey(_)))));
     }
 }

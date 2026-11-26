@@ -295,8 +295,9 @@ prefixes and different databases can run on one machine without touching each ot
 - `ExecutionExecutor(..., registry=...)` verifies authorizations through the registry. Without `registry`, the executor
   verifies against `public_key_b64` exactly as before. Passing neither raises `ValueError`.
 
-Limits: Core does not read the registry; it signs with one configured key id. Trusted timestamps are not available, so
-historical verdicts rely on the signer's `issued_at_utc`. See `docs/operations/key-management-runbook.md`.
+Core signs from the registry's active key and re-checks it before signing, so a rotation or revocation applies without a
+restart (see "Core signing" in `docs/operations/key-management-runbook.md`). Trusted timestamps are not available, so
+historical verdicts rely on the signer's `issued_at_utc`.
 
 ## Production limitations
 

@@ -82,8 +82,8 @@ approver. Staging cannot verify an identity token and cannot separate a human fr
 
 ## Limits and unverified assumptions
 
-- Core does not read the registry. It signs with one configured key id and seed. A Core key rotation is a configuration change
-  and a restart. Core-side registry integration is not implemented.
+- Core reads the registry's event log and signs with its active key. Its seed files are on the Core host. Compromise of that host
+  exposes the active seed until its key is revoked.
 - No trusted timestamps. `issued_at_utc` and `signed_at_utc` are claims by the signer. Historical verdicts depend on them.
 - Truncation of the tail of the registry log is valid and shorter; detection depends on the snapshot or an off-host copy.
 - A known key stays usable from the cache until `GOVAI_OIDC_JWKS_MAX_AGE_SECONDS` expires, even if the IdP is down. The bound was
@@ -91,6 +91,54 @@ approver. Staging cannot verify an identity token and cannot separate a human fr
 - The loopback test IdP stands in for a real provider. No claim is made about any hosted identity provider's claim conventions.
 - No compatibility with any external key-management service is claimed or tested.
 - Policy-bundle signing predates domain prefixes; its key separation is by registry purpose only.
+
+## Core-side registry integration
+
+Core now issues execution authorizations from the trusted registry (`rust/src/execution_authorization.rs`,
+`rust/src/key_registry.rs`). Core replays the authoritative event log, verifies the hash chain and every transition, and ignores
+the snapshot file. It picks the active key when it prepares an authorization and re-checks that key before signing. Each refusal
+is a stable code:
+
+- no active key: `503 AUTHORIZATION_KEY_UNAVAILABLE`, nothing appended;
+- signing refused after the append (revoked or retired since prepare, seed missing, unreadable, or mismatched): `503
+  AUTHORIZATION_SIGNING_REFUSED` with the record hash. The record stays in the ledger and no authorization is issued;
+- both a seed and a registry configured: refused at startup.
+
+Seed files are base64, the format the operator tool produces, with owner-only permissions, and must derive the registered public key.
+A first draft read them as hex and would have refused every operator-provisioned seed; a cross-language test now uses a seed generated
+by Python.
+
+### Live validation
+
+A debug build of `aigov_audit` in dev mode, on loopback, with a scratch registry driven through the Python operator API. Each row was
+sent to `POST /evidence` as the agent principal.
+
+| Case | Result |
+|---|---|
+| Active `exe-k1` | 200. Authorization signed with `signing_key_id` `exe-k1`. Executor verifier accepts it. |
+| Rotation to `exe-k2`, no restart | 200. Signed with `exe-k2`. |
+| Revoke `exe-k2`, no active key | 503 `AUTHORIZATION_KEY_UNAVAILABLE`. Ledger lines unchanged (3 → 3). |
+| Active `exe-k3` whose seed belongs to another key | 503 `AUTHORIZATION_SIGNING_REFUSED`. Ledger gained one record (3 → 4), as designed. |
+| Executor verdict, `exe-k1` authorization after its rotation | Accepted (ordinary rotation, trusted at signing). |
+| Executor verdict, `exe-k2` authorization issued 1.1 s before revocation | Refused: verdict `uncertain` (`signed_before_compromise_uncertain`). |
+| Tampered payload on an accepted authorization | Refused: `authorization_signature_invalid`. |
+| Garbage written over the snapshot `registry.json` | Core did not fail on it. The request reached the seed check. This is weaker than a clean run: the failing seed was from the case above. |
+| Startup with a seed and a registry both set | Refused: "configure either ... not both". |
+
+One observation outside this change, not investigated: in dev with the default policy, a `consequential_tool_call` naming a
+non-existent `approval_event_id` was accepted (200). Whether that is expected in dev, and whether staging and prod enforce the
+approval link, needs checking.
+
+### Test results on this tree
+
+- `cargo test --locked`: exit 0, no failures. PostgreSQL-gated tests are ignored and not run.
+- Registry unit tests: 4 passed. Authorization unit tests: 27 passed, including the Core issuance path (rotation and revocation
+  between prepare and sign, a missing seed, disabled mode, and configuration rules).
+- `pytest python/tests` with the in-repo package on `PYTHONPATH`: 1214 passed, 0 failed, 77 skipped. The skips are gated on
+  `DATABASE_URL` or a Docker image. An earlier run recorded 1222 passed and 61 skipped; that difference is not explained here.
+  `PYTHONPATH` is needed because the active environment's editable `aigov_py` points at another checkout, and the lifecycle tests
+  run child processes that do not get the path from `conftest.py`.
+- `make gate`: passed.
 
 ## Not run in this change
 
@@ -110,7 +158,6 @@ signers never expose key material and fail closed; and the local suites, the liv
 ## Human approval gate
 
 Not approved for production by this report. Before production use, the owners must: review the OIDC rule configuration for each
-tenant, since a mistake there is the main way to grant approval to a workload; decide how Core will read the registry, so that key
-rotation does not require a restart; choose an off-host copy of the registry log; decide the JWKS cache bounds for each identity
-provider; and run the "Not run" suites. Issue #501 remains open and is not addressed here. Merging into `staging` is a separate
+tenant, since a mistake there is the main way to grant approval to a workload; choose an off-host copy of the registry log; decide
+the JWKS cache bounds for each identity provider; and run the "Not run" suites. Issue #501 remains open and is not addressed here. Merging into `staging` is a separate
 decision, and this report does not make it.

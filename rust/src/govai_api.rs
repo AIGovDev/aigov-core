@@ -206,7 +206,7 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::principals::init_principals(deployment_env)?;
     crate::oidc::init_from_env(deployment_env)?;
     crate::execution_authorization::init_from_env()?;
-    if crate::execution_authorization::issuer().is_some()
+    if crate::execution_authorization::enabled()
         && !crate::principals::principals_configured()
     {
         return Err(
@@ -580,7 +580,20 @@ async fn post_evidence(
     let prepared = if principal.is_some()
         && (event.event_type == "consequential_tool_call" || event.event_type == "tool_call")
     {
-        crate::execution_authorization::prepare(chrono::Utc::now())
+        match crate::execution_authorization::prepare(chrono::Utc::now()) {
+            Ok(p) => p,
+            // Refused before the append: no record is written for a call that cannot be authorized.
+            Err(e) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "AUTHORIZATION_KEY_UNAVAILABLE",
+                    &e,
+                    "Activate an execution authorization key in the trusted key registry, then retry.",
+                    None,
+                )
+                .into_response();
+            }
+        }
     } else {
         None
     };
@@ -660,16 +673,28 @@ async fn post_evidence(
             if let Some(prep) = &prepared {
                 let str_field =
                     |k: &str| event.payload.get(k).and_then(|v| v.as_str()).unwrap_or("");
-                if let Some(signed) = crate::execution_authorization::sign_prepared(
-                    prep,
-                    &event.run_id,
-                    str_field("tool_name"),
-                    str_field("args_binding_hash"),
-                    &policy_version,
-                    str_field("approval_event_id"),
-                    &rec.record_hash,
-                ) {
-                    body["execution_authorization"] = json!(signed);
+                let call = crate::execution_authorization::CallBinding {
+                    run_id: &event.run_id,
+                    tool_name: str_field("tool_name"),
+                    args_binding_hash: str_field("args_binding_hash"),
+                    policy_revision: &policy_version,
+                    approval_event_id: str_field("approval_event_id"),
+                    consequential_record_hash: &rec.record_hash,
+                };
+                match crate::execution_authorization::sign_prepared(prep, &call) {
+                    Ok(Some(signed)) => body["execution_authorization"] = json!(signed),
+                    Ok(None) => {}
+                    // The record is already appended, but no authorization is issued: the executor will not run the call.
+                    Err(e) => {
+                        return api_error(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "AUTHORIZATION_SIGNING_REFUSED",
+                            &e,
+                            "The record was accepted but no execution authorization was issued. Do not execute this call; resolve the key state and resubmit under a new event id.",
+                            Some(json!({ "record_hash": rec.record_hash })),
+                        )
+                        .into_response();
+                    }
                 }
             }
             if metering::metering_enabled() {

@@ -139,3 +139,23 @@ def test_tampered_authorization_fails_signature_check(world):
     with pytest.raises(Refused) as exc:
         verify_authorization_with_registry(signed, reg)
     assert exc.value.reason == "authorization_signature_invalid"
+
+
+def test_a_stale_registry_instance_sees_a_revocation_made_elsewhere(world):
+    # Two processes share the registry: the executor loaded it before the revocation was written by the other.
+    reg, admin = world
+    seed, pub = K.new_signing_seed()
+    _register_and_activate(reg, admin, "exe-s", "execution_authorization", pub)
+    issued = datetime.now(UTC)
+    signed = _authorization(seed, kid="exe-s", issued=issued)
+    executor_view = K.KeyRegistry(reg._path)  # loaded before the revocation
+    assert verify_authorization_with_registry(signed, executor_view) == "exe-s"
+    operator_view = K.KeyRegistry(reg._path)
+    req = K.KeyRegistry.new_request(op="revoke", actor="ops-admin", expected_version=operator_view.version,
+                                    kid="exe-s", reason="exposed",
+                                    compromised_from_utc=(issued - timedelta(minutes=1)).isoformat())
+    operator_view.revoke(K.KeyRegistry.sign_request(req, admin))
+    with pytest.raises(Refused) as exc:
+        verify_authorization_with_registry(signed, executor_view)
+    assert exc.value.reason == "authorization_key_untrusted"
+
