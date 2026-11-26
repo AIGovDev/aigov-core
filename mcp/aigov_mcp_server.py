@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """AIGov local MCP-style bridge: subprocess wrappers with JSON results.
 
 - CLI: ``python mcp/aigov_mcp_server.py <command> [options]``
@@ -21,7 +20,8 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Final, Mapping
+from typing import Any, Final
+from collections.abc import Mapping
 from urllib.parse import urlsplit
 
 _STDIO_MAX_CHARS: Final[int] = 256 * 1024
@@ -380,7 +380,7 @@ def _template_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("stem must be at most 120 characters after normalization")
     force = arguments.get("force", False)
     if not isinstance(force, bool):
-        raise ValueError("force must be a boolean")
+        raise TypeError("force must be a boolean")
     return {"stem": stem, "force": force}
 
 
@@ -832,7 +832,7 @@ def run_mcp_stdio() -> int:
                 }
             )
         elif method == "tools/call":
-            name = str((params.get("name") or "")).strip()
+            name = str(params.get("name") or "").strip()
             arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
             result = _dispatch_tool(name, arguments)
             _write_jsonrpc_line(
