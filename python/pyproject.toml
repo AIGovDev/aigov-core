@@ -63,7 +63,7 @@ build-backend = "setuptools.build_meta"
 include-package-data = true
 
 [tool.setuptools.package-data]
-"aigov_py.trusted" = ["migrations/*.sql"]
+"aigov_py.trusted" = ["migrations/*.sql", "migrations/pg/*.sql"]
 aigov_py = [
   "experiments/datasets/*.json",
   "experiments/scripts/*.py",

@@ -144,9 +144,19 @@ pub fn prod_env(ledger: &Path, bundle: Option<&Path>) {
 /// Process environment for a start in `environment` ("staging" or "prod").
 pub fn environment_env(ledger: &Path, bundle: Option<&Path>, environment: &str) {
     std::env::set_var("GOVAI_LEDGER_DIR", ledger);
-    std::env::set_var("GOVAI_API_KEYS", "tb-key-admin");
-    std::env::set_var("GOVAI_API_KEYS_JSON", r#"{"tb-key-admin":"tenant-tb"}"#);
+    std::env::set_var("GOVAI_API_KEYS", "tb-key-admin,tb-key-approver");
+    std::env::set_var(
+        "GOVAI_API_KEYS_JSON",
+        r#"{"tb-key-admin":"tenant-tb","tb-key-approver":"tenant-tb"}"#,
+    );
     std::env::set_var("AIGOV_ENVIRONMENT", environment);
+    if environment == "prod" {
+        // Production refuses to start without authenticated principals, so the test key is configured as one.
+        std::env::set_var(
+            "GOVAI_PRINCIPALS_JSON",
+            r#"{"tb-key-admin":{"principal":"agent:tb","identity":"agent:tb","role":"agent","tenant":"tenant-tb"},"tb-key-approver":{"principal":"approver:tb","identity":"approver:tb","role":"approver","tenant":"tenant-tb"}}"#,
+        );
+    }
     std::env::set_var("GOVAI_API_USAGE_STORE", "memory");
     std::env::set_var("AIGOV_POLICY_TRUST_ED25519_JSON", trust_env_json());
     std::env::remove_var("AIGOV_POLICY_FILE");
