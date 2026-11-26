@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Human-operated approval step for the local MCP report-template example."""
 
 from __future__ import annotations
@@ -13,8 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "python"))
 sys.path.insert(0, str(REPO_ROOT / "mcp"))
 
-from aigov_mcp_server import _template_arguments  # noqa: E402
-from aigov_py.trusted import (  # noqa: E402
+from aigov_mcp_server import _template_arguments
+
+from aigov_py.trusted import (
     ApproverActor,
     CoreClient,
     CoreDecision,
