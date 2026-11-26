@@ -1,9 +1,9 @@
 {
   "schema": "govai.release_provenance.v1",
-  "generated_at_utc": "2026-11-26T12:22:34Z",
+  "generated_at_utc": "2026-11-26T14:06:29Z",
   "source": {
-    "commit": "18de55a3ebd62fa6513d61a9323cd5e14de88f5c",
-    "branch": "feat/pilot-readiness-closure",
+    "commit": "9ee9c19d9ab577a54ee5a28fb94f7e3bb8e09cb2",
+    "branch": "release/0.4.0-rc.1-preparation",
     "working_tree_clean": true
   },
   "toolchain": {
@@ -21,27 +21,27 @@
     "python -m build --wheel python",
     "python scripts/generate_sbom.py --rust-dir rust --out-dir <dir>"
   ],
-  "reproducibility": "Core crate rebuilt twice in the same target directory after cargo clean -p aigov_audit: identical hash (1dea2793fd...). Dependencies not rebuilt. Full from-scratch comparison not run (disk).",
+  "reproducibility": "Repository build vs clean build of the same commit (separate target directory): 48 bytes of crate identifiers differ, code identical (docs/evidence/release-candidate/reproducibility.md). Clean container build (docker build --no-cache): its binary has no crash-point names; sha256 75e66d7d66f3bf5bf6feac3dd8d4bcfc3f8dcf1a53b8c4e726a840aee0de49fd. Dependencies not rebuilt on an independent builder.",
   "artifacts": {
     "aigov_audit (release binary)": {
       "path": "rust/target/release/aigov_audit",
-      "sha256": "1dea2793fddee6712579a35572e34c890e9cdd769bab71a7acf933ce97215329"
+      "sha256": "b4e44881d8579ca7e6fde583291a402efe65fbf1acf751f03c19c124acee8f02"
     },
     "aigov_py wheel": {
       "path": "aigov_py-0.2.1-py3-none-any.whl",
-      "sha256": "b67fc422e2110d04496ce65ad2f85183b6ea4341bef2c06e283d8ae78ac57c43"
+      "sha256": "67f539871b0686b92963e114aa905d011437b4feb5d11558447506a16972a320"
     },
     "SBOM aigov-core-rust.cdx.json": {
       "path": "aigov-core-rust.cdx.json",
-      "sha256": "f3497b07cce36e57a1062f3cf8eb1d5d58bfd0fb15679d6a9f8660be66cfb169"
+      "sha256": "1178024bc16503870267dbc070d852b41fc3df613b8fccbb8b54c684913ae46a"
     },
     "SBOM aigov-py-python.cdx.json": {
       "path": "aigov-py-python.cdx.json",
-      "sha256": "c115e9002746b353cbd7b65ac496d9d553f0f3fe1201b788afa6a11e559ec59d"
+      "sha256": "2496fcd68623b8c74a50bcc0dd678b520eff12a4eefb10dcae4d9b3ab3ccb143"
     },
     "rust/Cargo.lock": {
       "path": "rust/Cargo.lock",
-      "sha256": "f65d2e6baf8bb7b37a9c328bf8baa80d59765e51a190115540627547971fc372"
+      "sha256": "f19f61a997c309528f6bf4887849aae5296fd12c6432000dc974b630cbda26a5"
     },
     "python/pyproject.toml": {
       "path": "python/pyproject.toml",
