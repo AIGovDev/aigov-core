@@ -53,6 +53,8 @@ pub struct PolicyStore {
     legacy_fallback: Arc<ResolvedPolicy>,
     /// Verified revisions waiting to be recorded. Recorded by `commit_revisions` after startup succeeds.
     pending_revisions: Arc<std::sync::Mutex<Vec<crate::policy_anchor::PendingAnchor>>>,
+    /// The revisions this process serves, one per policy. Evidence writes are refused while the anchor has superseded any of them.
+    in_force: Vec<crate::policy_anchor::PendingAnchor>,
 }
 
 impl PolicyStore {
@@ -168,12 +170,19 @@ impl PolicyStore {
             pending_revisions.extend(enforce_anti_rollback(deployment_env, doc)?);
         }
 
+        let in_force = pending_revisions.clone();
         Ok(Self {
             deployment_env,
             policies: Arc::new(loaded),
             legacy_fallback: Arc::new(legacy_resolved),
             pending_revisions: Arc::new(std::sync::Mutex::new(pending_revisions)),
+            in_force,
         })
+    }
+
+    /// The revisions this process serves. Empty when no anchored bundle is configured (dev, or the unsigned legacy path).
+    pub fn in_force_revisions(&self) -> &[crate::policy_anchor::PendingAnchor] {
+        &self.in_force
     }
 
     /// Reconcile and commit the verified revisions this store serves, against the durable PostgreSQL anchor.
@@ -783,6 +792,7 @@ mod tests {
             policies: Arc::new(vec![]),
             legacy_fallback: Arc::new(store),
             pending_revisions: Arc::new(std::sync::Mutex::new(Vec::new())),
+            in_force: Vec::new(),
         };
         let err = s
             .enforce_ingest_for_request("tenant", &ev, &ledger)

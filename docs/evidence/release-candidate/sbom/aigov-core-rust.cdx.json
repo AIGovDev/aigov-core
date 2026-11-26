@@ -4,7 +4,7 @@
   "serialNumber": "urn:uuid:3154213f-0e86-54aa-98f9-d008705f1e0b",
   "version": 1,
   "metadata": {
-    "timestamp": "2026-11-26T12:13:48Z",
+    "timestamp": "2026-11-26T13:59:03Z",
     "component": {
       "type": "application",
       "name": "aigov-core-rust",
