@@ -119,6 +119,38 @@ fn lock_for_ledger(log_path: &str) -> Result<Arc<Mutex<()>>, String> {
         .clone())
 }
 
+/// A cross-process lock on one ledger file: an exclusive `flock` on the sidecar `<ledger>.lock`. Core instances that share a
+/// ledger directory on one host must serialize their writes through it. The in-process mutex above is not enough: two
+/// processes each hold their own mutex, and they interleave appends and corrupt the hash chain. The lock is released when the
+/// descriptor is closed, which happens on drop, including after a panic.
+pub struct LedgerFileLock(File);
+
+impl LedgerFileLock {
+    pub fn acquire(log_path: &str) -> Result<Self, String> {
+        let lock_path = format!("{log_path}.lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| format!("ledger lock file unavailable: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            // SAFETY: `file` is a valid open descriptor for the duration of the call; the lock is blocking.
+            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+            if rc != 0 {
+                return Err(format!("ledger lock failed: {}", std::io::Error::last_os_error()));
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            return Err("ledger writes require flock on this platform; refusing to write without the lock".to_string());
+        }
+        Ok(LedgerFileLock(file))
+    }
+}
+
 fn ensure_parent_dir_exists(path: &str) -> Result<(), String> {
     let p = Path::new(path);
     let parent = match p.parent() {
@@ -558,6 +590,8 @@ pub fn append_record_checked(
     let _guard = lock
         .lock()
         .map_err(|_| "ledger lock poisoned".to_string())?;
+    // Across processes too: every writer of this ledger takes the same file lock before it reads state.
+    let _file_lock = LedgerFileLock::acquire(log_path).map_err(CheckedAppendError::Store)?;
     eprintln!(
         "audit_append phase=after_lock log_path={} elapsed_ms={}",
         log_path,
@@ -794,6 +828,8 @@ pub fn compute_ledger_events_content_sha256(
 /// Append a checkpoint record (append-only, fsync).
 pub fn append_checkpoint(log_path: &str, cp: &LedgerCheckpoint) -> Result<(), String> {
     ensure_parent_dir_exists(log_path)?;
+    // Not called from inside `append_record_checked`, so taking the file lock here cannot re-enter it.
+    let _file_lock = LedgerFileLock::acquire(log_path)?;
     let p = checkpoints_path_for_ledger(log_path);
     let mut f = OpenOptions::new()
         .create(true)
@@ -994,6 +1030,8 @@ pub fn scan_ledger_records(
 /// IMPORTANT: callers must hold the per-ledger lock (see [`lock_for_ledger`]) so truncation
 /// cannot race with concurrent appends.
 pub fn repair_trailing_partial_record(log_path: &str) -> Result<bool, String> {
+    // Public entry point (operator and tests). The append path uses `repair_trailing_partial_record_fast` under its own lock.
+    let _file_lock = LedgerFileLock::acquire(log_path)?;
     // If the file doesn't exist, nothing to repair.
     let mut f = match OpenOptions::new().read(true).write(true).open(log_path) {
         Ok(f) => f,

@@ -300,6 +300,27 @@ anchor, and signs with the active key. A rotation or revocation takes effect at 
 executor verifies through the registry, and historical verdicts rely on the signer's `issued_at_utc`. The residual threat
 (simultaneous compromise of PostgreSQL write access and the trust file) is in `docs/operations/key-management-runbook.md`.
 
+## The shared executor store (PostgreSQL)
+
+For several executor processes or hosts, use `aigov_py.trusted.store_pg.PostgresExecutionStore` instead of the SQLite store. It has
+the same methods, so `Executor` takes either one. Create the schema with `store_admin migrate-pg --url <url>` (versioned, operator
+run). The tenant is a required constructor argument.
+
+What the store adds, and what the caller must do:
+
+- `start` returns a **fence token** (an integer). `Executor` passes it to `finish` and `mark_outcome_unknown`. A caller that
+  finishes without the current token gets `StaleWorker`, and nothing is written.
+- Leases are on **database time**. The `lease_seconds` argument, not the caller's clock, sets the lease.
+- `expire_lease` is how recovery moves a started execution whose lease has passed to `outcome_unknown`. `Executor.recover()` uses
+  it automatically when the store has it.
+- `record_receipt_recorded` is **idempotent**: the same id again changes nothing.
+- A store failure before a side effect raises `Refused("store_unavailable")` from `execute`. A store failure after one is reported as
+  `outcome_not_recorded` and nothing is retried.
+
+Nothing else changes for callers. The SQLite store keeps its behaviour. The `fence` and `lease_seconds` arguments are accepted by both
+stores and used only by the PostgreSQL one. See `docs/architecture/distributed-execution.md` for the guarantees and their limits,
+and `docs/operations/distributed-execution-runbook.md` for operation.
+
 ## Production limitations
 
 These hold for the SDK as shipped. They are the same limitations the reference and the pilot state.

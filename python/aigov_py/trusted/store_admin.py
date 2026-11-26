@@ -338,6 +338,13 @@ def build_parser() -> argparse.ArgumentParser:
         sp.set_defaults(func=fn)
         return sp
 
+    def add_pg(name: str, fn) -> None:
+        sp = sub.add_parser(name)
+        sp.add_argument("--url", required=True, help="PostgreSQL URL (the database that holds the shared executor store)")
+        sp.set_defaults(func=fn)
+
+    add_pg("migrate-pg", cmd_migrate_pg)
+    add_pg("status-pg", cmd_status_pg)
     add("migrate", cmd_migrate, ("--backup-dir", {}))
     add("status", cmd_status)
     add("verify-history", cmd_verify_history)
@@ -388,17 +395,73 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# --- PostgreSQL (the shared executor store) ----------------------------------------------------------------------------
+
+PG_MIGRATIONS: tuple[tuple[int, str], ...] = ((1, "pg/0001_executor_pg.sql"),)
+PG_MIGRATION_LOCK = 0x67_6F76_6D6967  # held while migrating: two operators cannot apply migrations at once
+
+
+def _pg_connect(url: str) -> Any:
+    try:
+        import psycopg  # optional extra: runs-postgres
+    except ImportError as exc:
+        raise ExecutionStoreError("psycopg is not installed (pip install 'psycopg[binary]')") from exc
+    return psycopg.connect(url, autocommit=False, connect_timeout=5)
+
+
+def _pg_applied(cur: Any) -> set[int]:
+    cur.execute("SELECT to_regclass('public.executor_schema_migrations') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return set()
+    cur.execute("SELECT version FROM executor_schema_migrations")
+    return {int(r[0]) for r in cur.fetchall()}
+
+
+def cmd_migrate_pg(args: argparse.Namespace) -> int:
+    """Apply every pending PostgreSQL migration, in order, each in one transaction, under an advisory lock.
+
+    Operator-controlled: the executor never runs this. Run it before starting executors on a new database, and after
+    upgrading the SDK. It is safe to re-run: applied versions are skipped.
+    """
+    conn = _pg_connect(args.url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (PG_MIGRATION_LOCK,))
+            applied = _pg_applied(cur)
+            plan = [(v, name) for v, name in PG_MIGRATIONS if v not in applied]
+            for _version, name in plan:
+                cur.execute(_migration_text(name))
+            cur.execute("SELECT COALESCE(MAX(version), 0) FROM executor_schema_migrations")
+            final = int(cur.fetchone()[0])
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    print(json.dumps({"applied": [n for _, n in plan], "schema_version": final}))
+    return 0
+
+
+def cmd_status_pg(args: argparse.Namespace) -> int:
+    conn = _pg_connect(args.url)
+    try:
+        with conn.cursor() as cur:
+            applied = sorted(_pg_applied(cur))
+        conn.commit()
+    finally:
+        conn.close()
+    expected = [v for v, _ in PG_MIGRATIONS]
+    print(json.dumps({"applied_versions": applied, "expected_versions": expected,
+                      "up_to_date": applied == expected}))
+    return 0 if applied == expected else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (
-        ExecutionStoreError,
-        ReconciliationRefused,
-        sqlite3.Error,
-        ValueError,
-        OSError,
-    ) as exc:
+    except Exception as exc:  # store, reconciliation, SQLite, and PostgreSQL (psycopg) errors are reported as refusals
         print(
             json.dumps({"error": type(exc).__name__, "detail": str(exc)}),
             file=sys.stderr,

@@ -1,0 +1,10 @@
+{
+  "tree": "/Users/monikadvorackova/verdict-scratch/neg-staging",
+  "store": "sqlite",
+  "recovery_by_skewed_clock": "outcome_unknown",
+  "live_worker_result": "{\"raised\": \"InvalidTransition\", \"detail\": \"transition reconciliation_required -> succeeded is not permitted\"}",
+  "live_worker_stderr_tail": null,
+  "final_state": "reconciliation_required",
+  "receipt_state": "none",
+  "side_effects": 1
+}
