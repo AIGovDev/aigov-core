@@ -12,7 +12,6 @@ from unittest.mock import Mock
 
 import pytest
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
     "aigov_mcp_server_under_test", REPO_ROOT / "mcp" / "aigov_mcp_server.py"
