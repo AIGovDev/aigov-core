@@ -79,7 +79,9 @@ def _sdk(*, agent_decision: Decision = Decision.ALLOW, should_execute: bool = Tr
                 event_id="consequential_tool_call-1",
                 record_hash="b" * 64,
                 policy_revision="policy-v2",
-                reason="accepted" if agent_decision == Decision.ALLOW else "approval_not_found",
+                reason="accepted"
+                if agent_decision == Decision.ALLOW
+                else "approval_not_found",
                 authorization={"payload": {"authorization_id": "auth-1"}}
                 if agent_decision == Decision.ALLOW
                 else None,
@@ -139,7 +141,9 @@ def test_approval_request_records_agent_request_but_does_not_approve(monkeypatch
     assert observed["clients"][0][1] == "agent-secret"
 
 
-def test_execution_requires_distinct_human_approval_and_refuses_core_denial(monkeypatch):
+def test_execution_requires_distinct_human_approval_and_refuses_core_denial(
+    monkeypatch,
+):
     _configure(monkeypatch)
     sdk, observed = _sdk(agent_decision=Decision.REQUIRE_APPROVAL)
     monkeypatch.setattr(mcp, "_trusted_sdk", lambda: sdk)
@@ -160,11 +164,19 @@ def test_execution_requires_distinct_human_approval_and_refuses_core_denial(monk
     assert len(observed["clients"]) == 1
 
 
-def test_execution_uses_signed_core_authorization_and_separate_executor_key(monkeypatch):
+def test_execution_uses_signed_core_authorization_and_separate_executor_key(
+    monkeypatch,
+):
     _configure(monkeypatch)
     sdk, observed = _sdk()
     monkeypatch.setattr(mcp, "_trusted_sdk", lambda: sdk)
-    write = Mock(return_value={"ok": True, "wrote_file": True, "path": "docs/reports/approved.md"})
+    write = Mock(
+        return_value={
+            "ok": True,
+            "wrote_file": True,
+            "path": "docs/reports/approved.md",
+        }
+    )
     monkeypatch.setattr(mcp, "tool_govai_generate_audit_report_template", write)
 
     result = mcp._execute_approved_template(
@@ -190,7 +202,10 @@ def test_execution_uses_signed_core_authorization_and_separate_executor_key(monk
     )
     assert observed["clients"][0][1] == "agent-secret"
     assert observed["clients"][1][1] == "executor-secret"
-    assert observed["executor_config"]["public_key_b64"] == base64.b64encode(b"p" * 32).decode()
+    assert (
+        observed["executor_config"]["public_key_b64"]
+        == base64.b64encode(b"p" * 32).decode()
+    )
     assert observed["executor_config"]["audience"] == "mcp-executor"
     assert observed["execution"]["signed"] == {
         "payload": {"authorization_id": "auth-1"}
