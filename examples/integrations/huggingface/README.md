@@ -38,3 +38,5 @@ Run offline tests:
 cd python
 python -m pytest tests/test_huggingface_provenance.py -q
 ```
+
+Submit feature changes to `staging` before promotion to `main`.
