@@ -1,17 +1,19 @@
-"""Key registry and signer tests: lifecycle, purpose separation, historical verdicts, operator authorization, and tampering.
+"""Key registry (format v2) and signer tests: lifecycle, purpose separation, historical verdicts, operator authorization,
+anchor checks, and the signers.
 
-Every test runs in its own ``tempfile.TemporaryDirectory`` so nothing is shared between tests or sessions.
+Every test runs in its own temporary directory. The registry world is in ``_registry_world``: a trust file, a SQLite anchor,
+a root, and operators. The attack tests are in ``test_registry_attacks.py``.
 """
 
 from __future__ import annotations
 
 import base64
-import json
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from _registry_world import World
 from nacl.signing import SigningKey
 
 from aigov_py.trusted import keys as K
@@ -26,24 +28,12 @@ def tmpdir_path():
         yield Path(d)
 
 
-def _bootstrap(path: Path):
-    reg = K.KeyRegistry(path / "registry.json")
-    admin_seed, admin_pub = K.new_signing_seed()
-    reg.install_operator("ops-admin", admin_pub, ("keyadmin", "revoker"))
-    return reg, admin_seed
-
-
-def _register(reg, admin_seed, kid, purpose, pub, owner="team"):
-    req = K.KeyRegistry.new_request(
-        op="register", actor="ops-admin", expected_version=reg.version,
-        kid=kid, purpose=purpose, public_key_b64=pub, owner=owner,
-    )
-    return reg.register(K.KeyRegistry.sign_request(req, admin_seed))
-
-
-def _activate(reg, admin_seed, kid):
-    req = K.KeyRegistry.new_request(op="activate", actor="ops-admin", expected_version=reg.version, kid=kid)
-    return reg.activate(K.KeyRegistry.sign_request(req, admin_seed))
+@pytest.fixture
+def world():
+    with tempfile.TemporaryDirectory(prefix="keyreg-test-") as d:
+        w = World(Path(d))
+        w.install_operator("ops-admin")
+        yield w
 
 
 def _sign(seed_b64, purpose, payload: bytes) -> str:
@@ -51,327 +41,175 @@ def _sign(seed_b64, purpose, payload: bytes) -> str:
     return base64.b64encode(sk.sign(K.DOMAINS[purpose] + payload).signature).decode()
 
 
+def _code(fn) -> str:
+    with pytest.raises(K.KeyRegistryError) as exc:
+        fn()
+    return exc.value.code
+
+
 # --- lifecycle and purpose separation -----------------------------------------------------------------------------
 
 
-def test_register_activate_and_only_one_active_key_per_purpose(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub1 = K.new_signing_seed()
-    _, pub2 = K.new_signing_seed()
-    _register(reg, admin, "auth-a", "execution_authorization", pub1)
-    _register(reg, admin, "auth-b", "execution_authorization", pub2)
-    _activate(reg, admin, "auth-a")
-    req = K.KeyRegistry.new_request(op="activate", actor="ops-admin", expected_version=reg.version, kid="auth-b")
-    with pytest.raises(K.KeyRegistryError) as exc:
-        reg.activate(K.KeyRegistry.sign_request(req, admin))
-    assert exc.value.code == "second_active_key"
+def test_register_activate_and_only_one_active_key_per_purpose(world):
+    world.register_active("exe-a")
+    world.register_pending("exe-b")
+    assert world.reader().active_for("execution_authorization").kid == "exe-a"
+    assert _code(lambda: world.op("ops-admin", "activate", kid="exe-b")) == "second_active_key"
 
 
-def test_a_kid_cannot_be_reused(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    _register(reg, admin, "auth-a", "execution_authorization", pub)
-    req = K.KeyRegistry.new_request(
-        op="register", actor="ops-admin", expected_version=reg.version,
-        kid="auth-a", purpose="policy_bundle", public_key_b64=pub, owner="x",
-    )
-    with pytest.raises(K.KeyRegistryError) as exc:
-        reg.register(K.KeyRegistry.sign_request(req, admin))
-    assert exc.value.code in ("kid_already_registered", "version_conflict")
+def test_a_kid_cannot_be_reused_even_after_revocation(world):
+    world.register_active("exe-a")
+    world.revoke("exe-a")
+    assert _code(lambda: world.op("ops-admin", "register", kid="exe-a", purpose="execution_authorization",
+                                  public_key_b64=_PUB, owner="x")) == "kid_already_registered"
 
 
-def test_unknown_purpose_and_bad_public_key_are_refused(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    req = K.KeyRegistry.new_request(
-        op="register", actor="ops-admin", expected_version=reg.version,
-        kid="k-x", purpose="made_up", public_key_b64=pub, owner="x",
-    )
-    with pytest.raises(K.KeyRegistryError) as exc:
-        reg.register(K.KeyRegistry.sign_request(req, admin))
-    assert exc.value.code == "purpose_unknown"
-    req = K.KeyRegistry.new_request(
-        op="register", actor="ops-admin", expected_version=reg.version,
-        kid="k-y", purpose="policy_bundle", public_key_b64=base64.b64encode(b"short").decode(), owner="x",
-    )
-    with pytest.raises(K.KeyRegistryError) as exc:
-        reg.register(K.KeyRegistry.sign_request(req, admin))
-    assert exc.value.code == "public_key_invalid"
+def test_unknown_purpose_and_bad_public_key_are_refused(world):
+    assert _code(lambda: world.op("ops-admin", "register", kid="exe-a", purpose="made_up",
+                                  public_key_b64=_PUB, owner="x")) == "register_invalid"
+    assert _code(lambda: world.op("ops-admin", "register", kid="exe-b", purpose="execution_authorization",
+                                  public_key_b64="AAAA", owner="x")) == "register_invalid"
 
 
-def test_cross_purpose_signature_is_refused(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    seed, pub = K.new_signing_seed()
-    _register(reg, admin, "pol-1", "policy_bundle", pub)
-    _activate(reg, admin, "pol-1")
-    payload = b"same bytes"
-    sig = _sign(seed, "policy_bundle", payload)
-    now = datetime.now(UTC).isoformat()
-    ok = reg.assess(purpose="policy_bundle", kid="pol-1", payload=payload, signature_b64=sig, signed_at_utc=now)
-    assert ok.verdict == "trusted"
-    cross = reg.assess(purpose="execution_authorization", kid="pol-1", payload=payload, signature_b64=sig, signed_at_utc=now)
-    assert cross.verdict == "untrusted"
-    assert "purpose_mismatch" in cross.reasons
-
-
-def test_signature_by_a_different_key_with_the_same_kid_fails(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    forger_seed, _ = K.new_signing_seed()
-    _register(reg, admin, "exe-1", "execution_authorization", pub)
-    _activate(reg, admin, "exe-1")
-    sig = _sign(forger_seed, "execution_authorization", b"x")
-    a = reg.assess(purpose="execution_authorization", kid="exe-1", payload=b"x", signature_b64=sig,
+def test_cross_purpose_signature_is_refused(world):
+    world.register_active("exe-a")
+    reg = world.reader()
+    sig = _sign(world.keys["exe-a"][0], "policy_bundle", b"m")  # signed for another purpose
+    a = reg.assess(purpose="policy_bundle", kid="exe-a", payload=b"m", signature_b64=sig,
                    signed_at_utc=datetime.now(UTC).isoformat())
-    assert not a.signature_valid
-    assert a.verdict == "untrusted"
+    assert a.verdict == "untrusted" and "purpose_mismatch" in a.reasons
 
 
-# --- rotation and historical evidence ---------------------------------------------------------------------------------
+def test_signature_by_a_different_key_with_the_same_kid_fails(world):
+    world.register_active("exe-a")
+    reg = world.reader()
+    sig = _sign(K.new_signing_seed()[0], "execution_authorization", b"m")
+    a = reg.assess(purpose="execution_authorization", kid="exe-a", payload=b"m", signature_b64=sig,
+                   signed_at_utc=datetime.now(UTC).isoformat())
+    assert not a.signature_valid and a.verdict == "untrusted"
 
 
-def test_ordinary_rotation_keeps_historical_evidence_trusted(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    seed_a, pub_a = K.new_signing_seed()
-    _, pub_b = K.new_signing_seed()
-    _register(reg, admin, "exe-a", "execution_authorization", pub_a)
-    _activate(reg, admin, "exe-a")
-    payload = b"authorization-1"
-    sig = _sign(seed_a, "execution_authorization", payload)
-    signed_at = datetime.now(UTC).isoformat()
-    _register(reg, admin, "exe-b", "execution_authorization", pub_b)
-    req = K.KeyRegistry.new_request(
-        op="rotate", actor="ops-admin", expected_version=reg.version,
-        kid="exe-a", purpose="execution_authorization", successor_kid="exe-b",
-    )
-    reg.rotate(K.KeyRegistry.sign_request(req, admin))
-    a = reg.assess(purpose="execution_authorization", kid="exe-a", payload=payload, signature_b64=sig,
-                   signed_at_utc=signed_at)
-    assert a.verdict == "trusted"
-    assert a.current_status == "retired"
-    assert a.accepted()
+# --- historical verdicts -------------------------------------------------------------------------------------------------
 
 
-def test_retired_key_does_not_vouch_for_a_signature_made_after_retirement(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    seed_a, pub_a = K.new_signing_seed()
-    _, pub_b = K.new_signing_seed()
-    _register(reg, admin, "exe-a", "execution_authorization", pub_a)
-    _activate(reg, admin, "exe-a")
-    _register(reg, admin, "exe-b", "execution_authorization", pub_b)
-    req = K.KeyRegistry.new_request(
-        op="rotate", actor="ops-admin", expected_version=reg.version,
-        kid="exe-a", purpose="execution_authorization", successor_kid="exe-b",
-    )
-    reg.rotate(K.KeyRegistry.sign_request(req, admin))
-    later = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
+def test_ordinary_rotation_keeps_historical_evidence_trusted(world):
+    world.register_active("exe-a")
+    t_active = datetime.now(UTC)
+    seed_a = world.keys["exe-a"][0]
+    world.rotate("exe-a", "exe-b")
+    reg = world.reader()
+    sig = _sign(seed_a, "execution_authorization", b"evidence")
+    a = reg.assess(purpose="execution_authorization", kid="exe-a", payload=b"evidence", signature_b64=sig,
+                   signed_at_utc=t_active.isoformat())
+    assert a.verdict == "trusted", a.reasons
+
+
+def test_retired_key_does_not_vouch_for_a_signature_made_after_retirement(world):
+    world.register_active("exe-a")
+    seed_a = world.keys["exe-a"][0]
+    world.rotate("exe-a", "exe-b")
+    later = datetime.now(UTC) + timedelta(seconds=1)
     sig = _sign(seed_a, "execution_authorization", b"late")
-    a = reg.assess(purpose="execution_authorization", kid="exe-a", payload=b"late", signature_b64=sig,
-                   signed_at_utc=later)
-    assert a.verdict == "untrusted"
-    assert "signed_after_retirement" in a.reasons
+    a = world.reader().assess(purpose="execution_authorization", kid="exe-a", payload=b"late", signature_b64=sig,
+                              signed_at_utc=later.isoformat(), now=later + timedelta(seconds=1))
+    assert a.verdict == "untrusted" and "signed_after_retirement" in a.reasons
 
 
-def test_signature_before_activation_is_not_trusted(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    seed, pub = K.new_signing_seed()
-    _register(reg, admin, "exe-a", "execution_authorization", pub)
-    before = (datetime.now(UTC) - timedelta(days=1)).isoformat()
-    _activate(reg, admin, "exe-a")
-    sig = _sign(seed, "execution_authorization", b"p")
-    a = reg.assess(purpose="execution_authorization", kid="exe-a", payload=b"p", signature_b64=sig, signed_at_utc=before)
-    assert a.verdict == "untrusted"
-    assert "not_yet_active_at_signing" in a.reasons
+def test_signature_before_activation_is_not_trusted(world):
+    before = datetime.now(UTC)
+    world.register_active("exe-a")
+    sig = _sign(world.keys["exe-a"][0], "execution_authorization", b"early")
+    a = world.reader().assess(purpose="execution_authorization", kid="exe-a", payload=b"early", signature_b64=sig,
+                              signed_at_utc=(before - timedelta(seconds=5)).isoformat())
+    assert a.verdict == "untrusted" and "not_yet_active_at_signing" in a.reasons
 
 
-def test_compromise_makes_pre_compromise_signatures_uncertain_not_trusted(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    seed, pub = K.new_signing_seed()
-    _register(reg, admin, "pol-1", "policy_bundle", pub)
-    _activate(reg, admin, "pol-1")
-    t0 = datetime.now(UTC)
-    sig = _sign(seed, "policy_bundle", b"bundle")
-    req = K.KeyRegistry.new_request(
-        op="revoke", actor="ops-admin", expected_version=reg.version, kid="pol-1",
-        reason="key material exposed", compromised_from_utc=(t0 + timedelta(minutes=10)).isoformat(),
-    )
-    reg.revoke(K.KeyRegistry.sign_request(req, admin))
-    a = reg.assess(purpose="policy_bundle", kid="pol-1", payload=b"bundle", signature_b64=sig,
-                   signed_at_utc=(t0 + timedelta(seconds=1)).isoformat())
-    assert a.verdict == "uncertain"
-    assert a.compromise_uncertainty
-    assert not a.accepted()
+def test_compromise_makes_pre_compromise_signatures_uncertain_not_trusted(world):
+    world.register_active("exe-a")
+    t_sign = datetime.now(UTC)
+    sig = _sign(world.keys["exe-a"][0], "execution_authorization", b"pre")
+    world.revoke("exe-a", compromised_from=(t_sign + timedelta(hours=1)).isoformat())
+    a = world.reader().assess(purpose="execution_authorization", kid="exe-a", payload=b"pre", signature_b64=sig,
+                              signed_at_utc=t_sign.isoformat())
+    assert a.verdict == "uncertain" and not a.accepted()
     assert a.accepted(accept_uncertain=True)
 
 
-def test_signature_after_compromise_is_untrusted(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    seed, pub = K.new_signing_seed()
-    _register(reg, admin, "pol-1", "policy_bundle", pub)
-    _activate(reg, admin, "pol-1")
-    t0 = datetime.now(UTC)
-    req = K.KeyRegistry.new_request(
-        op="revoke", actor="ops-admin", expected_version=reg.version, kid="pol-1",
-        reason="exposed", compromised_from_utc=(t0 - timedelta(minutes=1)).isoformat(),
-    )
-    reg.revoke(K.KeyRegistry.sign_request(req, admin))
-    sig = _sign(seed, "policy_bundle", b"b")
-    a = reg.assess(purpose="policy_bundle", kid="pol-1", payload=b"b", signature_b64=sig,
-                   signed_at_utc=t0.isoformat())
-    assert a.verdict == "untrusted"
-    assert "signed_after_compromise" in a.reasons
+def test_signature_after_compromise_is_untrusted(world):
+    world.register_active("exe-a")
+    compromised = datetime.now(UTC) - timedelta(minutes=1)
+    world.revoke("exe-a", compromised_from=compromised.isoformat())
+    sig = _sign(world.keys["exe-a"][0], "execution_authorization", b"post")
+    a = world.reader().assess(purpose="execution_authorization", kid="exe-a", payload=b"post", signature_b64=sig,
+                              signed_at_utc=datetime.now(UTC).isoformat())
+    assert a.verdict == "untrusted" and "signed_after_compromise" in a.reasons
 
 
-# --- operator authorization and replay ------------------------------------------------------------------------------
+# --- operators and requests ----------------------------------------------------------------------------------------------
 
 
-def test_operator_without_the_role_is_refused(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    viewer_seed, viewer_pub = K.new_signing_seed()
-    reg.state.operators["viewer"] = {"public_key_b64": viewer_pub, "roles": []}
-    _, pub = K.new_signing_seed()
-    req = K.KeyRegistry.new_request(
-        op="register", actor="viewer", expected_version=reg.version,
-        kid="k-v", purpose="policy_bundle", public_key_b64=pub, owner="x",
-    )
-    with pytest.raises(K.KeyRegistryError) as exc:
-        reg.register(K.KeyRegistry.sign_request(req, viewer_seed))
-    assert exc.value.code == "operator_not_authorized"
+def test_operator_without_the_role_is_refused(world):
+    world.install_operator("auditor", roles=("reconciler",))
+    world.register_active("exe-a")
+    assert _code(lambda: world.op("auditor", "revoke", kid="exe-a", reason="x",
+                                  compromised_from_utc="2026-11-26T00:00:00+00:00")) == "operator_not_authorized"
 
 
-def test_forged_operator_request_is_refused(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    impostor_seed, _ = K.new_signing_seed()
-    _, pub = K.new_signing_seed()
-    req = K.KeyRegistry.new_request(
-        op="register", actor="ops-admin", expected_version=reg.version,
-        kid="k-f", purpose="policy_bundle", public_key_b64=pub, owner="x",
-    )
-    with pytest.raises(K.KeyRegistryError) as exc:
-        reg.register(K.KeyRegistry.sign_request(req, impostor_seed))
-    assert exc.value.code == "request_signature_invalid"
+def test_forged_operator_request_is_refused(world):
+    world.register_active("exe-a")
+    other_seed, _ = K.new_signing_seed()
+    req = K.KeyRegistry.sign_request(K.KeyRegistry.new_request(
+        op="revoke", actor="ops-admin", expected_version=world.reg.version, kid="exe-a", reason="x",
+        compromised_from_utc="2026-11-26T00:00:00+00:00"), other_seed)
+    assert _code(lambda: world.reg.apply(req)) == "request_signature_invalid"
 
 
-def test_replayed_request_is_refused(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    req = K.KeyRegistry.new_request(
-        op="register", actor="ops-admin", expected_version=reg.version,
-        kid="k-r", purpose="policy_bundle", public_key_b64=pub, owner="x",
-    )
-    signed = K.KeyRegistry.sign_request(req, admin)
-    reg.register(signed)
-    with pytest.raises(K.KeyRegistryError):
-        reg.register(signed)
+def test_replayed_request_is_refused(world):
+    world.register_pending("exe-a")
+    world.reg.refresh()
+    req = K.KeyRegistry.sign_request(K.KeyRegistry.new_request(
+        op="activate", actor="ops-admin", expected_version=world.reg.version, kid="exe-a"), world.operators["ops-admin"])
+    world.reg.apply(req)
+    assert _code(lambda: world.reg.apply(req)) == "version_conflict"
 
 
-def test_stale_version_is_a_conflict_so_racing_changes_do_not_both_apply(tmpdir_path):
-    reg_a, admin = _bootstrap(tmpdir_path)
-    reg_b = K.KeyRegistry(tmpdir_path / "registry.json")
-    _, pub1 = K.new_signing_seed()
-    _, pub2 = K.new_signing_seed()
-    req1 = K.KeyRegistry.new_request(
-        op="register", actor="ops-admin", expected_version=reg_a.version,
-        kid="k-1", purpose="policy_bundle", public_key_b64=pub1, owner="x",
-    )
-    req2 = K.KeyRegistry.new_request(
-        op="register", actor="ops-admin", expected_version=reg_b.version,
-        kid="k-2", purpose="policy_bundle", public_key_b64=pub2, owner="x",
-    )
-    reg_a.register(K.KeyRegistry.sign_request(req1, admin))
-    with pytest.raises(K.KeyRegistryError) as exc:
-        reg_b.register(K.KeyRegistry.sign_request(req2, admin))
-    assert exc.value.code == "version_conflict"
-    fresh = K.KeyRegistry(tmpdir_path / "registry.json")
-    assert fresh.get("k-2") is None
+def test_stale_version_is_a_conflict_so_racing_changes_do_not_both_apply(world):
+    world.register_pending("exe-a")
+    world.register_pending("exe-b")
+    world.reg.refresh()
+    stale = K.KeyRegistry.sign_request(K.KeyRegistry.new_request(
+        op="activate", actor="ops-admin", expected_version=world.reg.version, kid="exe-a"), world.operators["ops-admin"])
+    world.op("ops-admin", "activate", kid="exe-b")
+    assert _code(lambda: world.reg.apply(stale)) == "version_conflict"
 
 
-def test_revoke_requires_a_reason(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    _register(reg, admin, "pol-1", "policy_bundle", pub)
-    _activate(reg, admin, "pol-1")
-    req = K.KeyRegistry.new_request(op="revoke", actor="ops-admin", expected_version=reg.version, kid="pol-1", reason="")
-    with pytest.raises(K.KeyRegistryError) as exc:
-        reg.revoke(K.KeyRegistry.sign_request(req, admin))
-    assert exc.value.code == "reason_required"
+def test_revoke_requires_a_reason(world):
+    world.register_active("exe-a")
+    assert _code(lambda: world.op("ops-admin", "revoke", kid="exe-a", reason="",
+                                  compromised_from_utc="2026-11-26T00:00:00+00:00")) == "reason_required"
 
 
-def test_rotation_does_not_reset_the_registry_version(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub_a = K.new_signing_seed()
-    _, pub_b = K.new_signing_seed()
-    _register(reg, admin, "exe-a", "execution_authorization", pub_a)
-    _activate(reg, admin, "exe-a")
-    _register(reg, admin, "exe-b", "execution_authorization", pub_b)
-    before = reg.version
-    req = K.KeyRegistry.new_request(
-        op="rotate", actor="ops-admin", expected_version=before,
-        kid="exe-a", purpose="execution_authorization", successor_kid="exe-b",
-    )
-    reg.rotate(K.KeyRegistry.sign_request(req, admin))
-    assert reg.version > before
-    assert reg.version == len(reg.events)
+def test_a_revoked_key_cannot_be_activated_again(world):
+    world.register_active("exe-a")
+    world.revoke("exe-a")
+    assert _code(lambda: world.op("ops-admin", "activate", kid="exe-a")) == "illegal_transition"
 
 
-# --- integrity ---------------------------------------------------------------------------------------------------
+# --- the snapshot is a view, never a source of decisions ------------------------------------------------------------------
 
 
-def test_altered_event_is_detected_on_load(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    _register(reg, admin, "k-t", "policy_bundle", pub)
-    log = tmpdir_path / "registry.json.events.jsonl"
-    lines = log.read_text().splitlines()
-    ev = json.loads(lines[1])
-    ev["detail"]["public_key_b64"] = K.new_signing_seed()[1]
-    lines[1] = json.dumps(ev, sort_keys=True)
-    log.write_text("\n".join(lines) + "\n")
-    with pytest.raises(K.KeyRegistryError) as exc:
-        K.KeyRegistry(tmpdir_path / "registry.json")
-    assert exc.value.code == "event_altered"
+def test_the_snapshot_file_is_never_read_for_decisions(world):
+    world.register_active("exe-a")
+    world.registry_path.write_text('{"version": 999, "keys": {}}', encoding="utf-8")
+    reg = world.reader()
+    assert reg.active_for("execution_authorization").kid == "exe-a"
+    assert reg.version == len(world.events())
 
 
-def test_removed_middle_event_breaks_the_chain(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    _register(reg, admin, "k-t", "policy_bundle", pub)
-    _, pub2 = K.new_signing_seed()
-    _register(reg, admin, "k-u", "policy_bundle", pub2)
-    log = tmpdir_path / "registry.json.events.jsonl"
-    lines = log.read_text().splitlines()
-    assert len(lines) == 3
-    log.write_text("\n".join([lines[0], lines[2]]) + "\n")
-    with pytest.raises(K.KeyRegistryError) as exc:
-        K.KeyRegistry(tmpdir_path / "registry.json")
-    assert exc.value.code in ("event_sequence_broken", "event_chain_broken")
-
-
-def test_truncated_tail_is_reported_through_the_snapshot_not_silently_accepted(tmpdir_path):
-    # A tail truncation leaves a valid, shorter chain, so the chain alone cannot detect it. The snapshot records the
-    # newer version, so the mismatch is reported. Full protection needs an external anchor (see the runbook).
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    _register(reg, admin, "k-t", "policy_bundle", pub)
-    log = tmpdir_path / "registry.json.events.jsonl"
-    lines = log.read_text().splitlines()
-    log.write_text("\n".join(lines[:-1]) + "\n")
-    loaded = K.KeyRegistry(tmpdir_path / "registry.json")
-    assert loaded.version == 1
-    assert loaded.snapshot_matches is False
-
-
-def test_snapshot_disagreement_is_reported_and_the_log_wins(tmpdir_path):
-    reg, admin = _bootstrap(tmpdir_path)
-    _, pub = K.new_signing_seed()
-    _register(reg, admin, "k-t", "policy_bundle", pub)
-    snap = tmpdir_path / "registry.json"
-    data = json.loads(snap.read_text())
-    data["keys"]["k-t"]["status"] = "active"
-    snap.write_text(json.dumps(data))
-    loaded = K.KeyRegistry(snap)
-    assert loaded.snapshot_matches is False
-    assert loaded.get("k-t").status == "pending"
+def test_verify_integrity_reports_the_anchored_head(world):
+    world.register_active("exe-a")
+    report = world.reader().verify_integrity()
+    assert report["anchored"] is True and report["events"] == len(world.events())
 
 
 # --- signers -----------------------------------------------------------------------------------------------------

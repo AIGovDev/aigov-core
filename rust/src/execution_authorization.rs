@@ -111,9 +111,10 @@ pub fn valid_key_id(raw: &str) -> bool {
 /// Where authorizations are signed from.
 ///
 /// `EnvKey`: one seed from the environment, as before. The key id is fixed for the life of the process.
-/// `Registry`: the trusted key registry decides the active key on every issuance and re-checks it before signing, so a
-/// rotation or revocation takes effect without a restart. The seed for each key is read from `<seeds_dir>/<kid>.seed`
-/// and must match the public key the registry holds for that key id.
+/// `Registry`: the trusted key registry decides the active key on every issuance and re-checks it before signing. The log is
+/// verified from genesis against the trust file and the PostgreSQL anchor on every decision, so a rotation or revocation
+/// takes effect without a restart, and a rolled-back or substituted registry is refused. The seed for each key is read
+/// from `<seeds_dir>/<kid>.seed` and must match the public key the verified registry holds for that key id.
 #[derive(Debug, Clone)]
 enum Mode {
     EnvKey(IssuerConfig),
@@ -124,6 +125,8 @@ enum Mode {
 pub struct RegistryIssuer {
     pub registry_path: std::path::PathBuf,
     pub seeds_dir: std::path::PathBuf,
+    pub trust: crate::key_registry::TrustConfig,
+    pub anchor: crate::key_registry::AnchorSource,
     pub executor_audience: String,
     pub ttl_seconds: i64,
 }
@@ -163,6 +166,8 @@ pub struct IssuerSettings {
     pub seed_hex: String,
     pub key_id: String,
     pub registry_path: String,
+    pub registry_trust_path: String,
+    pub registry_anchor_url: String,
     pub seeds_dir: String,
     pub audience: String,
     pub ttl_seconds: i64,
@@ -170,25 +175,28 @@ pub struct IssuerSettings {
 
 impl IssuerSettings {
     fn from_env() -> Result<Self, String> {
+        let anchor_url = env_value("AIGOV_KEY_REGISTRY_ANCHOR_URL", "GOVAI_KEY_REGISTRY_ANCHOR_URL");
+        let anchor_url = if anchor_url.is_empty() {
+            crate::aigov_env::database_url_optional().unwrap_or_default()
+        } else {
+            anchor_url
+        };
         Ok(Self {
-            seed_hex: env_value(
-                "AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX",
-                "GOVAI_EXECUTION_AUTH_SIGNING_SEED_HEX",
-            ),
+            seed_hex: env_value("AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX", "GOVAI_EXECUTION_AUTH_SIGNING_SEED_HEX"),
             key_id: env_value("AIGOV_EXECUTION_AUTH_KEY_ID", "GOVAI_EXECUTION_AUTH_KEY_ID"),
             registry_path: env_value("AIGOV_KEY_REGISTRY_PATH", "GOVAI_KEY_REGISTRY_PATH"),
-            seeds_dir: env_value(
-                "AIGOV_EXECUTION_AUTH_SIGNING_SEEDS_DIR",
-                "GOVAI_EXECUTION_AUTH_SIGNING_SEEDS_DIR",
-            ),
+            registry_trust_path: env_value("AIGOV_KEY_REGISTRY_TRUST_FILE", "GOVAI_KEY_REGISTRY_TRUST_FILE"),
+            registry_anchor_url: anchor_url,
+            seeds_dir: env_value("AIGOV_EXECUTION_AUTH_SIGNING_SEEDS_DIR", "GOVAI_EXECUTION_AUTH_SIGNING_SEEDS_DIR"),
             audience: read_audience(),
             ttl_seconds: read_ttl()?,
         })
     }
 }
 
-/// Choose the issuance mode from checked settings. Pure, so the configuration rules are testable. Both a seed and a
-/// registry is refused: that would make the signing key ambiguous.
+/// Choose the issuance mode from checked settings. Pure apart from reading the trust file, so the rules are testable.
+/// Both a seed and a registry is refused: that would make the signing key ambiguous. Registry mode needs the trust file,
+/// the anchor URL, and a seeds directory, and the trust file must load and validate now, not at the first request.
 fn mode_from_settings(s: &IssuerSettings) -> Result<Option<Mode>, String> {
     match (!s.seed_hex.is_empty(), !s.registry_path.is_empty()) {
         (true, true) => Err(
@@ -219,9 +227,16 @@ fn mode_from_settings(s: &IssuerSettings) -> Result<Option<Mode>, String> {
                     "AIGOV_EXECUTION_AUTH_SIGNING_SEEDS_DIR is required when AIGOV_KEY_REGISTRY_PATH is set".to_string(),
                 );
             }
+            if s.registry_trust_path.is_empty() {
+                return Err("AIGOV_KEY_REGISTRY_TRUST_FILE is required when AIGOV_KEY_REGISTRY_PATH is set".to_string());
+            }
+            let trust = crate::key_registry::TrustConfig::load(std::path::Path::new(&s.registry_trust_path))?;
+            let anchor = crate::key_registry::AnchorSource::postgres(&s.registry_anchor_url, &trust.registry_id)?;
             Ok(Some(Mode::Registry(RegistryIssuer {
                 registry_path: s.registry_path.clone().into(),
                 seeds_dir: s.seeds_dir.clone().into(),
+                trust,
+                anchor,
                 executor_audience: s.audience.clone(),
                 ttl_seconds: s.ttl_seconds,
             })))
@@ -264,20 +279,20 @@ pub struct Prepared {
     pub signing_kid: Option<String>,
 }
 
-/// The active authorization key in the registry, read from the authoritative log.
-fn active_registry_key(r: &RegistryIssuer) -> Result<crate::key_registry::RegistryKey, String> {
-    let view = crate::key_registry::load(&r.registry_path)?;
+/// The active authorization key in the verified registry.
+async fn active_registry_key(r: &RegistryIssuer) -> Result<crate::key_registry::RegistryKey, String> {
+    let view = crate::key_registry::load_verified(&r.registry_path, &r.trust, &r.anchor).await?;
     crate::key_registry::active_for(&view, crate::key_registry::PURPOSE_EXECUTION_AUTHORIZATION)
         .cloned()
         .ok_or_else(|| "no active execution authorization key in the trusted key registry".to_string())
 }
 
-/// The signing key for `kid`, provided the registry still lists it as active and the seed matches its public key.
-fn signing_key_for(r: &RegistryIssuer, kid: &str) -> Result<SigningKey, String> {
+/// The signing key for `kid`, provided the verified registry still lists it as active and the seed matches its public key.
+async fn signing_key_for(r: &RegistryIssuer, kid: &str) -> Result<SigningKey, String> {
     if !valid_key_id(kid) {
         return Err("registry key id is not valid".to_string());
     }
-    let view = crate::key_registry::load(&r.registry_path)?;
+    let view = crate::key_registry::load_verified(&r.registry_path, &r.trust, &r.anchor).await?;
     let rec = view
         .keys
         .get(kid)
@@ -359,15 +374,15 @@ pub fn approval_refusal(events: &[crate::schema::EvidenceEvent], call: &crate::s
 
 /// Reserve an authorization id and its times before the append. `Ok(None)` when issuance is disabled. An error means
 /// issuance is enabled but no usable key exists: the caller refuses the request before anything is appended.
-pub fn prepare(now: chrono::DateTime<chrono::Utc>) -> Result<Option<Prepared>, String> {
-    prepare_with(mode(), now)
+pub async fn prepare(now: chrono::DateTime<chrono::Utc>) -> Result<Option<Prepared>, String> {
+    prepare_with(mode(), now).await
 }
 
-fn prepare_with(mode: Option<&Mode>, now: chrono::DateTime<chrono::Utc>) -> Result<Option<Prepared>, String> {
+async fn prepare_with(mode: Option<&Mode>, now: chrono::DateTime<chrono::Utc>) -> Result<Option<Prepared>, String> {
     let (ttl, signing_kid) = match mode {
         None => return Ok(None),
         Some(Mode::EnvKey(cfg)) => (cfg.ttl_seconds, None),
-        Some(Mode::Registry(r)) => (r.ttl_seconds, Some(active_registry_key(r)?.kid)),
+        Some(Mode::Registry(r)) => (r.ttl_seconds, Some(active_registry_key(r).await?.kid)),
     };
     Ok(Some(Prepared {
         authorization_id: format!("auth_{}", uuid::Uuid::new_v4().simple()),
@@ -390,12 +405,13 @@ pub struct CallBinding<'a> {
 }
 
 /// Sign the authorization for a call that the ledger has accepted, so the authorization is bound to the ledger entry.
-/// In registry mode the key is re-checked here: a revocation or rotation since `prepare` refuses the signature.
-pub fn sign_prepared(prepared: &Prepared, call: &CallBinding<'_>) -> Result<Option<SignedAuthorization>, String> {
-    sign_prepared_with(mode(), prepared, call)
+/// In registry mode the registry is verified again and the key re-checked: a revocation or rotation since `prepare`, a
+/// rolled-back log, or a log that does not match the anchor refuses the signature.
+pub async fn sign_prepared(prepared: &Prepared, call: &CallBinding<'_>) -> Result<Option<SignedAuthorization>, String> {
+    sign_prepared_with(mode(), prepared, call).await
 }
 
-fn sign_prepared_with(
+async fn sign_prepared_with(
     mode: Option<&Mode>,
     prepared: &Prepared,
     call: &CallBinding<'_>,
@@ -425,12 +441,11 @@ fn sign_prepared_with(
                 .signing_kid
                 .clone()
                 .ok_or("prepared authorization carries no registry key")?;
-            let key = signing_key_for(r, &kid)?;
+            let key = signing_key_for(r, &kid).await?;
             Ok(Some(sign(&key, build(&r.executor_audience, Some(kid)))))
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -524,13 +539,17 @@ mod tests {
 #[cfg(test)]
 mod registry_issuance_tests {
     use super::*;
-    use crate::key_registry::test_support::append;
+    use crate::key_registry::test_support::{append_event, signed_request, trust_for};
+    use crate::key_registry::{events_path_for, AnchorSource, AnchorState, TrustConfig, GENESIS};
     use base64::engine::general_purpose::STANDARD;
-    use serde_json::json;
+    use ed25519_dalek::{SigningKey, VerifyingKey};
+    use serde_json::{json, Map, Value};
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    const TS: &str = "2026-11-26T10:00:00+00:00";
+    static NONCES: AtomicU64 = AtomicU64::new(1);
 
-    fn seed(byte: u8) -> SigningKey {
+    fn key(byte: u8) -> SigningKey {
         SigningKey::from_bytes(&[byte; 32])
     }
 
@@ -538,19 +557,69 @@ mod registry_issuance_tests {
         STANDARD.encode(k.verifying_key().to_bytes())
     }
 
-    /// A registry directory with a seed file per key. Returns the snapshot path and the seeds directory.
-    fn world(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
-        let snap = dir.join("registry.json");
-        let seeds = dir.join("seeds");
+    /// A request signed by `signer`, against the version the caller expects. Nonces are unique within the test process.
+    fn request(signer: &SigningKey, actor: &str, op: &str, expected: u64, fields: Value) -> Value {
+        let mut p = Map::new();
+        p.insert("op".into(), json!(op));
+        p.insert("actor".into(), json!(actor));
+        p.insert("expected_version".into(), json!(expected));
+        p.insert("nonce".into(), json!(format!("nonce-{:016}", NONCES.fetch_add(1, Ordering::SeqCst))));
+        p.insert("issued_at_utc".into(), json!(chrono::Utc::now().to_rfc3339()));
+        for (k, v) in fields.as_object().unwrap() {
+            p.insert(k.clone(), v.clone());
+        }
+        signed_request(signer, p)
+    }
+
+    fn events_of(snapshot: &Path) -> Vec<Value> {
+        std::fs::read_to_string(events_path_for(snapshot))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    fn set_anchor(anchor: &AnchorSource, state: Option<AnchorState>) {
+        if let AnchorSource::Memory(m) = anchor {
+            *m.lock().unwrap() = state;
+        }
+    }
+
+    /// The anchor records the log as it is now (what a successful commit does).
+    fn anchor_to_log(snapshot: &Path, anchor: &AnchorSource) {
+        let events = events_of(snapshot);
+        let head = events.last().map(|e| e["hash"].as_str().unwrap().to_string()).unwrap_or_else(|| GENESIS.into());
+        set_anchor(anchor, Some(AnchorState { seq: events.len() as u64, head_hash: head }));
+    }
+
+    /// Append a request and anchor the result, as a successful Python writer does.
+    fn commit(w: &World, req: Value) {
+        append_event(&w.snap, req);
+        anchor_to_log(&w.snap, &w.anchor);
+    }
+
+    struct World {
+        _dir: tempfile::TempDir,
+        snap: PathBuf,
+        seeds: PathBuf,
+        root: SigningKey,
+        trust: TrustConfig,
+        anchor: AnchorSource,
+    }
+
+    fn world() -> World {
+        let dir = tempfile::tempdir().unwrap();
+        let snap = dir.path().join("registry.json");
+        let seeds = dir.path().join("seeds");
         std::fs::create_dir_all(&seeds).unwrap();
-        (snap, seeds)
+        let root = key(1);
+        let trust = trust_for("root-a", &root);
+        let anchor = AnchorSource::memory(Some(AnchorState { seq: 0, head_hash: GENESIS.into() }));
+        World { _dir: dir, snap, seeds, root, trust, anchor }
     }
 
-    fn write_seed(seeds: &std::path::Path, kid: &str, key: &SigningKey, mode: u32) {
-        write_seed_text(seeds, kid, &STANDARD.encode(key.to_bytes()), mode);
-    }
-
-    fn write_seed_text(seeds: &std::path::Path, kid: &str, text: &str, mode: u32) {
+    fn write_seed_text(seeds: &Path, kid: &str, text: &str, mode: u32) {
         let path = seeds.join(format!("{kid}.seed"));
         std::fs::write(&path, text).unwrap();
         #[cfg(unix)]
@@ -562,169 +631,44 @@ mod registry_issuance_tests {
         let _ = mode;
     }
 
-    #[test]
-    fn a_seed_written_by_the_python_operator_tool_signs_under_its_registry_key() {
-        // Seed and public key from `aigov_py.trusted.keys.new_signing_seed()`: the cross-language seed format.
-        let seed_b64 = "j+FLD+n3Bk33xM/eBOK2jDgmw66Sm5gEIHSzcnVk3Zc=";
-        let pub_b64 = "yRdGm2ydP9LemYP/xO2gGmdsR6zoC8+GkNfC5Hlx8HM=";
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        append(&snap, "register", "exe-py", Some("execution_authorization"),
-            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64, "owner": "authz"}), TS);
-        append(&snap, "activate", "exe-py", None, json!({}), TS);
-        write_seed_text(&seeds, "exe-py", seed_b64, 0o600);
-        let m = Mode::Registry(issuer(snap, seeds));
-        let p = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
-        let signed = sign_prepared_with(Some(&m), &p, &call(&"a".repeat(64))).unwrap().unwrap();
-        let pk: [u8; 32] = STANDARD.decode(pub_b64).unwrap().try_into().unwrap();
-        assert!(verify_signature(&VerifyingKey::from_bytes(&pk).unwrap(), &signed).is_ok());
+    fn write_seed(seeds: &Path, kid: &str, k: &SigningKey) {
+        write_seed_text(seeds, kid, &STANDARD.encode(k.to_bytes()), 0o600);
     }
 
-    #[test]
-    fn a_hex_seed_file_is_refused_because_the_operator_format_is_base64() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(26);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed_text(&seeds, "exe-k1", &hex::encode(k1.to_bytes()), 0o600);
-        let err = signing_key_for(&issuer(snap, seeds), "exe-k1").unwrap_err();
-        assert!(err.contains("must be 32 bytes"), "{err}");
+    /// The root installs the operator, which then registers and activates a key for the purpose.
+    fn install_operator(w: &World, op: &SigningKey) {
+        let n = events_of(&w.snap).len() as u64;
+        commit(w, request(&w.root, "root-a", "operator_install", n, json!({
+            "identity": "ops-admin", "public_key_b64": pub_b64(op), "roles": ["keyadmin", "revoker"]})));
     }
 
-    fn register_active(snap: &std::path::Path, kid: &str, key: &SigningKey) {
-        append(
-            snap,
-            "register",
-            kid,
-            Some("execution_authorization"),
-            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64(key), "owner": "authz"}),
-            TS,
-        );
-        append(snap, "activate", kid, None, json!({}), TS);
+    fn register_active(w: &World, op: &SigningKey, kid: &str, k: &SigningKey) {
+        let n = events_of(&w.snap).len() as u64;
+        commit(w, request(op, "ops-admin", "register", n, json!({
+            "kid": kid, "purpose": "execution_authorization", "public_key_b64": pub_b64(k), "owner": "authz"})));
+        let n = events_of(&w.snap).len() as u64;
+        commit(w, request(op, "ops-admin", "activate", n, json!({"kid": kid})));
+        write_seed(&w.seeds, kid, k);
     }
 
-    fn issuer(snap: std::path::PathBuf, seeds: std::path::PathBuf) -> RegistryIssuer {
-        RegistryIssuer {
-            registry_path: snap,
-            seeds_dir: seeds,
+    fn issuer(w: &World) -> Mode {
+        Mode::Registry(RegistryIssuer {
+            registry_path: w.snap.clone(),
+            seeds_dir: w.seeds.clone(),
+            trust: w.trust.clone(),
+            anchor: w.anchor.clone(),
             executor_audience: "executor".into(),
             ttl_seconds: 60,
-        }
+        })
     }
 
-    fn prepared(kid: &str) -> Prepared {
+    fn prepared_stub() -> Prepared {
         Prepared {
             authorization_id: "auth_test".into(),
             issued_at: chrono::Utc::now(),
             expires_at: chrono::Utc::now() + chrono::Duration::seconds(60),
-            signing_kid: Some(kid.into()),
+            signing_kid: Some("exe-k1".into()),
         }
-    }
-
-    #[test]
-    fn the_active_key_signs_and_its_signature_verifies_under_the_registry_key() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(11);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-k1", &k1, 0o600);
-        let r = issuer(snap, seeds);
-        let key = signing_key_for(&r, "exe-k1").expect("active key signs");
-        let p = prepared("exe-k1");
-        let payload = AuthorizationPayload {
-            schema: SCHEMA.into(),
-            authorization_id: p.authorization_id.clone(),
-            run_id: "run-1".into(),
-            tool_name: "refund".into(),
-            args_binding_hash: "a".repeat(64),
-            policy_revision: "rev-1".into(),
-            executor_audience: "executor".into(),
-            approval_event_id: "human_approved-1".into(),
-            consequential_record_hash: "b".repeat(64),
-            issued_at_utc: p.issued_at.to_rfc3339(),
-            expires_at_utc: p.expires_at.to_rfc3339(),
-            signing_key_id: Some("exe-k1".into()),
-        };
-        let signed = sign(&key, payload);
-        assert_eq!(signed.payload.signing_key_id.as_deref(), Some("exe-k1"));
-        let verifying = VerifyingKey::from_bytes(&k1.verifying_key().to_bytes()).unwrap();
-        assert!(verify_signature(&verifying, &signed).is_ok());
-    }
-
-    #[test]
-    fn a_revoked_key_cannot_sign_even_though_its_seed_is_still_on_disk() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(12);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-k1", &k1, 0o600);
-        append(&snap, "revoke", "exe-k1", None, json!({"reason": "exposed", "compromised_from_utc": TS}), TS);
-        let err = signing_key_for(&issuer(snap, seeds), "exe-k1").unwrap_err();
-        assert!(err.contains("revoked"), "{err}");
-    }
-
-    #[test]
-    fn rotation_retires_the_old_key_at_once_and_activates_the_successor() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(13);
-        let k2 = seed(14);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-k1", &k1, 0o600);
-        write_seed(&seeds, "exe-k2", &k2, 0o600);
-        append(&snap, "register", "exe-k2", Some("execution_authorization"),
-            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64(&k2), "owner": "authz"}), TS);
-        append(&snap, "retire", "exe-k1", None, json!({"rotation_group": "g1"}), TS);
-        append(&snap, "activate", "exe-k2", None, json!({"rotation_group": "g1"}), TS);
-        let r = issuer(snap, seeds);
-        assert!(signing_key_for(&r, "exe-k1").unwrap_err().contains("retired"));
-        assert!(signing_key_for(&r, "exe-k2").is_ok());
-        assert_eq!(active_registry_key(&r).unwrap().kid, "exe-k2");
-    }
-
-    #[test]
-    fn a_seed_that_does_not_match_the_registry_key_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(15);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-k1", &seed(16), 0o600);
-        let err = signing_key_for(&issuer(snap, seeds), "exe-k1").unwrap_err();
-        assert!(err.contains("does not match"), "{err}");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_seed_readable_by_other_users_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(17);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-k1", &k1, 0o644);
-        let err = signing_key_for(&issuer(snap, seeds), "exe-k1").unwrap_err();
-        assert!(err.contains("owner"), "{err}");
-    }
-
-    #[test]
-    fn with_no_active_key_there_is_nothing_to_issue_from() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(18);
-        append(&snap, "register", "exe-k1", Some("execution_authorization"),
-            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64(&k1), "owner": "authz"}), TS);
-        let err = active_registry_key(&issuer(snap, seeds)).unwrap_err();
-        assert!(err.contains("no active execution authorization key"), "{err}");
-    }
-
-    #[test]
-    fn a_seed_file_for_an_unregistered_kid_is_not_used() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(19);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-ghost", &k1, 0o600);
-        let err = signing_key_for(&issuer(snap, seeds), "exe-ghost").unwrap_err();
-        assert!(err.contains("not in the registry"), "{err}");
     }
 
     fn call(hash: &str) -> CallBinding<'_> {
@@ -738,88 +682,210 @@ mod registry_issuance_tests {
         }
     }
 
-    #[test]
-    fn core_issues_from_the_active_key_and_the_signature_verifies() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(21);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-k1", &k1, 0o600);
-        let m = Mode::Registry(issuer(snap, seeds));
-        let p = prepare_with(Some(&m), chrono::Utc::now()).unwrap().expect("issuance enabled");
+    #[tokio::test]
+    async fn the_active_key_signs_and_its_signature_verifies_under_the_registry_key() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        let m = issuer(&w);
+        let p = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().expect("issuance enabled");
         assert_eq!(p.signing_kid.as_deref(), Some("exe-k1"));
-        let signed = sign_prepared_with(Some(&m), &p, &call(&"b".repeat(64)))
-            .unwrap()
-            .expect("signed");
+        let signed = sign_prepared_with(Some(&m), &p, &call(&"b".repeat(64))).await.unwrap().expect("signed");
         assert_eq!(signed.payload.signing_key_id.as_deref(), Some("exe-k1"));
-        assert_eq!(signed.payload.executor_audience, "executor");
         let v = VerifyingKey::from_bytes(&k1.verifying_key().to_bytes()).unwrap();
         assert!(verify_signature(&v, &signed).is_ok());
     }
 
-    #[test]
-    fn rotation_between_prepare_and_sign_refuses_the_retired_key_and_the_successor_signs() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(22);
-        let k2 = seed(23);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-k1", &k1, 0o600);
-        write_seed(&seeds, "exe-k2", &k2, 0o600);
-        let m = Mode::Registry(issuer(snap.clone(), seeds));
-        let old = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
-        // Rotation lands after the prepare, with no restart of Core.
-        append(&snap, "register", "exe-k2", Some("execution_authorization"),
-            json!({"purpose": "execution_authorization", "public_key_b64": pub_b64(&k2), "owner": "authz"}), TS);
-        append(&snap, "retire", "exe-k1", None, json!({"rotation_group": "g1"}), TS);
-        append(&snap, "activate", "exe-k2", None, json!({"rotation_group": "g1"}), TS);
-        let err = sign_prepared_with(Some(&m), &old, &call(&"c".repeat(64))).unwrap_err();
+    #[tokio::test]
+    async fn rotation_between_prepare_and_sign_refuses_the_retired_key_and_the_successor_signs() {
+        let w = world();
+        let (op, k1, k2) = (key(2), key(3), key(4));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        write_seed(&w.seeds, "exe-k2", &k2);
+        let n = events_of(&w.snap).len() as u64;
+        commit(&w, request(&op, "ops-admin", "register", n, json!({
+            "kid": "exe-k2", "purpose": "execution_authorization", "public_key_b64": pub_b64(&k2), "owner": "authz"})));
+        let m = issuer(&w);
+        let old = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().unwrap();
+        let n = events_of(&w.snap).len() as u64;
+        commit(&w, request(&op, "ops-admin", "rotate", n, json!({"kid": "exe-k1", "successor_kid": "exe-k2"})));
+        let err = sign_prepared_with(Some(&m), &old, &call(&"c".repeat(64))).await.unwrap_err();
         assert!(err.contains("retired"), "{err}");
-        let new = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
+        let new = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().unwrap();
         assert_eq!(new.signing_kid.as_deref(), Some("exe-k2"));
-        let signed = sign_prepared_with(Some(&m), &new, &call(&"c".repeat(64))).unwrap().unwrap();
+        let signed = sign_prepared_with(Some(&m), &new, &call(&"c".repeat(64))).await.unwrap().unwrap();
         assert_eq!(signed.payload.signing_key_id.as_deref(), Some("exe-k2"));
     }
 
-    #[test]
-    fn revocation_between_prepare_and_sign_refuses_the_signature() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let k1 = seed(24);
-        register_active(&snap, "exe-k1", &k1);
-        write_seed(&seeds, "exe-k1", &k1, 0o600);
-        let m = Mode::Registry(issuer(snap.clone(), seeds));
-        let p = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
-        append(&snap, "revoke", "exe-k1", None, json!({"reason": "exposed", "compromised_from_utc": TS}), TS);
-        let err = sign_prepared_with(Some(&m), &p, &call(&"d".repeat(64))).unwrap_err();
+    #[tokio::test]
+    async fn revocation_between_prepare_and_sign_refuses_the_signature() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        let m = issuer(&w);
+        let p = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().unwrap();
+        let n = events_of(&w.snap).len() as u64;
+        commit(&w, request(&op, "ops-admin", "revoke", n, json!({
+            "kid": "exe-k1", "reason": "exposed", "compromised_from_utc": "2026-11-26T00:00:00+00:00"})));
+        let err = sign_prepared_with(Some(&m), &p, &call(&"d".repeat(64))).await.unwrap_err();
         assert!(err.contains("revoked"), "{err}");
     }
 
-    #[test]
-    fn with_no_active_key_core_refuses_before_anything_is_appended() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        let m = Mode::Registry(issuer(snap, seeds));
-        let err = prepare_with(Some(&m), chrono::Utc::now()).unwrap_err();
+    #[tokio::test]
+    async fn with_no_active_key_core_refuses_before_anything_is_appended() {
+        let w = world();
+        install_operator(&w, &key(2));
+        let m = issuer(&w);
+        let err = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap_err();
         assert!(err.contains("no active execution authorization key"), "{err}");
     }
 
-    #[test]
-    fn an_active_key_without_its_seed_file_refuses_the_signature() {
-        let dir = tempfile::tempdir().unwrap();
-        let (snap, seeds) = world(dir.path());
-        register_active(&snap, "exe-k1", &seed(25));
-        let m = Mode::Registry(issuer(snap, seeds));
-        let p = prepare_with(Some(&m), chrono::Utc::now()).unwrap().unwrap();
-        let err = sign_prepared_with(Some(&m), &p, &call(&"e".repeat(64))).unwrap_err();
+    #[tokio::test]
+    async fn an_active_key_without_its_seed_file_refuses_the_signature() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        std::fs::remove_file(w.seeds.join("exe-k1.seed")).unwrap();
+        let m = issuer(&w);
+        let p = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().unwrap();
+        let err = sign_prepared_with(Some(&m), &p, &call(&"e".repeat(64))).await.unwrap_err();
         assert!(err.contains("seed file for exe-k1 is missing"), "{err}");
     }
 
-    #[test]
-    fn with_issuance_disabled_nothing_is_reserved_or_signed() {
-        let p = prepared("exe-k1");
-        assert!(prepare_with(None, chrono::Utc::now()).unwrap().is_none());
-        assert!(sign_prepared_with(None, &p, &call(&"f".repeat(64))).unwrap().is_none());
+    #[tokio::test]
+    async fn a_seed_that_does_not_match_the_registry_key_is_refused() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        write_seed(&w.seeds, "exe-k1", &key(9));
+        let m = issuer(&w);
+        let p = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().unwrap();
+        let err = sign_prepared_with(Some(&m), &p, &call(&"f".repeat(64))).await.unwrap_err();
+        assert!(err.contains("does not match"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_seed_readable_by_other_users_is_refused() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        write_seed_text(&w.seeds, "exe-k1", &STANDARD.encode(k1.to_bytes()), 0o644);
+        let m = issuer(&w);
+        let p = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().unwrap();
+        let err = sign_prepared_with(Some(&m), &p, &call(&"g".repeat(64))).await.unwrap_err();
+        assert!(err.contains("owner"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_hex_seed_file_is_refused_because_the_operator_format_is_base64() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        write_seed_text(&w.seeds, "exe-k1", &hex::encode(k1.to_bytes()), 0o600);
+        let m = issuer(&w);
+        let p = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().unwrap();
+        let err = sign_prepared_with(Some(&m), &p, &call(&"h".repeat(64))).await.unwrap_err();
+        assert!(err.contains("must be 32 bytes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_seed_written_by_the_python_operator_tool_signs_under_its_registry_key() {
+        // Seed and public key from `aigov_py.trusted.keys.new_signing_seed()`: the cross-language seed format.
+        let seed_b64 = "j+FLD+n3Bk33xM/eBOK2jDgmw66Sm5gEIHSzcnVk3Zc=";
+        let pub_b64 = "yRdGm2ydP9LemYP/xO2gGmdsR6zoC8+GkNfC5Hlx8HM=";
+        let w = world();
+        let op = key(2);
+        install_operator(&w, &op);
+        let n = events_of(&w.snap).len() as u64;
+        commit(&w, request(&op, "ops-admin", "register", n, json!({
+            "kid": "exe-py", "purpose": "execution_authorization", "public_key_b64": pub_b64, "owner": "authz"})));
+        let n = events_of(&w.snap).len() as u64;
+        commit(&w, request(&op, "ops-admin", "activate", n, json!({"kid": "exe-py"})));
+        write_seed_text(&w.seeds, "exe-py", seed_b64, 0o600);
+        let m = issuer(&w);
+        let p = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap().unwrap();
+        let signed = sign_prepared_with(Some(&m), &p, &call(&"a".repeat(64))).await.unwrap().unwrap();
+        let pk: [u8; 32] = STANDARD.decode(pub_b64).unwrap().try_into().unwrap();
+        assert!(verify_signature(&VerifyingKey::from_bytes(&pk).unwrap(), &signed).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_rolled_back_log_is_refused_while_the_anchor_remembers_the_later_state() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        let before_revoke = events_of(&w.snap);
+        let n = before_revoke.len() as u64;
+        commit(&w, request(&op, "ops-admin", "revoke", n, json!({
+            "kid": "exe-k1", "reason": "exposed", "compromised_from_utc": "2026-11-26T00:00:00+00:00"})));
+        // The writer restores the earlier log, so the revocation is gone from the file.
+        let text: String = before_revoke.iter().map(|e| format!("{}\n", serde_json::to_string(e).unwrap())).collect();
+        std::fs::write(events_path_for(&w.snap), text).unwrap();
+        let m = issuer(&w);
+        let err = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap_err();
+        assert!(err.starts_with("anchor_log_behind"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_substituted_log_with_a_different_head_is_refused() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        // Another registry, with its own root and its own key, built the same way.
+        let other = world();
+        let other_root = key(7);
+        let other_trust = trust_for("root-a", &other_root);
+        let _ = other_trust;
+        install_operator(&other, &key(8));
+        register_active(&other, &key(8), "exe-evil", &key(9));
+        std::fs::copy(events_path_for(&other.snap), events_path_for(&w.snap)).unwrap();
+        let m = issuer(&w);
+        let err = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap_err();
+        assert!(err.starts_with("anchor_head_mismatch") || err.starts_with("root_not_authorized"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_event_appended_but_not_anchored_is_refused_until_reconciled() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        // A crash between the append and the anchor commit: the log is one event ahead of the anchor.
+        let n = events_of(&w.snap).len() as u64;
+        append_event(&w.snap, request(&op, "ops-admin", "revoke", n, json!({
+            "kid": "exe-k1", "reason": "exposed", "compromised_from_utc": "2026-11-26T00:00:00+00:00"})));
+        let m = issuer(&w);
+        let err = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap_err();
+        assert!(err.starts_with("anchor_log_ahead"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_missing_anchor_refuses_every_decision() {
+        let w = world();
+        let (op, k1) = (key(2), key(3));
+        install_operator(&w, &op);
+        register_active(&w, &op, "exe-k1", &k1);
+        set_anchor(&w.anchor, None);
+        let m = issuer(&w);
+        let err = prepare_with(Some(&m), chrono::Utc::now()).await.unwrap_err();
+        assert!(err.starts_with("anchor_missing"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn with_issuance_disabled_nothing_is_reserved_or_signed() {
+        let p = prepared_stub();
+        assert!(prepare_with(None, chrono::Utc::now()).await.unwrap().is_none());
+        assert!(sign_prepared_with(None, &p, &call(&"f".repeat(64))).await.unwrap().is_none());
     }
 
     #[test]
@@ -837,24 +903,17 @@ mod registry_issuance_tests {
             ttl_seconds: 60,
             ..Default::default()
         };
-        let err = mode_from_settings(&s).unwrap_err();
-        assert!(err.contains("not both"), "{err}");
+        assert!(mode_from_settings(&s).unwrap_err().contains("not both"));
     }
 
     #[test]
     fn a_registry_without_a_seeds_directory_is_refused() {
-        let s = IssuerSettings {
-            registry_path: "/tmp/registry.json".into(),
-            audience: "executor".into(),
-            ttl_seconds: 60,
-            ..Default::default()
-        };
-        let err = mode_from_settings(&s).unwrap_err();
-        assert!(err.contains("SEEDS_DIR is required"), "{err}");
+        let s = IssuerSettings { registry_path: "/tmp/registry.json".into(), audience: "executor".into(), ttl_seconds: 60, ..Default::default() };
+        assert!(mode_from_settings(&s).unwrap_err().contains("SEEDS_DIR is required"));
     }
 
     #[test]
-    fn registry_settings_select_registry_mode() {
+    fn a_registry_without_a_trust_file_is_refused() {
         let s = IssuerSettings {
             registry_path: "/tmp/registry.json".into(),
             seeds_dir: "/tmp/seeds".into(),
@@ -862,21 +921,44 @@ mod registry_issuance_tests {
             ttl_seconds: 60,
             ..Default::default()
         };
-        assert!(matches!(mode_from_settings(&s), Ok(Some(Mode::Registry(_)))));
+        assert!(mode_from_settings(&s).unwrap_err().contains("TRUST_FILE is required"));
     }
 
     #[test]
-    fn seed_settings_with_an_invalid_key_id_are_refused_and_valid_ones_select_env_mode() {
-        let base = IssuerSettings {
-            seed_hex: hex::encode([12u8; 32]),
+    fn a_trust_file_readable_by_others_is_refused_at_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let trust = dir.path().join("trust.json");
+        let doc = json!({"schema": "govai.key_registry_trust.v1", "registry_id": "r",
+            "roots": [{"kid": "root-a", "public_key_b64": pub_b64(&key(1)), "status": "current"}]});
+        write_seed_text_path(&trust, &doc.to_string(), 0o644);
+        let s = IssuerSettings {
+            registry_path: "/tmp/registry.json".into(),
+            registry_trust_path: trust.to_string_lossy().into(),
+            registry_anchor_url: "postgresql://localhost/none".into(),
+            seeds_dir: "/tmp/seeds".into(),
             audience: "executor".into(),
             ttl_seconds: 60,
             ..Default::default()
         };
-        let bad = IssuerSettings { key_id: "bad id!".into(), ..base.clone() };
-        assert!(mode_from_settings(&bad).unwrap_err().contains("KEY_ID"));
-        let good = IssuerSettings { key_id: "exe-k1".into(), ..base };
-        assert!(matches!(mode_from_settings(&good), Ok(Some(Mode::EnvKey(_)))));
+        assert!(mode_from_settings(&s).unwrap_err().contains("trust_config_permissions"));
+    }
+
+    fn write_seed_text_path(path: &Path, text: &str, mode: u32) {
+        std::fs::write(path, text).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+        #[cfg(not(unix))]
+        let _ = mode;
+    }
+
+    #[test]
+    fn seed_settings_with_an_invalid_key_id_are_refused_and_valid_ones_select_env_mode() {
+        let base = IssuerSettings { seed_hex: hex::encode([12u8; 32]), audience: "executor".into(), ttl_seconds: 60, ..Default::default() };
+        assert!(mode_from_settings(&IssuerSettings { key_id: "bad id!".into(), ..base.clone() }).unwrap_err().contains("KEY_ID"));
+        assert!(matches!(mode_from_settings(&IssuerSettings { key_id: "exe-k1".into(), ..base }), Ok(Some(Mode::EnvKey(_)))));
     }
 }
 

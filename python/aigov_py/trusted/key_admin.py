@@ -1,22 +1,24 @@
-"""Operator tool for the trusted key registry.
+"""Operator tool for the trusted key registry (format v2).
 
-    python -m aigov_py.trusted.key_admin --registry PATH <command> ...
+    python -m aigov_py.trusted.key_admin --registry PATH --trust TRUST_FILE [--anchor-url URL] <command>
 
 Commands:
 
-    inspect                         show keys, statuses, operators, and the integrity check (read only)
-    new-operator-key OUT_SEED       create an operator key pair: writes the seed to OUT_SEED (0600), prints the public key
-    install-operator IDENTITY PUB ROLES
-                                    bootstrap the first operator (only while no operator exists)
-    request OP SEED_FILE [args]     build and sign a request, print it as JSON on stdout
-    apply REQUEST_FILE              apply a signed request file to the registry
+    inspect                          verify the log and the anchor; print keys, operators, and the head (read only)
+    anchor-init                      create the anchor row at genesis (once per registry; refused if it exists)
+    new-key OUT_SEED                 create an Ed25519 key pair: write the seed to OUT_SEED (0600), print the public key
+    request OP SEED_FILE [fields]    build and sign a request and print it as JSON on stdout (nothing is written)
+    apply REQUEST_FILE               verify and commit one signed request (log append, then anchor compare-and-swap)
+    reconcile                        anchor the one event a crash left between the append and the anchor commit
+    migrate-v1 --v1-registry PATH --root-kid K --root-seed-file F
+                                     import a v1 registry as one root-signed legacy_import event (explicit; see the runbook)
 
-Every state change is a signed request: an operator in the registry, the needed role, the current registry version, and a
-fresh nonce. Seeds are read from files and are never printed or logged. ``request`` prints the signed request; ``apply``
-checks it against the registry at the moment of application.
+Root operations (``operator_install``, ``operator_revoke``) are signed by a root key pinned in the trust file, never by a
+key from the registry. Other operations are signed by an operator in the registry with the needed role. Every request
+carries the expected version and a fresh nonce; a request applies once, to the version it names.
 
-Emergency revocation: ``request revoke SEED --kid K --reason TEXT --compromised-from ISO8601`` then ``apply``. Revocation
-is terminal and needs the ``revoker`` role. See docs/operations/key-management-runbook.md.
+Anchor: ``--anchor-url`` (or ``AIGOV_KEY_REGISTRY_ANCHOR_URL``, else ``GOVAI_DATABASE_URL``) selects the PostgreSQL anchor.
+The table is created by migration ``0004_key_registry_anchor``; ``anchor-init`` refuses if it is missing.
 """
 
 from __future__ import annotations
@@ -27,8 +29,10 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from aigov_py.trusted import keys as K
+from aigov_py.trusted.registry_anchor import AnchorError, PostgresAnchor
 
 
 def _load_seed(path: str) -> str:
@@ -43,31 +47,55 @@ def _write_secret(path: str, value: str) -> None:
         fh.write(value + "\n")
 
 
+def _anchor(args: argparse.Namespace, registry_id: str, factory: Any = None) -> object:
+    if factory is not None:  # tests only: an injected anchor with the same contract
+        return factory(registry_id)
+    url = args.anchor_url or os.environ.get("AIGOV_KEY_REGISTRY_ANCHOR_URL") or os.environ.get("GOVAI_DATABASE_URL") or ""
+    return PostgresAnchor(url, registry_id)
+
+
 def cmd_inspect(reg: K.KeyRegistry) -> dict:
     return {
         "version": reg.version,
-        "snapshot_matches_log": reg.snapshot_matches,
         "integrity": reg.verify_integrity(),
-        "operators": {k: sorted(v["roles"]) for k, v in reg.state.operators.items()},
-        "keys": {kid: {"purpose": r.purpose, "status": r.status, "owner": r.owner} for kid, r in reg.state.keys.items()},
+        "operators": {k: {"roles": sorted(v["roles"]), "status": v["status"]} for k, v in reg.state.operators.items()},
+        "keys": {kid: {"purpose": r.purpose, "status": r.status, "owner": r.owner, "provenance": r.provenance}
+                 for kid, r in reg.state.keys.items()},
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def _request_fields(args: argparse.Namespace) -> dict:
+    if args.op == "operator_install":
+        return {"identity": args.identity, "public_key_b64": args.public_key_b64, "roles": args.roles}
+    if args.op == "operator_revoke":
+        return {"identity": args.identity, "reason": args.reason or ""}
+    if args.op == "register":
+        return {"kid": args.kid, "purpose": args.purpose, "public_key_b64": args.public_key_b64,
+                "owner": args.owner or args.actor}
+    if args.op == "rotate":
+        return {"kid": args.kid, "successor_kid": args.successor_kid}
+    if args.op == "revoke":
+        return {"kid": args.kid, "reason": args.reason or "", "compromised_from_utc": args.compromised_from}
+    return {"kid": args.kid}
+
+
+def main(argv: list[str] | None = None, *, anchor_factory: Any = None) -> int:
     parser = argparse.ArgumentParser(prog="key_admin", description=__doc__.split("\n\n")[0])
     parser.add_argument("--registry", required=True, type=Path)
+    parser.add_argument("--trust", required=True, type=Path)
+    parser.add_argument("--anchor-url", default=None)
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("inspect")
-    p = sub.add_parser("new-operator-key")
+    sub.add_parser("anchor-init")
+    sub.add_parser("reconcile")
+    p = sub.add_parser("new-key")
     p.add_argument("out_seed")
-    p = sub.add_parser("install-operator")
-    p.add_argument("identity")
-    p.add_argument("public_key_b64")
-    p.add_argument("roles", nargs="+", choices=K.OPERATOR_ROLES)
     p = sub.add_parser("request")
     p.add_argument("op", choices=K.OPS)
     p.add_argument("seed_file")
-    p.add_argument("--actor", required=True)
+    p.add_argument("--actor", required=True, help="operator identity, or a root kid for root operations")
+    p.add_argument("--identity")
+    p.add_argument("--roles", nargs="+", choices=K.OPERATOR_ROLES)
     p.add_argument("--kid")
     p.add_argument("--purpose", choices=K.PURPOSES)
     p.add_argument("--public-key-b64")
@@ -77,57 +105,50 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--compromised-from")
     p = sub.add_parser("apply")
     p.add_argument("request_file")
+    p = sub.add_parser("migrate-v1")
+    p.add_argument("--v1-registry", required=True, type=Path)
+    p.add_argument("--root-kid", required=True)
+    p.add_argument("--root-seed-file", required=True)
     args = parser.parse_args(argv)
 
-    if args.cmd == "new-operator-key":
+    if args.cmd == "new-key":
         seed, pub = K.new_signing_seed()
         _write_secret(args.out_seed, seed)
         print(json.dumps({"seed_file": args.out_seed, "public_key_b64": pub}))
         return 0
 
-    reg = K.KeyRegistry(args.registry)
-
     try:
+        trust = K.TrustConfig.load(args.trust)
+        anchor = _anchor(args, trust.registry_id, anchor_factory)
+        if args.cmd == "anchor-init":
+            anchor.init()
+            print(json.dumps({"anchor": "initialized", "registry_id": trust.registry_id}))
+            return 0
+        if args.cmd == "migrate-v1":
+            result = K.migrate_v1(args.v1_registry, args.registry, trust=trust, anchor=anchor, root_kid=args.root_kid,
+                                  root_seed_b64=_load_seed(args.root_seed_file))
+            print(json.dumps({"migrated": True, **result}, sort_keys=True))
+            return 0
+        reg = K.KeyRegistry(args.registry, trust=trust, anchor=anchor)
         if args.cmd == "inspect":
             print(json.dumps(cmd_inspect(reg), indent=2, sort_keys=True))
             return 0
-        if args.cmd == "install-operator":
-            reg.install_operator(args.identity, args.public_key_b64, tuple(args.roles))
-            print(json.dumps({"installed": args.identity, "roles": args.roles, "version": reg.version}))
+        if args.cmd == "reconcile":
+            new = reg.reconcile()
+            print(json.dumps({"reconciled_to": new.seq, "head_hash": new.head_hash}))
             return 0
         if args.cmd == "request":
             seed = _load_seed(args.seed_file)
-            fields = {}
-            if args.op == "register":
-                fields = {"kid": args.kid, "purpose": args.purpose, "public_key_b64": args.public_key_b64,
-                          "owner": args.owner or args.actor}
-            elif args.op == "rotate":
-                fields = {"kid": args.kid, "purpose": args.purpose, "successor_kid": args.successor_kid}
-            elif args.op == "revoke":
-                fields = {"kid": args.kid, "reason": args.reason or "",
-                          "compromised_from_utc": args.compromised_from}
-            else:
-                fields = {"kid": args.kid}
-            payload_req = K.KeyRegistry.new_request(op=args.op, actor=args.actor, expected_version=reg.version, **fields)
-            print(json.dumps(K.KeyRegistry.sign_request(payload_req, seed), sort_keys=True))
+            payload = K.KeyRegistry.new_request(op=args.op, actor=args.actor, expected_version=reg.version,
+                                                **_request_fields(args))
+            print(json.dumps(K.KeyRegistry.sign_request(payload, seed), sort_keys=True))
             return 0
         if args.cmd == "apply":
             request = json.loads(Path(args.request_file).read_text(encoding="utf-8"))
-            op = request["payload"]["op"]
-            handlers = {
-                "register": reg.register,
-                "activate": reg.activate,
-                "retire": reg.retire,
-                "revoke": reg.revoke,
-                "rotate": reg.rotate,
-            }
-            if op not in handlers:
-                print(json.dumps({"error": "unsupported_op", "op": op}), file=sys.stderr)
-                return 2
-            handlers[op](request)
-            print(json.dumps({"applied": op, "version": reg.version}))
+            ev = reg.apply(request)
+            print(json.dumps({"applied": request["payload"]["op"], "seq": ev["seq"], "head_hash": ev["hash"]}))
             return 0
-    except K.KeyRegistryError as exc:
+    except (K.KeyRegistryError, AnchorError) as exc:
         print(json.dumps({"error": exc.code, "detail": exc.detail}), file=sys.stderr)
         return 3
     return 2

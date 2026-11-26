@@ -87,7 +87,7 @@ reachable from a successful startup; it was fixed anyway, because a future chang
 ## 5. Migration
 
 - Migration `0003_policy_revision_anchor` creates one table and touches no existing table. It is additive.
-- The expected migration count is 3. A database that has not applied it refuses startup with
+- The expected migration count is 4. A database that has not applied it refuses startup with
   `apply migrations (0003_policy_revision_anchor)`.
 - Apply it with the normal migration step (`GOVAI_AUTO_MIGRATE=true`, or your existing migration procedure), before
   starting the new version.

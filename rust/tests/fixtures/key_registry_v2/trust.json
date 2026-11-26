@@ -1,0 +1,11 @@
+{
+  "registry_id": "fixture-registry",
+  "roots": [
+    {
+      "kid": "root-a",
+      "public_key_b64": "xm0vyFPU2wYQ5xzctVzrEF7QoLaBvE0/c6DRgcDHZT8=",
+      "status": "current"
+    }
+  ],
+  "schema": "govai.key_registry_trust.v1"
+}

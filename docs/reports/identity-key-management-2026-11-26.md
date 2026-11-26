@@ -1,5 +1,7 @@
 # Identity and key management: audit report (2026-11-26)
 
+> Status: the registry was rewritten to format v2 in the follow-up section ("Follow-up: approval check, registry trust boundary, and verification"). Sections below that describe v1 (`eaab53f` and earlier) are the record of the first commits and are kept for that reason.
+
 Scope: production-oriented identity (OIDC/JWT) and key-lifecycle boundaries, implemented without external infrastructure. Branch
 `feat/identity-key-management`, from `origin/staging` at `3ef6a38` (PR #512 merged). Refs #501, which stays open: this change
 does not address the policy-revision anti-rollback review that #501 tracks.
@@ -82,10 +84,10 @@ approver. Staging cannot verify an identity token and cannot separate a human fr
 
 ## Limits and unverified assumptions
 
-- Core reads the registry's event log and signs with its active key. Its seed files are on the Core host. Compromise of that host
-  exposes the active seed until its key is revoked.
+- Core verifies the registry against the pinned trust file and the PostgreSQL anchor, and signs with the active key. Its seed files
+  are on the Core host. Compromise of that host exposes the active seed until its key is revoked.
+- Simultaneous compromise of PostgreSQL write access and the trust file is not detected by the registry (see the residual threat above).
 - No trusted timestamps. `issued_at_utc` and `signed_at_utc` are claims by the signer. Historical verdicts depend on them.
-- Truncation of the tail of the registry log is valid and shorter; detection depends on the snapshot or an off-host copy.
 - A known key stays usable from the cache until `GOVAI_OIDC_JWKS_MAX_AGE_SECONDS` expires, even if the IdP is down. The bound was
   not exercised live beyond the cache window.
 - The loopback test IdP stands in for a real provider. No claim is made about any hosted identity provider's claim conventions.
@@ -166,55 +168,110 @@ call. The positive path (an approval accepted and then used) is covered by the u
 approval path could not be reached through HTTP in this build. Tool calls that are not consequential still receive authorizations without
 an approval; that matches the existing `read_repo_metadata` test, and it was not changed.
 
-### Registry trust boundary (confirmed gap, not fixed; owner decision required)
+### Registry trust boundary (confirmed gap, now fixed in format v2)
 
-Replay in both Python (`KeyRegistry._replay`) and Rust (`key_registry::load`) checks the hash chain, sequence, and transitions. It does
-not verify operator signatures. The log keeps only `request_sha256`, so the signed requests cannot be re-checked from it. The first
-operator is trusted by whoever creates the file. Demonstrated with `scratchpad/trust/demo.py` (throwaway registries):
+Replay in both readers checked the hash chain and transitions but not signatures. The log kept only `request_sha256`, and the first
+operator was trusted by whoever created the file. Two attacks reproduced against commit `eaab53f`, as negative controls:
 
-- **Forgery.** A writer of `registry.json.events.jsonl` replaced the log with one they built (their own operator and key). The
-  registry reported their key as the only active one. The executor verifier accepted an authorization they signed.
-- **Rollback.** A writer truncated the log to a prefix from before a revocation. The revoked key became active again, the integrity
-  check passed, and the executor accepted an authorization signed by it. The Rust reader reported the same key as active on the
-  rolled-back log (probe, removed afterwards).
+- **Forgery.** A writer of the log replaced it with one built under their own operator and key. The registry showed their key as the
+  only active one, and the executor verifier accepted an authorization they signed.
+- **Rollback and resurrection.** A writer restored a prefix from before a revocation. The revoked key was active again, the integrity
+  check passed, and the executor accepted an authorization signed by it.
 
-These are not defects of the approval check or of the hash chain; they are a missing root of trust. A fix needs an owner decision that
-the implementation cannot make: where the root operator public key is pinned (outside the file, configured on Core and the executor),
-where the last-seen version and head hash are kept so that rollback is detected (a store the file writer cannot change), and a format
-change so that each lifecycle event carries and is verified against its signed request. Until then, treat the log file as a trust root:
-restrict write access to the Core and executor operators, and keep an off-host copy to compare against. Issue #501 remains open.
+Outputs: `scratchpad/trust/negative_control_eaab53f.txt` (Python executor), and the Rust reader probe on the same commit (forged log:
+`active key = Some("exe-evil")`; rolled-back log: `exe-real status = Some("active")`).
+
+The corrected design, in three parts:
+
+1. **Pinned roots.** The root operator public keys are in a trust file, owner-only, outside the registry directory. The registry cannot
+   supply, add, or replace a root. Roots install and remove operators and import legacy history. A retired root signs only up to a stated
+   sequence number. Core and the executor refuse a trust file that is readable by others.
+2. **Signed, versioned events.** Format `govai.key_event.v2`. Each event carries its signed request (`govai.key_op.v2`, domain
+   `govai.key_op.v2\0`), which holds the expected version and a nonce. Replay verifies every signature, the signer's authority, the
+   sequence, the hash chain, and every transition, from genesis. State is derived from signed fields only. Python writes; Rust and
+   Python both read. The fixture is `rust/tests/fixtures/key_registry_v2/`.
+3. **Independent anchor.** Table `key_registry_anchor` in PostgreSQL (migration `0004`), holding the sequence number and head hash of the
+   last committed event. Writers hold the row lock for the whole append and commit, and compare-and-swap the anchor. Readers require the
+   log to match the anchor exactly. Core reads the anchor on every issuance and before signing. The production anchor contains no DDL: the
+   `DDL` boundary test in the repository enforces this for shipped packages.
+
+Re-run of the same attacks against the corrected code (`scratchpad/trust/negative_control_v2.txt`):
+
+| Attack | Before (`eaab53f`) | After |
+|---|---|---|
+| A. Log replaced by one built under another root and key | Executor accepts `exe-evil` | Reader refuses: `request_signature_invalid` (the pinned root's signature does not verify) |
+| B. Rollback to before a revocation | Executor accepts `exe-real` after revocation | Reader refuses: `anchor_log_behind` |
+
+Test coverage of the requested matrix (all run; the counts are per file):
+
+- **Unauthorized insertion and substitution** (`test_registry_attacks.py`): a writer without an operator key; an operator signing a root
+  operation; a role without authority; a whole log from another registry; an equal-length log with a different head; a trust file readable
+  by others; a trust file with no current root. Rust: the same classes in `key_registry::tests`.
+- **Rollback and revoked-key resurrection**: a restored prefix; an anchor moved back (detected as log-ahead).
+- **Event deletion, modification, reordering, replay**: deletion (even with the anchor moved to match), modification with a recomputed hash
+  (the signature still fails), reordering, duplication, an old request after the version moved.
+- **Concurrent rotation and revocation**: six processes revoking the same key; a rotation racing a revocation. Exactly one applies. Run on SQLite
+  and on PostgreSQL (the row lock).
+- **Crash consistency**: a crash between append and commit leaves the log one event ahead; readers and writers refuse; `reconcile` anchors the
+  single event after verifying it; two events ahead is refused. PostgreSQL: the transaction rolls back, and the anchor does not move.
+- **Root and operator rotation**: root-a retired at a bound, root-b current; history verifies; root-a refused after its bound; a revoked
+  operator refused after revocation, its history still verifiable.
+- **Migration**: a v1 registry (built with the v1 writer from `eaab53f`, kept as a test-only module) migrates into one root-signed `legacy_import`
+  event. Imported keys are `legacy_v1_unsigned` and their verdicts are at most `uncertain`. An altered v1 log, an existing target, an initialized
+  anchor, a non-current root, and a v1 log used directly as v2 are all refused.
+- **Cross-language**: Python verifies the committed fixture and refuses altered and removed events; Rust verifies it, and refuses altered,
+  removed, deleted, duplicated, unauthorized, and wrong-root variants.
+- **Preservation**: executed authorizations stay consumed across key rotation and across a root rotation; outstanding authorizations survive
+  ordinary rotation; historical verdicts are unchanged for keys that were not imported.
+
+Defects found and fixed during the work:
+
+- The first Python readers and the first Rust reader read the log and the anchor without a consistent view. A commit landing between the two reads
+  looked like a rollback, and a concurrency test failed intermittently (`anchor_log_behind`). Readers now retry a mismatch a bounded number of times
+  and accept only a view in which the log and the anchor agree. A real mismatch still refuses after the last attempt.
+- The first version put `CREATE TABLE` and a SQLite anchor in shipped code. The repository's DDL-boundary test caught it. The anchor is now
+  PostgreSQL-only in shipped code, and the test anchor lives in the test directory.
+- Adding migration `0004` changed the expected migration count from 3 to 4 (`EXPECTED_SQLX_MIGRATION_COUNT`, and the two docs that state it).
+- The first PostgreSQL anchor reader used a 30-second pool acquire timeout. An unreachable anchor now refuses within 5 seconds.
+
+### Residual threat (not defended by this code)
+
+Simultaneous compromise of PostgreSQL write access and the trust file lets an attacker rewrite the anchor, replace the log, and substitute the
+roots. The registry code cannot detect that, because both independent checks are then under the attacker's control. The runbook lists the
+controls that have to sit outside this code: change control and an out-of-band hash of the trust file, restricted and audited write access to
+the anchor table, and an off-host copy of the head hash. A compromised current root can sign within its bound, so root rotation must be prompt.
+Operator and execution seeds are protected only by their owners. Timestamps are still signer claims.
 
 ### Python test counts and environment
 
 The active environment's editable `aigov_py` pointed at another checkout (`verdict-scratch/staging/python`, which has no `trusted`
 package). Child processes spawned by the lifecycle tests did not get the path from `conftest.py`, and 12 tests failed on that first run.
-The suite now runs in an isolated environment (`~/verdict-scratch/iso-venv`, a non-editable install of this tree, `.[dev,agent-reference,runs-postgres]`
-plus `openai-agents` and `cryptography`, as in the workflows), with no path tricks.
+The suite now runs in an isolated environment (`~/verdict-scratch/iso-venv`, created with the framework Python 3.12,
+a non-editable install of this tree with `.[dev,agent-reference,runs-postgres]` plus `openai-agents` and `cryptography`, as in the workflows).
+Tests run with the in-repo package on `PYTHONPATH` so child processes use the same code.
 
-| Configuration (this tree, final code) | passed | skipped | failed |
+Final counts on this tree (format v2):
+
+| Configuration | passed | skipped | failed |
 |---|---|---|---|
-| No `DATABASE_URL`, base extras | 1181 | 60 | 0 |
-| No `DATABASE_URL`, agent extras | 1214 | 77 | 0 |
-| PostgreSQL 18 (local), destructive flag, agent extras, release binary | 1251 | 40 | 0 |
+| PostgreSQL 18 (local, destructive flag, registry anchor URL), agent extras, release binary | 1295 | 40 | 0 |
 
-The earlier figure of 1222 passed and 61 skipped in the first report does not match any configuration reproduced here. The report did not
-record its environment. The skip reasons are environmental: 13 need the `aigov-core:test` image, and the rest need live identity
-providers, Sigstore, or a release binary. The 1214/77 figure from earlier in this session is the no-database run with agent extras.
+The skips are environmental: 13 need the `aigov-core:test` image, and the rest need live identity providers, Sigstore, or a bundle. Earlier
+counts in this report (1222 passed / 61 skipped in the first report, 1181 / 60 and 1214 / 77 without a database, 1251 / 40 before the registry
+rewrite) were taken under different configurations and are not comparable with this one.
 
 ### Verification on this tree
 
 - Rust `cargo test --locked -- --include-ignored` with PostgreSQL (`AIGOV_TEST_PG_ADMIN_URL`, `AIGOV_TEST_PG_AUTH=1`,
-  `AIGOV_PG_TEST_DESTRUCTIVE=1`, `GOVAI_DATABASE_URL`): 403 passed, 0 failed, 0 ignored.
-- Service-backed reference tests (`test_agent_reference_core.py`, 27) against the release Core started by
-  `examples/agent-reference/service/start_core_binary.py` on PostgreSQL: 27 passed. Note this configuration does not enable
-  execution authorization, so the approval check is not exercised by it.
-- Customer pilot (`examples/customer-pilot/pilot.py run`, synthetic data): all checks passed, no failing rows.
-- `make gate`, `governance-standards-check`, `reconstructible-demo-check`, `runtime-packaging-check`, `runtime-observability-check`,
-  `lineage-governance-check`, `core-runtime-examples-check`, `reference-integrations-check`: passed.
-- `scripts/downstream_python_consumption_smoke.py` and the portable-evidence tests: passed.
-- SDK wheel built (20 trusted modules; no example or reference code); installed into a clean venv; `trusted_sdk_downstream_check.py
-  offline`: passed.
-- Operator and identity local validation: the earlier live matrix stands. The approval fix does not change the OIDC path.
+  `AIGOV_PG_TEST_DESTRUCTIVE=1`, `AIGOV_TEST_REGISTRY_PG_URL`, `GOVAI_DATABASE_URL`): 413 passed, 0 failed.
+- Python: 1295 passed, 0 failed (above). Registry suites: attack matrix 22, key registry 25, operator CLI 9, authorization 9, rotation
+  regressions 6, migration 8, fixture 3, PostgreSQL anchor 7.
+- Service-backed reference tests (27) against a release Core on PostgreSQL: all passed.
+- Customer pilot (synthetic data, release Core on PostgreSQL): all checks passed, no failing rows.
+- `make gate` and the CI make targets (governance, reconstructible demo, packaging, observability, lineage, core-runtime examples, reference
+  integrations): passed. `scripts/downstream_python_consumption_smoke.py` and the portable-evidence tests: passed.
+- SDK wheel built (20 trusted modules; no example or reference code), installed into a clean venv, `trusted_sdk_downstream_check.py offline`:
+  passed.
 
 Disk space stayed above 40 GiB free during the run.
 
@@ -228,8 +285,8 @@ PostgreSQL-backed Rust and Python tests were run in the follow-up below.
 
 Passes when: OIDC/JWT verification enforces issuer, audience, signature, time claims, and algorithm; identity mapping cannot give a
 workload the approver role through any claim shape; API-key compatibility is preserved with no fallback after a JWT failure; key
-purposes are separated and the registry is append-only and detects edits that do not recompute the hash chain (a writer of the log
-file can rewrite or roll it back; see the follow-up); rotation keeps historical evidence verifiable and does not
+purposes are separated; the registry is verified against pinned roots and an independent anchor, so a writer of the log file can neither
+forge nor roll back history (see the follow-up, and its residual threat); rotation keeps historical evidence verifiable and does not
 reset replay or policy-revision state; compromise yields uncertain or untrusted verdicts and refuses outstanding authorizations;
 signers never expose key material and fail closed; and the local suites, the live checks, the negative controls against staging, and
 `make gate` pass. These hold for the tree recorded above, subject to CI on the final HEAD. The "Not run" suites above are not covered.
@@ -237,6 +294,7 @@ signers never expose key material and fail closed; and the local suites, the liv
 ## Human approval gate
 
 Not approved for production by this report. Before production use, the owners must: review the OIDC rule configuration for each
-tenant, since a mistake there is the main way to grant approval to a workload; choose an off-host copy of the registry log; decide
-the JWKS cache bounds for each identity provider; and run the "Not run" suites. Issue #501 remains open and is not addressed here. Merging into `staging` is a separate
+tenant, since a mistake there is the main way to grant approval to a workload; set up the controls for the residual threat (trust-file
+change control with an out-of-band hash, restricted and audited write access to the anchor, an off-host head-hash copy); decide the JWKS
+cache bounds for each identity provider; and run the "Not run" suites. Issue #501 remains open and is not addressed here. Merging into `staging` is a separate
 decision, and this report does not make it.

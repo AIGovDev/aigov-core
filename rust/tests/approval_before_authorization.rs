@@ -3,9 +3,11 @@
 //! built-in dev policy. That policy has no approval gate for `consequential_tool_call`, so the check that refuses these
 //! calls is Core's own, applied before anything is appended.
 //!
+//! The approval check applies in every issuance mode. These tests use the single-key mode, which needs no database; the
+//! registry mode is covered by the unit tests and by the PostgreSQL-backed test in `registry_anchor_pg.rs`.
+//!
 //! One process-wide configuration (issuance mode is a process global), so all scenarios run from one test function.
 
-use aigov_audit::key_registry::{event_hash, events_path_for, EVENT_SCHEMA};
 use aigov_audit::{build_app_state, build_router};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -18,47 +20,8 @@ use std::path::Path;
 use tower::ServiceExt;
 
 const KID: &str = "exe-approval-test";
-
-fn write_registry(snapshot: &Path, seeds: &Path) {
-    let seed = [41u8; 32];
-    let key = SigningKey::from_bytes(&seed);
-    let public = STANDARD.encode(key.verifying_key().to_bytes());
-    std::fs::write(seeds.join(format!("{KID}.seed")), STANDARD.encode(seed)).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(seeds.join(format!("{KID}.seed")), std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    let events = [
-        ("register", Some("execution_authorization"), json!({"purpose": "execution_authorization", "public_key_b64": public, "owner": "authz"})),
-        ("activate", None, json!({})),
-    ];
-    let mut out = String::new();
-    let mut prev: Option<String> = None;
-    for (i, (op, purpose, detail)) in events.into_iter().enumerate() {
-        let seq = (i + 1) as u64;
-        let mut body = Map::new();
-        body.insert("schema".into(), json!(EVENT_SCHEMA));
-        body.insert("seq".into(), json!(seq));
-        body.insert("version".into(), json!(seq));
-        body.insert("ts_utc".into(), json!("2026-11-26T10:00:00+00:00"));
-        body.insert("op".into(), json!(op));
-        body.insert("kid".into(), json!(KID));
-        body.insert("purpose".into(), purpose.map(|p| json!(p)).unwrap_or(Value::Null));
-        body.insert("actor".into(), json!("ops-admin"));
-        body.insert("group".into(), Value::Null);
-        body.insert("nonce".into(), Value::Null);
-        body.insert("request_sha256".into(), Value::Null);
-        body.insert("detail".into(), detail);
-        body.insert("prev_hash".into(), prev.clone().map(Value::String).unwrap_or(Value::Null));
-        let hash = event_hash(&body);
-        body.insert("hash".into(), json!(hash));
-        out.push_str(&serde_json::to_string(&Value::Object(body)).unwrap());
-        out.push('\n');
-        prev = Some(hash);
-    }
-    std::fs::write(events_path_for(snapshot), out).unwrap();
-}
+/// A throwaway 32-byte seed for the single-key issuance mode. Nothing in the repository depends on it.
+const SEED_HEX: &str = "2929292929292929292929292929292929292929292929292929292929292929";
 
 async fn post(app: &axum::Router, key: &str, body: &Value) -> (StatusCode, Value) {
     let req = Request::builder()
@@ -109,26 +72,22 @@ fn ledger_records(ledger: &Path) -> usize {
 async fn consequential_calls_without_a_real_approval_get_no_authorization() {
     let dir = tempfile::tempdir().unwrap();
     let ledger = dir.path().join("ledger");
-    let seeds = dir.path().join("seeds");
     std::fs::create_dir_all(&ledger).unwrap();
-    std::fs::create_dir_all(&seeds).unwrap();
-    let snapshot = dir.path().join("registry.json");
-    write_registry(&snapshot, &seeds);
 
-    // Issuance on (registry mode). The built-in dev policy is in force: no policy file.
-    for k in ["AIGOV_POLICY_FILE", "AIGOV_POLICY_DIR", "AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX", "GOVAI_EXECUTION_AUTH_SIGNING_SEED_HEX", "AIGOV_KEY_REGISTRY_PATH", "AIGOV_ENVIRONMENT", "AIGOV_ENV", "AIGOV_LEDGER_DIR"] {
+    // Issuance on (single-key mode). The built-in dev policy is in force: no policy file.
+    for k in ["AIGOV_POLICY_FILE", "AIGOV_POLICY_DIR", "AIGOV_KEY_REGISTRY_PATH", "GOVAI_KEY_REGISTRY_PATH", "AIGOV_ENVIRONMENT", "AIGOV_ENV", "AIGOV_LEDGER_DIR"] {
         std::env::remove_var(k);
     }
     std::env::set_var("GOVAI_ENV", "dev");
     std::env::set_var("GOVAI_LEDGER_DIR", &ledger);
+    std::env::set_var("GOVAI_EXECUTION_AUTH_SIGNING_SEED_HEX", SEED_HEX);
+    std::env::set_var("GOVAI_EXECUTION_AUTH_KEY_ID", KID);
     std::env::set_var("GOVAI_API_KEYS", "agent-k");
     std::env::set_var("GOVAI_API_KEYS_JSON", r#"{"agent-k":"t1"}"#);
     std::env::set_var(
         "GOVAI_PRINCIPALS_JSON",
         r#"{"agent-k":{"principal":"agent:approval-test","identity":"agent:approval-test","role":"agent","tenant":"t1"}}"#,
     );
-    std::env::set_var("GOVAI_KEY_REGISTRY_PATH", &snapshot);
-    std::env::set_var("GOVAI_EXECUTION_AUTH_SIGNING_SEEDS_DIR", &seeds);
 
     let state = build_app_state().await.expect("core state");
     let app = build_router(state);

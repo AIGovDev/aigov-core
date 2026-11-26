@@ -580,7 +580,7 @@ async fn post_evidence(
     let prepared = if principal.is_some()
         && (event.event_type == "consequential_tool_call" || event.event_type == "tool_call")
     {
-        match crate::execution_authorization::prepare(chrono::Utc::now()) {
+        match crate::execution_authorization::prepare(chrono::Utc::now()).await {
             Ok(p) => p,
             // Refused before the append: no record is written for a call that cannot be authorized.
             Err(e) => {
@@ -690,7 +690,7 @@ async fn post_evidence(
                     approval_event_id: str_field("approval_event_id"),
                     consequential_record_hash: &rec.record_hash,
                 };
-                match crate::execution_authorization::sign_prepared(prep, &call) {
+                match crate::execution_authorization::sign_prepared(prep, &call).await {
                     Ok(Some(signed)) => body["execution_authorization"] = json!(signed),
                     Ok(None) => {}
                     // The record is already appended, but no authorization is issued: the executor will not run the call.

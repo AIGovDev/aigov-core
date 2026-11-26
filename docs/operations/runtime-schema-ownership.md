@@ -4,8 +4,8 @@ Status: 2026-11-22. Scope: which code creates database tables, and how productio
 
 ## Production schema (Rust service)
 
-- Owner: versioned SQL migrations in `rust/migrations/` (`0001_core_api_key_usage.sql`, `0002_core_issued_api_keys.sql`), applied by sqlx (`Migrator`, `src/db.rs::run_sqlx_migrations`).
-- Tracking table: `_sqlx_migrations`. The service checks it with `verify_sqlx_migrations_complete` against `EXPECTED_SQLX_MIGRATION_COUNT = 2`.
+- Owner: versioned SQL migrations in `rust/migrations/` (`0001_core_api_key_usage.sql`, `0002_core_issued_api_keys.sql`, `0003_policy_revision_anchor.sql`, `0004_key_registry_anchor.sql`), applied by sqlx (`Migrator`, `src/db.rs::run_sqlx_migrations`).
+- Tracking table: `_sqlx_migrations`. The service checks it with `verify_sqlx_migrations_complete` against `EXPECTED_SQLX_MIGRATION_COUNT = 4`.
 - Apply paths:
   - out-of-band before deploy (preferred), or
   - at startup when `GOVAI_AUTO_MIGRATE=true`.
