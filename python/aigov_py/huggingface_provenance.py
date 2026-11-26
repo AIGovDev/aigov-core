@@ -5,6 +5,8 @@ Local digests describe downloaded bytes, not publisher authenticity.
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import re
 from pathlib import Path
 from typing import Any, Sequence
@@ -79,12 +81,40 @@ def capture_hub_provenance(
     except Exception:
         raise RuntimeError("Hub provenance capture failed") from None
 
+    card = getattr(pinned, "card_data", None)
+    license_id = getattr(card, "license", None)
+    # Only a constrained identifier is retained, never arbitrary card text.
+    if not isinstance(license_id, str) or not re.fullmatch(r"[A-Za-z0-9.+-]{1,80}", license_id):
+        license_id = None
     return {
         "schema": "aigov.huggingface.provenance.v1",
         "repo_id": repo_id,
         "repo_type": repo_type,
         "commit": commit,
-        "source_reported": {"private": getattr(pinned, "private", None)},
+        "source_reported": {"private": getattr(pinned, "private", None), "license": license_id},
         "artifact_verification": "locally_hashed_selected_files",
         "artifacts": artifacts,
     }
+
+
+def manifest_digest(manifest: dict[str, Any]) -> str:
+    """Digest for an externally trusted reference; not a signature."""
+    body = json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def verify_artifact(
+    manifest: dict[str, Any], filename: str, local_path: str | Path,
+    *, expected_manifest_sha256: str,
+) -> bool:
+    """Compare local bytes with a manifest bound to an external trusted digest."""
+    if manifest.get("schema") != "aigov.huggingface.provenance.v1":
+        return False
+    if not hmac.compare_digest(manifest_digest(manifest), expected_manifest_sha256):
+        return False
+    matches = [a for a in manifest["artifacts"] if a["path"] == filename]
+    if len(matches) != 1:
+        return False
+    digest, size = _digest(local_path)
+    return hmac.compare_digest(digest, matches[0]["sha256"]) and size == matches[0]["size_bytes"]
