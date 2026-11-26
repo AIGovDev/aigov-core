@@ -157,12 +157,26 @@ pub fn init_principals(_deployment_env: GovaiEnvironment) -> Result<(), String> 
     Ok(())
 }
 
-/// True when the principal layer is configured. Ingest then requires an authenticated principal.
+/// True when the principal layer is configured. Ingest then requires an authenticated principal. OIDC counts: with
+/// OIDC configured, every authenticated request carries a principal from the explicit OIDC rules.
 pub fn principals_configured() -> bool {
-    PRINCIPALS
-        .get()
-        .and_then(|c| c.read().ok().map(|g| !g.is_empty()))
-        .unwrap_or(false)
+    crate::oidc::configured()
+        || PRINCIPALS
+            .get()
+            .and_then(|c| c.read().ok().map(|g| !g.is_empty()))
+            .unwrap_or(false)
+}
+
+/// The authenticated principal for a request: the one the gate verified from an OIDC token, else the one configured
+/// for the API key. A verified OIDC principal is never looked up again as an API key.
+pub fn request_principal(
+    headers: &axum::http::HeaderMap,
+    extensions: &axum::http::Extensions,
+) -> Option<Principal> {
+    if let Some(crate::oidc::AuthenticatedPrincipal(p)) = extensions.get::<crate::oidc::AuthenticatedPrincipal>() {
+        return Some(p.clone());
+    }
+    crate::audit_api_key::raw_bearer_token(headers).and_then(principal_for_token)
 }
 
 /// The principal for a bearer token, if the token is configured.

@@ -282,6 +282,22 @@ prefixes and different databases can run on one machine without touching each ot
   `core_policy`, `service/trust_setup`). They delegate to the SDK. They add the reference's registry and benchmark sandbox
   and nothing else.
 
+## Keys, signers, and verification (identity and key-management change)
+
+- `aigov_py.trusted.keys.KeyRegistry` holds **public** keys with a purpose, an owner, and a status. Changes are signed
+  operator requests applied to an append-only, hash-chained log. Operator tool: `python -m aigov_py.trusted.key_admin`.
+- `aigov_py.trusted.signers`: `LocalEd25519Signer` (a seed held in memory, never returned or printed) and
+  `ExternalSigner` (a provider callable with a bounded timeout; every failure raises `SignerError`). Each signer has one
+  key id and one purpose, and it adds the purpose's domain prefix itself.
+- `verify_authorization_with_registry(signed, registry)` verifies an execution authorization against the registry. The
+  payload must carry `signing_key_id`. Refusals: `authorization_key_id_missing`, `authorization_key_untrusted` (revoked,
+  retired after signing, or uncertain), `authorization_key_purpose_mismatch`, `authorization_signature_invalid`.
+- `ExecutionExecutor(..., registry=...)` verifies authorizations through the registry. Without `registry`, the executor
+  verifies against `public_key_b64` exactly as before. Passing neither raises `ValueError`.
+
+Limits: Core does not read the registry; it signs with one configured key id. Trusted timestamps are not available, so
+historical verdicts rely on the signer's `issued_at_utc`. See `docs/operations/key-management-runbook.md`.
+
 ## Production limitations
 
 These hold for the SDK as shipped. They are the same limitations the reference and the pilot state.
