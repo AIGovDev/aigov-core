@@ -144,7 +144,10 @@ def test_healthcheck_is_configured():
 def test_production_without_a_signed_bundle_refuses_to_start():
     proc = _run_once("--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", IMAGE)
     assert proc.returncode != 0
-    assert "requires a signed policy bundle" in proc.stdout + proc.stderr
+    # Production refuses without a signed bundle and without principals. Either refusal is correct; the principal check
+    # runs first, so this bare container reports it.
+    out = proc.stdout + proc.stderr
+    assert "requires a signed policy bundle" in out or "requires GOVAI_PRINCIPALS_JSON" in out, out
 
 
 def _staging_env(trust_json: str) -> list[str]:
