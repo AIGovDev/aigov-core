@@ -18,6 +18,7 @@ use base64::Engine;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::canonical_json::canonical_json_bytes;
 
@@ -314,6 +315,46 @@ fn signing_key_for(r: &RegistryIssuer, kid: &str) -> Result<SigningKey, String> 
         return Err(format!("seed for {kid} does not match the registry public key"));
     }
     Ok(key)
+}
+
+/// Why Core must not issue an authorization for this consequential call, given the events of its run. `None` when the
+/// approval it names is a real, unrevoked, unused `human_approved` with decision `approve` for this same tool call. The
+/// reasons are stable codes. Core checks this under the ledger lock, so two calls cannot both use one approval.
+pub fn approval_refusal(events: &[crate::schema::EvidenceEvent], call: &crate::schema::EvidenceEvent) -> Option<&'static str> {
+    let text = |e: &crate::schema::EvidenceEvent, k: &str| -> String {
+        e.payload.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string()
+    };
+    let want = text(call, "approval_event_id");
+    if want.is_empty() {
+        return Some("approval_missing");
+    }
+    let Some(approval) = events
+        .iter()
+        .find(|e| e.event_type == "human_approved" && e.event_id == want)
+    else {
+        return Some("approval_not_found");
+    };
+    if events.iter().any(|e| {
+        e.event_type == "human_approval_revoked" && text(e, "approval_event_id") == want
+    }) {
+        return Some("approval_revoked");
+    }
+    if text(approval, "decision") != "approve" {
+        return Some("approval_not_approved");
+    }
+    let call_tool_call_id = text(call, "tool_call_id");
+    if call_tool_call_id.is_empty() || call_tool_call_id != text(approval, "tool_call_id") {
+        return Some("approval_tool_call_mismatch");
+    }
+    // Only calls consume an approval. A revocation names the approval too, but it does not use it.
+    if events.iter().any(|e| {
+        e.event_id != call.event_id
+            && e.event_type != "human_approval_revoked"
+            && text(e, "approval_event_id") == want
+    }) {
+        return Some("approval_already_consumed");
+    }
+    None
 }
 
 /// Reserve an authorization id and its times before the append. `Ok(None)` when issuance is disabled. An error means
@@ -836,5 +877,94 @@ mod registry_issuance_tests {
         assert!(mode_from_settings(&bad).unwrap_err().contains("KEY_ID"));
         let good = IssuerSettings { key_id: "exe-k1".into(), ..base };
         assert!(matches!(mode_from_settings(&good), Ok(Some(Mode::EnvKey(_)))));
+    }
+}
+
+#[cfg(test)]
+mod approval_tests {
+    use super::*;
+    use crate::schema::EvidenceEvent;
+    use serde_json::json;
+
+    fn ev(id: &str, ty: &str, payload: Value) -> EvidenceEvent {
+        EvidenceEvent {
+            event_id: id.into(),
+            event_type: ty.into(),
+            ts_utc: "2026-11-26T10:00:00Z".into(),
+            actor: "test".into(),
+            system: "test".into(),
+            run_id: "run-1".into(),
+            environment: None,
+            payload,
+            parent_run_id: None,
+            root_run_id: None,
+            delegated_from_event_id: None,
+            agent_id: None,
+            agent_role: None,
+            delegation_reason: None,
+        }
+    }
+
+    fn approval(decision: &str, tool_call_id: &str) -> EvidenceEvent {
+        ev("appr-1", "human_approved", json!({"decision": decision, "tool_call_id": tool_call_id}))
+    }
+
+    fn call(approval_id: &str, tool_call_id: &str) -> EvidenceEvent {
+        ev(
+            "call-1",
+            "consequential_tool_call",
+            json!({"tool_name": "create_file", "tool_call_id": tool_call_id, "approval_event_id": approval_id}),
+        )
+    }
+
+    #[test]
+    fn a_real_unused_approval_of_this_call_is_accepted() {
+        assert_eq!(approval_refusal(&[approval("approve", "tc-1")], &call("appr-1", "tc-1")), None);
+    }
+
+    #[test]
+    fn a_missing_or_blank_approval_id_is_refused() {
+        assert_eq!(approval_refusal(&[], &call("", "tc-1")), Some("approval_missing"));
+        assert_eq!(approval_refusal(&[], &call("   ", "tc-1")), Some("approval_missing"));
+    }
+
+    #[test]
+    fn an_approval_that_does_not_exist_is_refused() {
+        assert_eq!(approval_refusal(&[], &call("appr-1", "tc-1")), Some("approval_not_found"));
+        // A different event with the same shape is not an approval.
+        let other = ev("appr-1", "tool_call", json!({"decision": "approve", "tool_call_id": "tc-1"}));
+        assert_eq!(approval_refusal(&[other], &call("appr-1", "tc-1")), Some("approval_not_found"));
+    }
+
+    #[test]
+    fn a_rejection_is_not_an_approval() {
+        assert_eq!(approval_refusal(&[approval("reject", "tc-1")], &call("appr-1", "tc-1")), Some("approval_not_approved"));
+    }
+
+    #[test]
+    fn an_approval_for_another_tool_call_is_refused() {
+        assert_eq!(
+            approval_refusal(&[approval("approve", "tc-other")], &call("appr-1", "tc-1")),
+            Some("approval_tool_call_mismatch")
+        );
+        assert_eq!(approval_refusal(&[approval("approve", "")], &call("appr-1", "")), Some("approval_tool_call_mismatch"));
+    }
+
+    #[test]
+    fn a_revoked_approval_is_refused() {
+        let revoked = ev("rev-1", "human_approval_revoked", json!({"approval_event_id": "appr-1"}));
+        assert_eq!(
+            approval_refusal(&[approval("approve", "tc-1"), revoked], &call("appr-1", "tc-1")),
+            Some("approval_revoked")
+        );
+    }
+
+    #[test]
+    fn an_approval_already_used_by_another_call_is_refused() {
+        let earlier = ev("call-0", "consequential_tool_call", json!({"approval_event_id": "appr-1", "tool_call_id": "tc-1"}));
+        assert_eq!(
+            approval_refusal(&[approval("approve", "tc-1"), earlier], &call("appr-1", "tc-1")),
+            Some("approval_already_consumed")
+        );
     }
 }

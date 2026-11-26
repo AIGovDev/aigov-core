@@ -140,17 +140,96 @@ approval link, needs checking.
   run child processes that do not get the path from `conftest.py`.
 - `make gate`: passed.
 
+## Follow-up: approval check, registry trust boundary, and verification (2026-11-26)
+
+### Approval before authorization (confirmed defect, fixed)
+
+Core issued an execution authorization for a `consequential_tool_call` that named an approval which did not exist. Reproduced on the
+unfixed tree with `tests/approval_before_authorization.rs`: HTTP 200, a signed authorization, and a ledger record for an approval id
+that was never recorded.
+
+Where it applies. The built-in policy defines no approval gate for `consequential_tool_call`. Its `human_approved` rule accepts only
+`scope=model_promoted`, so a tool approval cannot be recorded under it. Under the built-in dev policy, unknown event types are
+allowed, so with issuance enabled the defect was reachable in dev. In staging and production the built-in policy rejects an undefined
+event type, so an unapproved call is refused there. A signed bundle that defines `consequential_tool_call` with the reference
+approval gate is also refused (`approval_not_found`). A bundle that defines the call without that gate would have been accepted by the
+policy and authorized by Core. That case was not configured anywhere in this repository, but nothing in Core prevented it.
+
+Fix. With issuance enabled, Core refuses a consequential call unless its `approval_event_id` names a `human_approved` event in the same
+run with decision `approve`, the same `tool_call_id`, that is not revoked and not already used by another call. The check runs under the
+ledger lock, before anything is appended, and returns `policy_violation ... reason=approval_*`. Deployments without an authorization key
+are unchanged. Tests: 7 unit tests on the rule (`approval_tests`), 3 policy tests for each environment and the reference bundle
+(`approval_policy_tests`), and the HTTP regression test, which passes on the fixed tree and fails on the unfixed one.
+
+Limit. Under the built-in dev policy, a tool approval cannot be recorded at all, so with issuance enabled dev refuses every consequential
+call. The positive path (an approval accepted and then used) is covered by the unit tests, not by HTTP, because the reference bundle's
+approval path could not be reached through HTTP in this build. Tool calls that are not consequential still receive authorizations without
+an approval; that matches the existing `read_repo_metadata` test, and it was not changed.
+
+### Registry trust boundary (confirmed gap, not fixed; owner decision required)
+
+Replay in both Python (`KeyRegistry._replay`) and Rust (`key_registry::load`) checks the hash chain, sequence, and transitions. It does
+not verify operator signatures. The log keeps only `request_sha256`, so the signed requests cannot be re-checked from it. The first
+operator is trusted by whoever creates the file. Demonstrated with `scratchpad/trust/demo.py` (throwaway registries):
+
+- **Forgery.** A writer of `registry.json.events.jsonl` replaced the log with one they built (their own operator and key). The
+  registry reported their key as the only active one. The executor verifier accepted an authorization they signed.
+- **Rollback.** A writer truncated the log to a prefix from before a revocation. The revoked key became active again, the integrity
+  check passed, and the executor accepted an authorization signed by it. The Rust reader reported the same key as active on the
+  rolled-back log (probe, removed afterwards).
+
+These are not defects of the approval check or of the hash chain; they are a missing root of trust. A fix needs an owner decision that
+the implementation cannot make: where the root operator public key is pinned (outside the file, configured on Core and the executor),
+where the last-seen version and head hash are kept so that rollback is detected (a store the file writer cannot change), and a format
+change so that each lifecycle event carries and is verified against its signed request. Until then, treat the log file as a trust root:
+restrict write access to the Core and executor operators, and keep an off-host copy to compare against. Issue #501 remains open.
+
+### Python test counts and environment
+
+The active environment's editable `aigov_py` pointed at another checkout (`verdict-scratch/staging/python`, which has no `trusted`
+package). Child processes spawned by the lifecycle tests did not get the path from `conftest.py`, and 12 tests failed on that first run.
+The suite now runs in an isolated environment (`~/verdict-scratch/iso-venv`, a non-editable install of this tree, `.[dev,agent-reference,runs-postgres]`
+plus `openai-agents` and `cryptography`, as in the workflows), with no path tricks.
+
+| Configuration (this tree, final code) | passed | skipped | failed |
+|---|---|---|---|
+| No `DATABASE_URL`, base extras | 1181 | 60 | 0 |
+| No `DATABASE_URL`, agent extras | 1214 | 77 | 0 |
+| PostgreSQL 18 (local), destructive flag, agent extras, release binary | 1251 | 40 | 0 |
+
+The earlier figure of 1222 passed and 61 skipped in the first report does not match any configuration reproduced here. The report did not
+record its environment. The skip reasons are environmental: 13 need the `aigov-core:test` image, and the rest need live identity
+providers, Sigstore, or a release binary. The 1214/77 figure from earlier in this session is the no-database run with agent extras.
+
+### Verification on this tree
+
+- Rust `cargo test --locked -- --include-ignored` with PostgreSQL (`AIGOV_TEST_PG_ADMIN_URL`, `AIGOV_TEST_PG_AUTH=1`,
+  `AIGOV_PG_TEST_DESTRUCTIVE=1`, `GOVAI_DATABASE_URL`): 403 passed, 0 failed, 0 ignored.
+- Service-backed reference tests (`test_agent_reference_core.py`, 27) against the release Core started by
+  `examples/agent-reference/service/start_core_binary.py` on PostgreSQL: 27 passed. Note this configuration does not enable
+  execution authorization, so the approval check is not exercised by it.
+- Customer pilot (`examples/customer-pilot/pilot.py run`, synthetic data): all checks passed, no failing rows.
+- `make gate`, `governance-standards-check`, `reconstructible-demo-check`, `runtime-packaging-check`, `runtime-observability-check`,
+  `lineage-governance-check`, `core-runtime-examples-check`, `reference-integrations-check`: passed.
+- `scripts/downstream_python_consumption_smoke.py` and the portable-evidence tests: passed.
+- SDK wheel built (20 trusted modules; no example or reference code); installed into a clean venv; `trusted_sdk_downstream_check.py
+  offline`: passed.
+- Operator and identity local validation: the earlier live matrix stands. The approval fix does not change the OIDC path.
+
+Disk space stayed above 40 GiB free during the run.
+
 ## Not run in this change
 
-These suites were not run in this change, so they are not claimed as passing: Acme Finance validation, customer pilot end to end,
-reference-agent live tests, the container build and test, the SDK wheel check, the security harness, and the PostgreSQL-backed Rust
-tests (`policy_anchor_pg`, `db_issued_keys_pg`). Their results must come from CI on the final HEAD before merge.
+Not run, so not claimed as passing: Acme Finance validation, the container build and test (the `aigov-core:test` image is not built,
+so 13 Python tests skip), and the security harness. The customer pilot, the reference-agent live tests, the wheel check, and the
+PostgreSQL-backed Rust and Python tests were run in the follow-up below.
 
 ## Evaluation gate
 
 Passes when: OIDC/JWT verification enforces issuer, audience, signature, time claims, and algorithm; identity mapping cannot give a
 workload the approver role through any claim shape; API-key compatibility is preserved with no fallback after a JWT failure; key
-purposes are separated and the registry is append-only and tamper-evident; rotation keeps historical evidence verifiable and does not
+purposes are separated and the registry is append-only and detects edits that do not recompute the hash chain (a writer of the log
+file can rewrite or roll it back; see the follow-up); rotation keeps historical evidence verifiable and does not
 reset replay or policy-revision state; compromise yields uncertain or untrusted verdicts and refuses outstanding authorizations;
 signers never expose key material and fail closed; and the local suites, the live checks, the negative controls against staging, and
 `make gate` pass. These hold for the tree recorded above, subject to CI on the final HEAD. The "Not run" suites above are not covered.

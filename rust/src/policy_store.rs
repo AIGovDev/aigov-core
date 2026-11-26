@@ -790,3 +790,84 @@ mod tests {
         assert_eq!(err.code, "unknown_event_type");
     }
 }
+
+/// Which policies refuse a consequential call that names no approval. Core's own check is in
+/// `execution_authorization::approval_refusal` and the HTTP test in `tests/approval_before_authorization.rs`.
+#[cfg(test)]
+mod approval_policy_tests {
+    use super::*;
+    use crate::policy_engine::{enforce_ingest, LedgerView};
+
+    struct NoEvents;
+    impl LedgerView for NoEvents {
+        fn iter_events_for_run<'a>(
+            &'a self,
+            _run_id: &'a str,
+        ) -> Box<dyn Iterator<Item = EvidenceEvent> + 'a> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn call() -> EvidenceEvent {
+        EvidenceEvent {
+            event_id: "call-1".into(),
+            event_type: "consequential_tool_call".into(),
+            ts_utc: "2026-11-26T10:00:00Z".into(),
+            actor: "agent".into(),
+            system: "test".into(),
+            run_id: "run-1".into(),
+            environment: None,
+            payload: serde_json::json!({
+                "tool_name": "create_file",
+                "tool_call_id": "tc-1",
+                "approval_event_id": "appr-missing",
+                "args_binding_hash": "a".repeat(64),
+                "policy_revision": "rev-1",
+            }),
+            parent_run_id: None,
+            root_run_id: None,
+            delegated_from_event_id: None,
+            agent_id: None,
+            agent_role: None,
+            delegation_reason: None,
+        }
+    }
+
+    fn reference_bundle() -> GovaiPolicyV1 {
+        serde_json::from_str(include_str!(
+            "../../examples/agent-reference/policies/core_policy.unsigned.json"
+        ))
+        .expect("reference policy parses as govai.policy.v1")
+    }
+
+    #[test]
+    fn the_built_in_policy_refuses_consequential_calls_in_staging_and_prod_but_not_in_dev() {
+        let cfg = PolicyConfig::default();
+        let ledger = NoEvents;
+        // Staging and prod reject event types the policy does not define, so an unapproved call is refused there.
+        for env in [GovaiEnvironment::Staging, GovaiEnvironment::Prod] {
+            let p = runtime_policy_from_legacy(&cfg, env);
+            assert!(enforce_ingest(&p, &call(), &ledger).is_err(), "{env:?} accepted an undefined event type");
+        }
+        // Dev allows unknown event types and defines no approval gate. Core's own check is what refuses here.
+        let dev = runtime_policy_from_legacy(&cfg, GovaiEnvironment::Dev);
+        assert!(enforce_ingest(&dev, &call(), &ledger).is_ok());
+    }
+
+    #[test]
+    fn the_reference_bundle_refuses_a_call_that_names_no_real_approval() {
+        let p = load_bundle_doc(&reference_bundle()).expect("reference bundle loads");
+        let err = enforce_ingest(&p, &call(), &NoEvents).unwrap_err();
+        assert!(err.to_string().contains("approval_not_found"), "{err}");
+    }
+
+    #[test]
+    fn a_bundle_that_defines_the_call_without_the_approval_gate_is_accepted_by_policy_alone() {
+        // This is the case Core's own check exists for: the policy engine alone would let the call through.
+        let mut doc = reference_bundle();
+        let rule = doc.ingest_rules.event_types.get_mut("consequential_tool_call").expect("rule present");
+        rule.gates.retain(|g| g.get("type").and_then(|t| t.as_str()) != Some("requires_unconsumed_approval"));
+        let p = load_bundle_doc(&doc).expect("bundle loads");
+        assert!(enforce_ingest(&p, &call(), &NoEvents).is_ok());
+    }
+}

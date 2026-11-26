@@ -55,6 +55,10 @@ In registry mode:
   record stays in the ledger, no authorization is issued, and the call must not run. Resolve the key state and resubmit under a
   new event id.
 - Core decides from the event log only. It does not use the snapshot `registry.json`.
+- A consequential call is authorized only if its `approval_event_id` names a `human_approved` event with decision `approve`, in the same
+  run, for the same `tool_call_id`, that is not revoked and not already used by another call. Otherwise the call is refused with
+  `policy_violation ... reason=approval_*` before anything is appended. This applies whatever the policy says. With the built-in dev
+  policy, a tool approval cannot be recorded, so consequential calls are refused while issuance is enabled.
 
 ## Procedures
 
@@ -133,6 +137,10 @@ matches it. A snapshot mismatch is a signal to investigate, not a normal state.
   log, the registry cannot be verified and nothing should be trusted from it.
 - **Log altered or truncated.** The chain check refuses an altered or reordered log. A truncated tail is valid and shorter,
   so the chain alone cannot detect it; the snapshot mismatch reports it. Keep an off-host copy of the log to compare against.
+- **Log written by a party that can recompute the chain, or rolled back.** Not detected. Core and the executor replay the log without
+  verifying operator signatures and without a pinned root or head. A writer of the file can forge a key, or restore an earlier log
+  that un-revokes a key. Restrict write access to the registry file and treat it as a trust root until the owner decides on the pinned
+  root and head (see the audit report, follow-up section).
 - **Operator key lost.** An existing `keyadmin` installs a new operator through a signed request. If no `keyadmin` remains,
   the registry cannot be changed; restore from the last good backup and record the gap.
 

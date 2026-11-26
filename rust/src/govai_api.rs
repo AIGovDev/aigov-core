@@ -650,7 +650,16 @@ async fn post_evidence(
         let view = FileLedgerView::new(path);
         st.policy_store
             .enforce_ingest_for_request(&tenant_id, &event, &view)
-            .map_err(|v| v.to_string())
+            .map_err(|v| v.to_string())?;
+        // With issuance enabled, Core issues an authorization only for a consequential call that names a real approval,
+        // whatever the policy says. Checked under the lock, so two calls cannot both use one approval.
+        if prepared.is_some() && event.event_type == "consequential_tool_call" {
+            let events = collect_events_for_run(path, &event.run_id)?;
+            if let Some(reason) = crate::execution_authorization::approval_refusal(&events, &event) {
+                return Err(format!("policy_violation: a human approval is required reason={reason}"));
+            }
+        }
+        Ok(())
     };
     let append_result =
         match crate::audit_store::append_record_checked(&log_path, event.clone(), &locked_check) {
