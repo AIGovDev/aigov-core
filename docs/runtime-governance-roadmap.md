@@ -44,7 +44,7 @@ Evidence in the current tree:
 - **Invariants:** No side effect without a verified authorization and successful durable reservation; approval and authorization bind exact tool, run and normalized arguments; errors fail closed; a receipt is separate evidence and does not prove external truth.
 - **API / storage:** Reuses `/evidence`, authorization status, receipts and existing executor stores; this branch adds no Core endpoint or policy schema. MCP config requires separate agent/executor keys, pinned public key, audience and pre-migrated executor store.
 - **Compatibility:** Existing Core API and policy contracts remain unchanged. Real MCP writes now require trusted-execution configuration and a separately approved call; dry-run remains local.
-- **Threats:** Agent/executor credential compromise, forged/mismatched arguments, replay, revocation TOCTOU, local-store tampering, direct shell bypass and filesystem race.
+- **Threats:** Loss of agent/executor identity separation, altered arguments, duplicate execution, stale authorization, local-store tampering, direct shell bypass and filesystem race.
 - **Tests / benchmarks:** Mocked MCP denial, malformed config, signature handoff, replay/no-dispatch and binding tests plus existing trusted SDK/Rust adversarial suites. Add real Core MCP E2E and measure authorization/executor overhead at p50/p95/p99.
 - **Commercial value:** Brings existing preventive controls to a widely used agent tool protocol and produces reviewable approval/authorization/receipt evidence.
 - **Dependencies / risks:** Requires Core trusted-execution principals and signing configuration, an independent approver workflow and a migrated executor store. The current MCP process performs the file write locally; it is not a hardened sandbox.
