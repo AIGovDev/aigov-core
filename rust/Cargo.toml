@@ -13,6 +13,8 @@ categories = ["web-programming", "database"]
 # Default public core build excludes hosted SaaS, billing, Stripe, onboarding, and tenant console.
 default = []
 hosted-platform = []
+# Test-only crash points in the authorization issuance path. Never enabled by release builds or the Dockerfile.
+fault-injection = []
 
 [[bin]]
 name = "aigov_audit"

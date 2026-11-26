@@ -38,8 +38,11 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-BIN = Path(os.environ.get("AIGOV_TEST_CORE_BIN", REPO / "rust" / "target" / "release" / "aigov_audit"))
-pytestmark = pytest.mark.skipif(not BIN.exists(), reason=f"Core binary not built: {BIN}")
+# The crash points exist only in a build with the `fault-injection` feature:
+#   cargo build --release --features fault-injection --bin aigov_audit --target-dir <dir>
+BIN = Path(os.environ.get("AIGOV_TEST_FAULT_CORE_BIN", REPO / "target-fault" / "release" / "aigov_audit"))
+PLAIN_BIN = Path(os.environ.get("AIGOV_TEST_CORE_BIN", REPO / "rust" / "target" / "release" / "aigov_audit"))
+pytestmark = pytest.mark.skipif(not BIN.exists(), reason=f"fault-injection Core binary not built: {BIN}")
 
 KEY = "crash-agent-key"
 TENANT = "t1"
@@ -262,3 +265,17 @@ def test_crash_after_the_record_is_committed_never_delivers_an_authorization_and
     records = [json.loads(r["event_json"]) for r in _records(scenario["ledger"])]
     assert len([r for r in records if r["event_type"] == "consequential_tool_call"]) == 1
     _verify_chain(scenario["ledger"])
+
+
+def test_a_normal_build_refuses_to_start_with_fault_injection_set(tmp_path):
+    """Production-exclusion control: the plain build has no crash points and refuses the fault-injection variables."""
+    if not PLAIN_BIN.exists():
+        pytest.skip(f"plain Core binary not built: {PLAIN_BIN}")
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    env = {"PATH": os.environ.get("PATH", ""), "AIGOV_ENVIRONMENT": "dev", "GOVAI_LEDGER_DIR": str(ledger),
+           "GOVAI_API_KEYS": KEY, "GOVAI_API_KEYS_JSON": json.dumps({KEY: TENANT}),
+           "AIGOV_BIND": f"127.0.0.1:{free_port()}", "AIGOV_TEST_FAULT_INJECTION": "1", "AIGOV_TEST_CRASH_AT": "before_append"}
+    r = subprocess.run([str(PLAIN_BIN)], env=env, capture_output=True, timeout=30)
+    assert r.returncode != 0, "a normal build started with fault-injection variables set"
+    assert b"fault-injection" in r.stderr or b"fault-injection" in r.stdout
