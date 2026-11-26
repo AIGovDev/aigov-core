@@ -48,7 +48,8 @@ from .authorization import (
 )
 from .core import CoreClient
 from .lifecycle import State
-from .store import ExecutionStore
+from .store import ExecutionStore, ExecutionStoreError
+from .store_pg import StaleWorker, StoreUnavailable
 from .tools import ToolSpec, args_binding_hash
 
 Performer = Callable[[str, dict[str, Any], str], dict[str, Any]]
@@ -253,17 +254,21 @@ class Executor:
 
             self._point("before_reserve")
             now = _now_iso(self._clock)
-            reserved = self._store.reserve(
-                authorization_id=auth_id,
-                run_id=run_id,
-                tool=tool,
-                digest=digest,
-                signed_json=json.dumps(signed, sort_keys=True),
-                now=now,
-                executor_identity=self._audience,
-                policy_revision=payload.get("policy_revision"),
-                arguments_json=canonical_dumps(arguments),
-            )
+            try:
+                reserved = self._store.reserve(
+                    authorization_id=auth_id,
+                    run_id=run_id,
+                    tool=tool,
+                    digest=digest,
+                    signed_json=json.dumps(signed, sort_keys=True),
+                    now=now,
+                    executor_identity=self._audience,
+                    policy_revision=payload.get("policy_revision"),
+                    arguments_json=canonical_dumps(arguments),
+                )
+            except ExecutionStoreError as exc:
+                # Nothing was started, so nothing can have run. Refuse; the caller may retry later.
+                raise Refused("store_unavailable") from exc
             if not reserved:
                 raise Refused("authorization_replayed")
             self._emit("reserved", authorization_id=auth_id, run_id=run_id, tool=tool)
@@ -290,6 +295,20 @@ class Executor:
                 timings=timings,
             )
 
+    def _mark_unknown_or_yield(self, auth_id: str, fence: int | None, *, reason: str) -> None:
+        """Record outcome_unknown for this claim. If the claim was already taken over, the state is already decided
+        elsewhere; nothing is written and nothing is retried."""
+        try:
+            self._store.mark_outcome_unknown(
+                authorization_id=auth_id,
+                now=_now_iso(self._clock),
+                actor=self._worker,
+                reason=reason,
+                fence=fence,
+            )
+        except (StaleWorker, StoreUnavailable):
+            self._emit("stale_worker", authorization_id=auth_id, reason="outcome_unknown_not_recorded")
+
     def _perform(
         self,
         *,
@@ -305,13 +324,20 @@ class Executor:
         lease_until = (
             datetime.fromisoformat(now) + timedelta(seconds=self._lease)
         ).isoformat()
-        if not self._store.start(
-            authorization_id=auth_id,
-            worker_id=self._worker,
-            now=now,
-            lease_until=lease_until,
-        ):
+        try:
+            claim = self._store.start(
+                authorization_id=auth_id,
+                worker_id=self._worker,
+                now=now,
+                lease_until=lease_until,
+                lease_seconds=self._lease,
+            )
+        except ExecutionStoreError as exc:
+            raise Refused("store_unavailable") from exc
+        if not claim:
             raise Refused("authorization_already_started")
+        # A shared store returns a fence token (an int); the SQLite store returns True and needs none.
+        fence = claim if isinstance(claim, int) and not isinstance(claim, bool) else None
         self._emit("started", authorization_id=auth_id, lease_until_utc=lease_until)
         self._point("before_side_effect")
 
@@ -322,10 +348,9 @@ class Executor:
         try:
             result = self._performer(tool, arguments, exec_id)
         except Exception as exc:  # noqa: BLE001 - any failure after the side effect began is an unknown outcome
-            self._store.mark_outcome_unknown(
-                authorization_id=auth_id,
-                now=_now_iso(self._clock),
-                actor=self._worker,
+            self._mark_unknown_or_yield(
+                auth_id,
+                fence,
                 reason=f"performer raised {type(exc).__name__}",
             )
             self._emit(
@@ -346,14 +371,38 @@ class Executor:
         outcome = "success" if ok else f"blocked:{result.get('blocked_reason')}"
         res_digest = result_digest(result.get("data")) if ok else None
         receipt_id = "execution_receipt-" + uuid.uuid4().hex
-        self._store.finish(
-            authorization_id=auth_id,
-            outcome=outcome,
-            result_digest_hex=res_digest,
-            now=_now_iso(self._clock),
-            receipt_event_id=receipt_id,
-            worker_id=self._worker,
-        )
+        try:
+            self._store.finish(
+                authorization_id=auth_id,
+                outcome=outcome,
+                result_digest_hex=res_digest,
+                now=_now_iso(self._clock),
+                receipt_event_id=receipt_id,
+                worker_id=self._worker,
+                fence=fence,
+            )
+        except StaleWorker:
+            # The claim was taken over (recovery moved the execution on). This worker's outcome is not recorded, so no
+            # receipt is sent for it. The execution is reconciled from its recorded state, never re-run.
+            self._emit("stale_worker", authorization_id=auth_id, outcome=outcome)
+            return ExecutionOutcome(
+                executed=False,
+                reason="stale_worker",
+                authorization_id=auth_id,
+                timings=timings,
+                execution_state=None,
+            )
+        except StoreUnavailable:
+            # The side effect ran, but its outcome could not be written. The row stays started under its lease, and
+            # recovery marks it outcome_unknown when the lease passes. No receipt is sent, and nothing is retried here.
+            self._emit("outcome_not_recorded", authorization_id=auth_id, outcome=outcome)
+            return ExecutionOutcome(
+                executed=False,
+                reason="outcome_not_recorded",
+                authorization_id=auth_id,
+                timings=timings,
+                execution_state=None,
+            )
         self._emit("finished", authorization_id=auth_id, outcome=outcome)
         self._point("after_finish_before_receipt_submit")
 
@@ -374,15 +423,20 @@ class Executor:
     # --- receipts ----------------------------------------------------------------------------------------------------
 
     def _deliver_receipt(self, run_id: str, auth_id: str) -> bool:
-        """Evidence delivery only. See ``receipts.deliver``."""
-        return receipts.deliver(
-            self._store,
-            self._core,
-            run_id=run_id,
-            authorization_id=auth_id,
-            clock=self._clock,
-            fault=self._fault_point_only,
-        )
+        """Evidence delivery only. See ``receipts.deliver``. A store failure leaves the receipt pending; it never repeats the
+        action, and a later recovery delivers it again."""
+        try:
+            return receipts.deliver(
+                self._store,
+                self._core,
+                run_id=run_id,
+                authorization_id=auth_id,
+                clock=self._clock,
+                fault=self._fault_point_only,
+            )
+        except ExecutionStoreError:
+            self._emit("receipt_pending", authorization_id=auth_id, reason="store_unavailable")
+            return False
 
     def _fault_point_only(self, name: str) -> None:
         self._point(name)
@@ -539,6 +593,17 @@ class Executor:
 
     def _recover_started(self, row: dict[str, Any]) -> RecoveryAction:
         auth_id, run_id = row["authorization_id"], row["run_id"]
+        if hasattr(self._store, "expire_lease"):
+            # A shared store decides expiry on the database clock. Worker clocks are not consulted.
+            expired = self._store.expire_lease(
+                authorization_id=auth_id, now=_now_iso(self._clock), actor=self._worker
+            )
+            if not expired:
+                return RecoveryAction(auth_id, run_id, row["state"], "skipped", "a live worker holds this execution")
+            return RecoveryAction(
+                auth_id, run_id, row["state"], "outcome_unknown",
+                "side effect may have run; reconciliation required; not retried",
+            )
         lease = row["lease_until_utc"]
         if lease and _parse(lease) > datetime.fromtimestamp(self._clock(), tz=UTC):
             return RecoveryAction(

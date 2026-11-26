@@ -353,7 +353,13 @@ class ExecutionStore:
         return True
 
     def start(
-        self, *, authorization_id: str, worker_id: str, now: str, lease_until: str
+        self,
+        *,
+        authorization_id: str,
+        worker_id: str,
+        now: str,
+        lease_until: str,
+        lease_seconds: int | None = None,
     ) -> bool:
         """Mark the side effect as about to begin. Written before the performer is called. Returns False if another
         worker has already started this execution, or it is not reserved."""
@@ -393,6 +399,7 @@ class ExecutionStore:
         now: str,
         receipt_event_id: str,
         worker_id: str = "executor",
+        fence: int | None = None,
     ) -> None:
         """Record the definite outcome and the pending receipt, in one transaction."""
         with self._txn() as c:
@@ -428,7 +435,13 @@ class ExecutionStore:
             )
 
     def mark_outcome_unknown(
-        self, *, authorization_id: str, now: str, actor: str, reason: str
+        self,
+        *,
+        authorization_id: str,
+        now: str,
+        actor: str,
+        reason: str,
+        fence: int | None = None,
     ) -> None:
         """A started execution has no definite outcome. Records outcome_unknown, then reconciliation_required.
         Neither state is ever retried automatically."""
