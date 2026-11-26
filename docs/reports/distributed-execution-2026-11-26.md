@@ -198,3 +198,21 @@ is **not** supported, and the SQLite executor store across hosts is not supporte
 - No Railway change, no remote service, database, volume, credential, or paid API was created. The local PostgreSQL cluster and
   the Docker containers were created on this machine for testing, and were removed or stopped at the end.
 - Issue #501 remains open.
+
+## Evaluation gate
+
+Passes when, on the exact final HEAD: the cross-process ledger lock holds under two Core processes (two-instance test passes and the
+chain verifies); the PostgreSQL executor store enforces one execution per authorization across tenants, fenced finishes, database-clock
+expiry, append-only history, and tenant isolation (store and distributed suites pass); the clock-skew control is refused on this branch
+and reproduces on the staging tree; the local security harness, Acme Finance validation, reference suites, customer pilot, container
+tests, SDK wheel downstream check, and `make gate` pass; and the benchmark shows zero unauthorized executions, zero duplicate executions,
+and zero false denials at 1, 2, 4, and 8 workers. Status: the local evaluation passes on this tree. The hosted checks on the PR's head are
+the separate gate and are recorded on the PR, not here.
+
+## Human approval gate
+
+Not approved for production by this report. The owners must decide, before any production use: the ledger topology (one host per
+tenant, or a database-backed ledger; several Core instances across hosts are not supported today); whether the downstream systems provide
+a deduplication key and reconciliation evidence; the lease length per tool; who runs `migrate-pg` and in what order; and the residual
+threats in the runbook. Issue #501 remains open. Merging into `staging` is a separate decision, and this report does not make it.
+

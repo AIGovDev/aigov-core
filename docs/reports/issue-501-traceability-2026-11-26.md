@@ -57,3 +57,15 @@ and debug builds of this branch.
 Issue #501 is not closed by this branch. The open items are R5 (replay of a valid bundle at its own revision), D2 (authenticating
 the file record), A2 (two real volumes or hosts), the owner decisions D1 and D3, and the policy-reset rule in D4. A product decision
 on multi-host ledgers is also needed; the ledger is host-local.
+
+## Evaluation gate
+
+Issue #501 can be closed only when every row above is PASS, with no FAIL and no NOT VERIFIED, and the owner has recorded the decisions
+D1 to D4. Today the matrix has FAIL rows (R5, D2, and the ledger across hosts in R4 and A1) and NOT VERIFIED rows. The gate is not met.
+
+## Human approval gate
+
+Closing #501 is an owner decision and is not made by this branch. The owner must record D1 to D4, decide R5 (bundle replay at the same
+revision), decide D2 (authentication of the file record), and either run a two-host test (A2) or accept the single-host scope in writing.
+Until then the issue stays open.
+
