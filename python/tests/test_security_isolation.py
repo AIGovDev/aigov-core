@@ -41,6 +41,32 @@ TENANT_B = "sec-test-tenant-b"
 # Shared HTTP helper (copied from test_staging_e2e.py for standalone use)
 # ---------------------------------------------------------------------------
 
+
+# Staging requires principals: pipeline evidence uses the agent key, human decisions use the approver key.
+APPROVER_EVENT_TYPES = {"human_approved", "human_approval_revoked", "risk_reviewed"}
+
+
+def _key_for(api_key: str, body) -> str:
+    if api_key and isinstance(body, dict) and body.get("event_type") in APPROVER_EVENT_TYPES:
+        return api_key + "-approver"
+    return api_key
+
+
+def _principals_env(keys_by_tenant: dict[str, str]) -> dict[str, str]:
+    """Agent, approver, and executor principals for each tenant key, as GOVAI_API_KEYS / GOVAI_PRINCIPALS_JSON."""
+    api_keys, keys_json, principals = [], {}, {}
+    for key, tenant in keys_by_tenant.items():
+        for role, k in (("agent", key), ("approver", key + "-approver"), ("executor", key + "-executor")):
+            api_keys.append(k)
+            keys_json[k] = tenant
+            principals[k] = {"principal": f"{role}:{tenant}", "identity": f"{role}:{tenant}", "role": role, "tenant": tenant}
+    return {
+        "GOVAI_API_KEYS": ",".join(api_keys),
+        "GOVAI_API_KEYS_JSON": json.dumps(keys_json),
+        "GOVAI_PRINCIPALS_JSON": json.dumps(principals),
+    }
+
+
 def _http(
     url: str,
     *,
@@ -52,7 +78,7 @@ def _http(
     data = json.dumps(body).encode() if body else None
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+        headers["Authorization"] = f"Bearer {_key_for(api_key, body)}"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -133,13 +159,10 @@ def two_tenant_server() -> Generator[tuple[str, str, str], None, None]:
     key_b = secrets.token_urlsafe(24)
 
     env = os.environ.copy()
+    env.update(_principals_env({key_a: TENANT_A, key_b: TENANT_B}))
     env.update({
         "GOVAI_LEDGER_DIR": ledger,
-        "GOVAI_API_KEYS_JSON": json.dumps({
-            key_a: TENANT_A,
-            key_b: TENANT_B,
-        }),
-        "GOVAI_API_KEYS": f"{key_a},{key_b}",
+
         "AIGOV_ENVIRONMENT": "staging",
         # Test fixture uses the repository policy file (unsigned). Production must sign policy verdicts.
         "AIGOV_ALLOW_UNSIGNED_POLICY_FILE": "1",

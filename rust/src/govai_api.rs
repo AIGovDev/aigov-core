@@ -205,13 +205,15 @@ pub async fn build_app_state() -> Result<AppState, String> {
     crate::immutable_store::ImmutableStoreConfig::from_env()?.validate_startup_wiring(deployment_env)?;
     crate::audit_api_key::init_api_key_tenant_map(deployment_env)?;
     validate_api_key_allowlist_consistency(deployment_env)?;
-    // Production authenticates every write. Without configured principals, any holder of a key can post any event type,
-    // including approvals and receipts, so production refuses to start in that configuration.
-    if matches!(deployment_env, GovaiEnvironment::Prod) && !crate::principals::principals_configured() {
-        return Err(
-            "Invalid configuration: production requires GOVAI_PRINCIPALS_JSON (or OIDC); refusing to start without authenticated principals"
-                .to_string(),
-        );
+    // Staging and production authenticate every write. Without configured principals, any holder of a key can post any
+    // event type, including approvals and execution evidence, so these environments refuse to start in that configuration.
+    if matches!(deployment_env, GovaiEnvironment::Prod | GovaiEnvironment::Staging)
+        && !crate::principals::principals_configured()
+    {
+        return Err(format!(
+            "Invalid configuration: {} requires GOVAI_PRINCIPALS_JSON (or OIDC); refusing to start without authenticated principals",
+            deployment_env.as_str()
+        ));
     }
     crate::oidc::init_from_env(deployment_env)?;
     crate::execution_authorization::init_from_env()?;
@@ -585,7 +587,7 @@ async fn post_evidence(
             )
             .into_response();
         }
-        if !crate::principals::allowed_event_types(p.role).contains(&event.event_type.as_str()) {
+        if !crate::principals::role_may_post(p.role, event.event_type.as_str()) {
             return api_error(
                 StatusCode::FORBIDDEN,
                 "ROLE_NOT_PERMITTED",

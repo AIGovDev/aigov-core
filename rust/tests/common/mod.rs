@@ -150,8 +150,8 @@ pub fn environment_env(ledger: &Path, bundle: Option<&Path>, environment: &str) 
         r#"{"tb-key-admin":"tenant-tb","tb-key-approver":"tenant-tb"}"#,
     );
     std::env::set_var("AIGOV_ENVIRONMENT", environment);
-    if environment == "prod" {
-        // Production refuses to start without authenticated principals, so the test key is configured as one.
+    if environment == "prod" || environment == "staging" {
+        // Staging and production refuse to start without authenticated principals, so the test keys are configured as them.
         std::env::set_var(
             "GOVAI_PRINCIPALS_JSON",
             r#"{"tb-key-admin":{"principal":"agent:tb","identity":"agent:tb","role":"agent","tenant":"tenant-tb"},"tb-key-approver":{"principal":"approver:tb","identity":"approver:tb","role":"approver","tenant":"tenant-tb"}}"#,
