@@ -90,7 +90,7 @@ Covered by item 9. Acceptance also requires the owner to confirm that this candi
 
 - **Recommended.** One tenant, one ledger host, one Core process per tenant, production mode, principals configured, PostgreSQL 16 or 18 for the anchors and the executor store, executors as library code in the customer's workers.
 - **Not supported.** Several Core processes on different hosts sharing a ledger directory. SQLite executor stores on more than one host. Dev mode in any deployment.
-- **Consequences.** The measured single-process ceiling is about 40 to 48 evidence writes per second on the test workstation (see `docs/evidence/release-candidate/load/`). Pilot volume must stay under the measured ceiling of the chosen hardware, or the pilot needs a second tenant host, which is a new decision.
+- **Consequences.** The measured single-process ceiling is about 37 to 49 evidence writes per second on the test workstation (see `docs/evidence/release-candidate/load/`). Pilot volume must stay under the measured ceiling of the chosen hardware, or the pilot needs a second tenant host, which is a new decision.
 - **Acceptance criteria.** The owner confirms the topology, the expected write rate, and that the hardware will be measured with `scripts/core_load_test.py` before the pilot starts.
 - **Owner record:** _open_
 
