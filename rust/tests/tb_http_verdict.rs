@@ -67,11 +67,18 @@ async fn signed_policy_governs_ingest_and_verdict_in_production() {
     };
     std::env::set_var("GOVAI_DATABASE_URL", url);
     std::env::set_var("GOVAI_AUTO_MIGRATE", "true");
-    let app = build_router(
-        build_app_state()
-            .await
-            .expect("prod start with signed bundle"),
-    );
+    // Startup order as in `run`: build the state, then commit the verified revision to the anchor. Evidence writes are
+    // refused until the anchor row exists.
+    let state = build_app_state()
+        .await
+        .expect("prod start with signed bundle");
+    let pool = state.pool.clone();
+    state
+        .policy_store
+        .commit_revisions(&pool)
+        .await
+        .expect("commit the verified revision");
+    let app = build_router(state);
 
     let run = "tb-run-1";
     let (s, body) = post(&app, &discovery(run)).await;
