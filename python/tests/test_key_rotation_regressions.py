@@ -1,15 +1,14 @@
-"""Regressions: key rotation and revocation against execution authorizations.
+"""Regressions: key rotation, revocation, and root rotation against execution authorizations (registry format v2).
 
 Each test drives a real ``Executor`` that verifies through the trusted key registry, against the file-backed Core stand-in,
 and counts the side effects that actually happened. Covered:
 
 - an authorization already executed cannot run again after its key is rotated (replay protection);
 - an outstanding authorization survives ordinary rotation (historical verification);
-- an outstanding authorization signed before a compromise is refused (uncertain, refused by default);
-- an outstanding authorization signed after a compromise is refused (untrusted).
-
-Policy revision anchors are covered by ``rust/src/policy_anchor.rs`` (module ``rotation_regressions``): the anchor decision
-takes no key identity, so rotation cannot change it.
+- an outstanding authorization signed after a compromise is refused (untrusted), and one signed before is refused by default
+  (uncertain), both with no side effect;
+- the operator history stays verifiable after rotation;
+- replay protection is still in force after the root key is rotated.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from pathlib import Path
 
 import _lifecycle_harness as h
 import pytest
+from _registry_world import World, write_secret_file
 from nacl.signing import SigningKey
 
 from aigov_py.canonical_json import canonical_bytes
@@ -38,42 +38,21 @@ def world():
         root = Path(d)
         db = root / "executor.sqlite"
         migrate(db, backup_dir=None)
-        reg = K.KeyRegistry(root / "registry.json")
-        admin_seed, admin_pub = K.new_signing_seed()
-        reg.install_operator("ops-admin", admin_pub, ("keyadmin", "revoker"))
+        w = World(root)
+        w.install_operator("ops-admin")
         yield {"root": root, "db": db, "core": h.FileCore(root / "core.json"),
-               "effects": root / "effects.log", "reg": reg, "admin": admin_seed}
+               "effects": root / "effects.log", "world": w}
 
 
-def _register_activate(w, kid, seed_b64_pub):
-    reg, admin = w["reg"], w["admin"]
-    req = K.KeyRegistry.new_request(op="register", actor="ops-admin", expected_version=reg.version,
-                                    kid=kid, purpose="execution_authorization", public_key_b64=seed_b64_pub, owner="t")
-    reg.register(K.KeyRegistry.sign_request(req, admin))
-    req = K.KeyRegistry.new_request(op="activate", actor="ops-admin", expected_version=reg.version, kid=kid)
-    reg.activate(K.KeyRegistry.sign_request(req, admin))
+def _key(w, kid: str) -> str:
+    """Create a key for ``kid`` in the world and return its seed (base64)."""
+    seed, _ = w["world"].new_key(kid)
+    return seed
 
 
-def _rotate(w, old, new):
-    reg, admin = w["reg"], w["admin"]
-    req = K.KeyRegistry.new_request(op="register", actor="ops-admin", expected_version=reg.version, kid=new,
-                                    purpose="execution_authorization", public_key_b64=w["_pubs"][new], owner="t")
-    reg.register(K.KeyRegistry.sign_request(req, admin))
-    req = K.KeyRegistry.new_request(op="rotate", actor="ops-admin", expected_version=reg.version, kid=old,
-                                    purpose="execution_authorization", successor_kid=new)
-    reg.rotate(K.KeyRegistry.sign_request(req, admin))
-
-
-def _revoke(w, kid, compromised_from: datetime):
-    reg, admin = w["reg"], w["admin"]
-    req = K.KeyRegistry.new_request(op="revoke", actor="ops-admin", expected_version=reg.version, kid=kid,
-                                    reason="suspected exposure", compromised_from_utc=compromised_from.isoformat())
-    reg.revoke(K.KeyRegistry.sign_request(req, admin))
-
-
-def _authorization(seed_hex: str, kid: str, issued: datetime) -> dict:
+def _authorization(seed_b64: str, kid: str, issued: datetime) -> dict:
     """A signed authorization that names its signing key, as the registry path requires."""
-    key = SigningKey(bytes.fromhex(seed_hex))
+    key = SigningKey(base64.b64decode(seed_b64))
     payload = {
         "schema": AUTH_SCHEMA,
         "authorization_id": f"auth_{uuid.uuid4().hex}",
@@ -96,7 +75,7 @@ def _executor(w, worker: str) -> Executor:
     return Executor(
         core=w["core"],
         public_key_b64=None,
-        registry=w["reg"],
+        registry=w["world"].reader(),
         audience=h.AUDIENCE,
         store=ExecutionStore(w["db"]),
         tools=h.TOOLS,
@@ -105,24 +84,17 @@ def _executor(w, worker: str) -> Executor:
     )
 
 
-def _key(w, kid: str) -> tuple[str, str]:
-    seed, pub = h.new_authorization_key()
-    w.setdefault("_pubs", {})[kid] = pub
-    w.setdefault("_seeds", {})[kid] = seed
-    return seed, pub
-
-
 def test_an_executed_authorization_cannot_run_again_after_its_key_is_rotated(world):
     w = world
-    seed_a, pub_a = _key(w, "exe-a")
+    seed_a = _key(w, "exe-a")
     _key(w, "exe-b")
-    _register_activate(w, "exe-a", pub_a)
+    w["world"].register_active("exe-a")
     auth = _authorization(seed_a, "exe-a", datetime.now(UTC))
     first = _executor(w, "worker-1").execute(run_id=h.RUN, tool=h.TOOL.name, arguments=h.ARGS, signed=auth)
     assert first.executed
     assert h.SideEffects(w["effects"]).count() == 1
 
-    _rotate(w, "exe-a", "exe-b")
+    w["world"].rotate("exe-a", "exe-b")
     again = _executor(w, "worker-2").execute(run_id=h.RUN, tool=h.TOOL.name, arguments=h.ARGS, signed=auth)
     assert not again.executed, "rotation must not re-open a consumed authorization"
     assert h.SideEffects(w["effects"]).count() == 1
@@ -130,11 +102,11 @@ def test_an_executed_authorization_cannot_run_again_after_its_key_is_rotated(wor
 
 def test_an_outstanding_authorization_survives_ordinary_rotation(world):
     w = world
-    seed_a, pub_a = _key(w, "exe-a")
+    seed_a = _key(w, "exe-a")
     _key(w, "exe-b")
-    _register_activate(w, "exe-a", pub_a)
+    w["world"].register_active("exe-a")
     auth = _authorization(seed_a, "exe-a", datetime.now(UTC))
-    _rotate(w, "exe-a", "exe-b")
+    w["world"].rotate("exe-a", "exe-b")
     result = _executor(w, "worker-1").execute(run_id=h.RUN, tool=h.TOOL.name, arguments=h.ARGS, signed=auth)
     assert result.executed, result.reason
     assert h.SideEffects(w["effects"]).count() == 1
@@ -142,11 +114,11 @@ def test_an_outstanding_authorization_survives_ordinary_rotation(world):
 
 def test_an_outstanding_authorization_signed_after_compromise_is_refused_and_performs_nothing(world):
     w = world
-    seed, pub = _key(w, "exe-c")
-    _register_activate(w, "exe-c", pub)
+    seed = _key(w, "exe-c")
+    w["world"].register_active("exe-c")
     issued = datetime.now(UTC)
     auth = _authorization(seed, "exe-c", issued)
-    _revoke(w, "exe-c", compromised_from=issued - timedelta(minutes=1))
+    w["world"].revoke("exe-c", compromised_from=(issued - timedelta(minutes=1)).isoformat())
     result = _executor(w, "worker-1").execute(run_id=h.RUN, tool=h.TOOL.name, arguments=h.ARGS, signed=auth)
     assert not result.executed
     assert result.reason == "authorization_key_untrusted"
@@ -155,11 +127,11 @@ def test_an_outstanding_authorization_signed_after_compromise_is_refused_and_per
 
 def test_an_outstanding_authorization_signed_before_an_uncertain_compromise_is_refused_by_default(world):
     w = world
-    seed, pub = _key(w, "exe-u")
-    _register_activate(w, "exe-u", pub)
+    seed = _key(w, "exe-u")
+    w["world"].register_active("exe-u")
     issued = datetime.now(UTC)
     auth = _authorization(seed, "exe-u", issued)
-    _revoke(w, "exe-u", compromised_from=issued + timedelta(minutes=5))
+    w["world"].revoke("exe-u", compromised_from=(issued + timedelta(minutes=5)).isoformat())
     result = _executor(w, "worker-1").execute(run_id=h.RUN, tool=h.TOOL.name, arguments=h.ARGS, signed=auth)
     assert not result.executed
     assert result.reason == "authorization_key_untrusted"
@@ -168,11 +140,33 @@ def test_an_outstanding_authorization_signed_before_an_uncertain_compromise_is_r
 
 def test_rotation_and_revocation_leave_the_operator_history_verifiable(world):
     w = world
-    seed_a, pub_a = _key(w, "exe-a")
+    _key(w, "exe-a")
     _key(w, "exe-b")
-    _register_activate(w, "exe-a", pub_a)
-    _rotate(w, "exe-a", "exe-b")
-    reloaded = K.KeyRegistry(w["root"] / "registry.json")
-    assert reloaded.verify_integrity()["chain_verified"] is True
+    w["world"].register_active("exe-a")
+    w["world"].rotate("exe-a", "exe-b")
+    reloaded = w["world"].reader()
+    assert reloaded.verify_integrity()["anchored"] is True
     assert reloaded.get("exe-a").status == "retired"
     assert reloaded.get("exe-b").status == "active"
+
+
+def test_replay_protection_survives_a_root_rotation(world):
+    w = world
+    seed_a = _key(w, "exe-a")
+    w["world"].register_active("exe-a")
+    auth = _authorization(seed_a, "exe-a", datetime.now(UTC))
+    assert _executor(w, "worker-1").execute(run_id=h.RUN, tool=h.TOOL.name, arguments=h.ARGS, signed=auth).executed
+    # Root rotation: root-a is retired after the current sequence, and a new root is current.
+    world = w["world"]
+    bound = world.reg.version
+    new_root_seed, new_root_pub = K.new_signing_seed()
+    doc = dict(world.trust_doc)
+    doc["roots"] = [
+        {"kid": "root-a", "public_key_b64": world.root_pub, "status": "retired", "retired_after_seq": bound},
+        {"kid": "root-b", "public_key_b64": new_root_pub, "status": "current"},
+    ]
+    write_secret_file(world.trust_path, __import__("json").dumps(doc))
+    world.trust = K.TrustConfig.load(world.trust_path)
+    result = _executor(w, "worker-2").execute(run_id=h.RUN, tool=h.TOOL.name, arguments=h.ARGS, signed=auth)
+    assert not result.executed, "a root rotation must not re-open a consumed authorization"
+    assert h.SideEffects(w["effects"]).count() == 1

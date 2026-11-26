@@ -13,6 +13,7 @@ from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 
 from aigov_py.canonical_json import canonical_bytes
+from aigov_py.trusted.keys import KeyRegistryError
 
 AUTH_SCHEMA = "govai.execution_authorization.v1"
 AUTH_DOMAIN = b"govai.execution_authorization.v1\x00"
@@ -59,6 +60,14 @@ def verify_authorization_with_registry(signed: dict[str, Any], registry: Any, *,
         sig = signed["signature"]
     except KeyError as exc:
         raise Refused("authorization_signature_invalid") from exc
+    # Re-read the log: a revocation or rotation written by another process must apply to this decision at once.
+    refresh = getattr(registry, "refresh", None)
+    if refresh is not None:
+        try:
+            refresh()
+        except KeyRegistryError as exc:
+            # The log does not verify, or it does not match the anchor. Nothing is trusted from it.
+            raise Refused("registry_" + exc.code) from exc
     kwargs = {"purpose": "execution_authorization", "kid": kid, "payload": canonical_bytes(payload),
               "signature_b64": sig, "signed_at_utc": signed_at}
     if now is not None:

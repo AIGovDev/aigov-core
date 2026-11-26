@@ -1,120 +1,220 @@
-# Key-management runbook
+# Key-management runbook (registry format v2)
 
-Scope: the Ed25519 keys that GovAI uses to sign and verify. Four purposes are defined, each with its own domain prefix:
+Scope: the Ed25519 keys that GovAI signs and verifies with. Four purposes, each with its own domain prefix:
 
 | Purpose | Domain prefix | Signer | Verified by |
 |---|---|---|---|
-| `execution_authorization` | `govai.execution_authorization.v1\0` | Core (`AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX`, key id `AIGOV_EXECUTION_AUTH_KEY_ID`) | executor (`verify_authorization_with_registry`) |
+| `execution_authorization` | `govai.execution_authorization.v1\0` | Core (the registry's active key; see [Core signing](#core-signing-execution-authorization)) | executor (`verify_authorization_with_registry`) |
 | `reconciliation_evidence` | `govai.reconciliation.v1\0` | the reconciler's own signer | executor, reconciliation |
 | `policy_bundle` | `govai.policy_bundle.v1\0` | the policy owner | Core policy trust store |
 | `audit_export` | `govai.audit_export.v1\0` | Core export signer | external verifiers |
 
-The registry (`aigov_py.trusted.keys`) holds **public keys only**. Private seeds belong to their signers and are never
-written to the registry, to logs, or to chat.
+The registry holds **public keys only**. Private seeds belong to their signers and never go into the registry, the logs, or chat.
 
-Implemented: the registry, the operator tool (`python -m aigov_py.trusted.key_admin`), the signer interface, and
-registry-based verification in the executor. Verified locally: see the audit report
-(`docs/reports/identity-key-management-2026-11-26.md`). Not implemented: Core does not read the registry. Core still signs
-with the one seed and key id from its environment, so a Core key rotation is a configuration change plus a restart.
+## What protects the registry
 
-## Concepts
+Three things, each independent of the others:
 
-- **Key id (`kid`).** 1 to 64 characters from `A-Z a-z 0-9 . _ -`. Never reused, even after revocation.
-- **Status.** `pending` (registered, not signing) -> `active` (the one signing key for its purpose) -> `retired` (ordinary
-  rotation) ; any non-revoked status -> `revoked` (terminal, for compromise).
-- **One active key per purpose.** Activation is refused while another key of the same purpose is active.
-- **Operators.** Identities with a public key and roles: `keyadmin` (register, activate, retire, rotate), `revoker`
-  (revoke). The first operator is installed once, by the person who creates the registry file. Later operators are added by
-  a `keyadmin` through a signed request.
-- **Event log.** `registry.json.events.jsonl` is authoritative: every change is one hash-chained event. `registry.json` is
-  a view and is checked against the log on load (`snapshot_matches`).
-- **Signed requests.** Every change is an operator-signed request that carries the expected registry version and a nonce.
-  A request applies once, to the version it names.
+1. **Pinned roots (trust file).** The root operator public keys live in a *trust file* on each host that verifies or signs, owner-only (no group or other bits), outside the registry directory. The registry cannot supply, replace, or add a root. Only roots install and remove operators and import legacy history.
+2. **Signed events (log).** Every event in `registry.json.events.jsonl` carries the signed request that produced it. Readers verify every signature, the sequence, the hash chain, the signer's authority, and every state transition, from genesis.
+3. **Anchor (PostgreSQL).** The table `key_registry_anchor` holds the sequence number and head hash of the last committed event, per registry. Writers update it in the same transaction that appends the event. Readers require the log to match the anchor exactly.
+
+A reader refuses unless all three agree. Refusal codes are stable; the common ones are listed at the end.
+
+What is **not** protected: a party that can change the trust file and the anchor at the same time. See [Residual threat](#residual-threat).
+
+## Files and configuration
+
+| Setting | Where | Purpose |
+|---|---|---|
+| Trust file | `AIGOV_KEY_REGISTRY_TRUST_FILE` (Core), `--trust` (operator tool) | Pinned roots and the registry id. Owner-only. |
+| Registry log | `<registry>.events.jsonl` (next to `registry.json`) | Authoritative signed log. |
+| Snapshot | `registry.json` | A view for people. Never read for decisions. |
+| Anchor URL | `AIGOV_KEY_REGISTRY_ANCHOR_URL`, else `GOVAI_DATABASE_URL` | PostgreSQL holding `key_registry_anchor`. |
+| Seeds directory | `AIGOV_EXECUTION_AUTH_SIGNING_SEEDS_DIR` (Core) | `<kid>.seed` files, owner-only, base64 of the 32-byte seed. |
+
+Trust file (`govai.key_registry_trust.v1`):
+
+```json
+{
+  "schema": "govai.key_registry_trust.v1",
+  "registry_id": "prod-authz",
+  "roots": [
+    {"kid": "root-2026-a", "public_key_b64": "...", "status": "retired", "retired_after_seq": 412},
+    {"kid": "root-2026-b", "public_key_b64": "...", "status": "current"}
+  ]
+}
+```
+
+- A `current` root signs new events. A `retired` root signs only events up to and including `retired_after_seq`, so its history
+  stays verifiable and it cannot sign after its bound.
+- At least one `current` root is required.
+- Keep retired roots in the file for as long as their history must verify.
+
+The anchor table comes from migration `0004_key_registry_anchor` (`rust/migrations/`). Core applies it with the normal migration
+step. Its readiness check counts that migration. The operator tool never creates tables. `anchor-init` refuses if the table is
+missing.
+
+## Core signing (execution authorization)
+
+Core signs execution authorizations with the registry's single active `execution_authorization` key. Configure one mode:
+
+- **Registry mode**: `AIGOV_KEY_REGISTRY_PATH` (the registry's `registry.json`), `AIGOV_KEY_REGISTRY_TRUST_FILE`, the anchor URL,
+  and `AIGOV_EXECUTION_AUTH_SIGNING_SEEDS_DIR`. Core verifies the log from genesis, against the trust file and the anchor, on every
+  issuance and again before signing. The trust file must load and validate at startup.
+- **Single-key mode**: `AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX` with `AIGOV_EXECUTION_AUTH_KEY_ID`. No registry.
+
+Setting both modes is refused at startup. Setting neither disables issuance, as before.
+
+In registry mode:
+
+- A consequential call is authorized only if its `approval_event_id` names a `human_approved` event with decision `approve`, in
+  the same run, for the same `tool_call_id`, not revoked and not used by another call. Otherwise it is refused before anything is
+  appended, with `policy_violation ... reason=approval_*`. This applies under every policy. With the built-in dev policy a tool
+  approval cannot be recorded, so consequential calls are refused while issuance is enabled.
+- If the registry does not verify, or the anchor is missing or unreachable, the call is refused with
+  `503 AUTHORIZATION_KEY_UNAVAILABLE` before anything is appended.
+- If the call is accepted but signing is refused, Core returns `503 AUTHORIZATION_SIGNING_REFUSED` with the record hash. The
+  record stays in the ledger, no authorization is issued, and the call must not run.
+- A seed file must be readable only by its owner, and must derive the public key the verified registry holds for its kid.
 
 ## Procedures
 
-### Install the first operator (once per registry)
+All changes are signed requests. Each carries the expected version and a fresh nonce, and applies once, to the version it names.
+Commands below use `--registry R --trust T` and the anchor URL from the environment.
+
+### 1. Create the trust file and the anchor (once per registry)
 
 ```
-python -m aigov_py.trusted.key_admin --registry /secure/registry.json new-operator-key /secure/keys/ops-admin.seed
-python -m aigov_py.trusted.key_admin --registry /secure/registry.json install-operator ops-admin <public_key_b64> keyadmin revoker
+python -m aigov_py.trusted.key_admin --registry R --trust T new-key /secure/root-a.seed   # root key: keep it off Core and executor hosts
+# put the public key in the trust file, owner-only (chmod 600), with registry_id and status "current"
+python -m aigov_py.trusted.key_admin --registry R --trust T anchor-init   # requires migration 0004 applied
 ```
 
-Store the seed file on the operator's machine with owner-only permissions (the tool creates it `0600`). Do not commit it.
+The root seed is needed only to sign root operations and migrations. Store it where the root holder works, not on Core.
 
-### Register and activate a key
-
-```
-python -m aigov_py.trusted.key_admin --registry R request register ops-admin.seed --actor ops-admin \
-    --kid exe-2026-01 --purpose execution_authorization --public-key-b64 <pub> > reg.json
-python -m aigov_py.trusted.key_admin --registry R apply reg.json
-python -m aigov_py.trusted.key_admin --registry R request activate ops-admin.seed --actor ops-admin --kid exe-2026-01 > act.json
-python -m aigov_py.trusted.key_admin --registry R apply act.json
-```
-
-Activation is refused while another key of the same purpose is active. Use rotation for that.
-
-### Ordinary rotation
-
-Register the successor (pending), then rotate. The old key becomes `retired`, and the successor becomes `active` in one
-group of two events.
+### 2. Install an operator (root-signed)
 
 ```
-python -m aigov_py.trusted.key_admin --registry R request rotate ops-admin.seed --actor ops-admin \
-    --kid exe-2026-01 --purpose execution_authorization --successor-kid exe-2026-02 > rot.json
-python -m aigov_py.trusted.key_admin --registry R apply rot.json
+python -m aigov_py.trusted.key_admin --registry R --trust T new-key /secure/ops-admin.seed
+python -m aigov_py.trusted.key_admin --registry R --trust T request operator_install /secure/root-a.seed --actor root-a \
+    --identity ops-admin --public-key-b64 <pub> --roles keyadmin revoker > req.json
+python -m aigov_py.trusted.key_admin --registry R --trust T apply req.json
 ```
 
-Historical evidence signed by the retired key stays trusted, because it was signed while the key was active. Evidence
-signed after the retirement time is untrusted.
-
-**Replay and rollback.** Rotation does not reset policy revision anchors or authorization replay protection. Those are
-keyed by authorization id and policy revision (Core's authoritative anchor and the executor's store), not by key.
-
-### Emergency revocation (compromised key)
-
-Revocation is terminal and needs a `revoker`. Set `--compromised-from` to the earliest time you believe the key may have
-been used by an attacker. When in doubt, use the earliest time that the key could have been exposed.
+### 3. Register and activate a key
 
 ```
-python -m aigov_py.trusted.key_admin --registry R request revoke revoker.seed --actor revoker \
-    --kid exe-2026-01 --reason "suspected exposure" --compromised-from 2026-11-20T00:00:00+00:00 > rev.json
-python -m aigov_py.trusted.key_admin --registry R apply rev.json
+python -m aigov_py.trusted.key_admin --registry R --trust T new-key /secure/exe-a.seed
+python -m aigov_py.trusted.key_admin --registry R --trust T request register /secure/ops-admin.seed --actor ops-admin \
+    --kid exe-2026-01 --purpose execution_authorization --public-key-b64 <pub> > reg.json && ... apply reg.json
+python -m aigov_py.trusted.key_admin --registry R --trust T request activate /secure/ops-admin.seed --actor ops-admin --kid exe-2026-01 > act.json && ... apply act.json
 ```
 
-Immediately after revocation:
+Activation is refused while another key of the same purpose is active. Use rotation for that. Place the key's seed in the Core
+seeds directory as `<kid>.seed` (base64, owner-only) before its first use.
 
-1. Stop Core from signing with the revoked key: replace `AIGOV_EXECUTION_AUTH_SIGNING_SEED_HEX` and
-   `AIGOV_EXECUTION_AUTH_KEY_ID` with the successor's, and restart Core. Core does not consult the registry (see above).
-2. Treat authorizations issued by the revoked key between `compromised-from` and the revocation as suspect. The verdict
-   for a signature made after `compromised-from` is `untrusted`. For a signature made before it, the verdict is
-   `uncertain` and is refused by default. Review those authorizations with a person; do not accept them automatically.
-3. Record the incident in the audit log of your operations.
+### 4. Ordinary rotation
 
-### Inspect
+Register the successor (pending), then `request rotate --kid exe-2026-01 --successor-kid exe-2026-02`. It is one event: the old key becomes `retired`, the successor `active`.
+Historical evidence signed by the retired key stays trusted, and evidence signed after its retirement is untrusted. Core picks up
+the change on its next decision, with no restart.
+
+### 5. Emergency revocation (compromised key)
+
+Revocation is terminal and needs a `revoker`. Set `--compromised-from` to the earliest time the key may have been used by an
+attacker.
 
 ```
-python -m aigov_py.trusted.key_admin --registry R inspect
+python -m aigov_py.trusted.key_admin --registry R --trust T request revoke /secure/ops-admin.seed --actor ops-admin \
+    --kid exe-2026-01 --reason "suspected exposure" --compromised-from 2026-11-20T00:00:00+00:00 > rev.json && ... apply rev.json
 ```
 
-Shows the version, operators and roles, every key's purpose and status, and whether the log verifies and the snapshot
-matches it. A snapshot mismatch is a signal to investigate, not a normal state.
+- Core stops issuing with the revoked key at its next decision. Until a successor is registered and activated, consequential
+  calls are refused with `AUTHORIZATION_KEY_UNAVAILABLE`.
+- Authorizations signed by the key after `compromised-from` are `untrusted`. Those signed before it are `uncertain` and refused
+  by default. Review them with a person; do not accept them automatically.
 
-## Recovery
+### 6. Operator rotation
 
-- **Registry file lost.** Restore `registry.json.events.jsonl` from backup. Loading the log rebuilds the state; the snapshot
-  `registry.json` is rewritten on the next change (or you can run `inspect` to confirm `snapshot_matches_log`). Without the
-  log, the registry cannot be verified and nothing should be trusted from it.
-- **Log altered or truncated.** The chain check refuses an altered or reordered log. A truncated tail is valid and shorter,
-  so the chain alone cannot detect it; the snapshot mismatch reports it. Keep an off-host copy of the log to compare against.
-- **Operator key lost.** An existing `keyadmin` installs a new operator through a signed request. If no `keyadmin` remains,
-  the registry cannot be changed; restore from the last good backup and record the gap.
+```
+python -m aigov_py.trusted.key_admin --registry R --trust T request operator_revoke /secure/root-a.seed --actor root-a --identity ops-admin --reason "left" > rev-op.json && ... apply rev-op.json
+python -m aigov_py.trusted.key_admin --registry R --trust T request operator_install /secure/root-a.seed --actor root-a --identity ops-admin-2 --public-key-b64 <pub> --roles keyadmin revoker > inst.json && ... apply inst.json
+```
 
-## Limits
+A revoked operator's later requests are refused. Its earlier events stay verifiable. Identities are never reused.
 
-- No trusted timestamps. `issued_at_utc` and `signed_at_utc` are claims by the signer. Historical verdicts depend on those
-  claims. A signer that lies about time can move a signature into or out of a key's validity window. Use an independent
-  timestamp source if that matters for your evidence.
-- The registry is not a federated identity system. Operators are pinned keys.
-- Core signs from one configured key at a time (see above).
-- No compatibility with any external key-management service is claimed or tested.
+### 7. Root key rotation
+
+1. Create the new root and add it to the trust file as `current`.
+2. Change the old root to `retired` with `retired_after_seq` set to the current registry version (`inspect` shows it).
+3. Deploy the trust file to every host that verifies or signs. Until a host has the new file, it refuses events signed by the new root.
+
+Old history stays verifiable because the old root stays in the file. The old root cannot sign past its bound. Keep the bound
+as a record of the rotation.
+
+### 8. Crash recovery
+
+If a process dies between appending an event and committing the anchor, readers refuse with `anchor_log_ahead`, and writers refuse
+too. Nothing is lost and nothing is accepted on top of an unreconciled event:
+
+```
+python -m aigov_py.trusted.key_admin --registry R --trust T reconcile
+```
+
+`reconcile` verifies the whole log, and anchors the single extra event only if it is the one directly after the anchored head. Two or more
+extra events, or any mismatch, are refused and need an investigation.
+
+### 9. Migrating a v1 registry
+
+A v1 registry (the format before this runbook; commit `eaab53f`) has no signed history. Its events record only hashes of requests.
+The migration is therefore an explicit attestation by the root holder:
+
+```
+python -m aigov_py.trusted.key_admin --registry R2 --trust T migrate-v1 --v1-registry R1 --root-kid root-a --root-seed-file /secure/root-a.seed
+```
+
+- The v1 chain and transitions are verified first; an altered v1 log is refused.
+- The result is one root-signed `legacy_import` event. Its keys keep their statuses and times, with the provenance
+  `legacy_v1_unsigned`.
+- A signature made under an imported key is at most `uncertain`, with reason `legacy_unsigned_history`. It is refused by
+  default. The migration does not make old history trusted.
+- The target registry must not exist and the anchor must be uninitialized. The v1 log is left in place.
+
+### 10. Inspect
+
+```
+python -m aigov_py.trusted.key_admin --registry R --trust T inspect
+```
+
+Shows the version, operators and roles, every key's purpose, status, and provenance, and whether the log verifies against the anchor.
+An anchor mismatch is a signal to investigate, not a normal state.
+
+## Refusal codes
+
+| Code | Meaning |
+|---|---|
+| `anchor_missing` | The anchor row does not exist. Run `anchor-init` (after the migration). |
+| `anchor_log_behind` | The log is shorter than the anchor: rollback or truncation. |
+| `anchor_log_ahead` | The log is one or more events beyond the anchor: a crash (use `reconcile`) or an investigation. |
+| `anchor_head_mismatch` | Same length, different head: substitution. |
+| `anchor_unavailable` | The anchor database cannot be reached. Decisions are refused. |
+| `request_signature_invalid` | A signature does not verify under the signer's key. |
+| `root_not_authorized` | A root signed outside its bound, or is not in the trust file. |
+| `operator_not_authorized` | The signer is unknown, inactive, or lacks the role. |
+| `replayed_nonce`, `expected_version_mismatch`, `version_conflict` | A request was replayed, reordered, or made against a stale version. |
+| `trust_config_permissions`, `trust_config_invalid`, `trust_config_missing` | The trust file is unsafe or invalid. |
+
+## Residual threat
+
+Simultaneous compromise of **PostgreSQL write access** and **the trust file** lets an attacker rewrite the anchor, replace the log,
+and substitute the roots, so the reader accepts a forged registry. Nothing in the registry code detects that, because both
+independent checks are then under the attacker's control. Defending against it needs separate controls, outside this code:
+
+- Keep the trust file under change control, with its own audit trail, and compare its hash against a copy held elsewhere.
+- Restrict write access to the anchor table to the migration role and to the operator's reconcile step, and audit it.
+- Keep an off-host copy of the log and check the head hash against it periodically.
+
+Other residual risks: a compromised root key can sign anything within its bound (rotate roots promptly); operator seeds and
+execution seeds are protected only by their owners; timestamps are signer claims, with no trusted time source; single-host
+anchors (`SqliteAnchor` in tests) are not production.

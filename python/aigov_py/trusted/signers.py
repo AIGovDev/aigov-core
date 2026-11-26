@@ -20,7 +20,8 @@ import concurrent.futures
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from nacl.signing import SigningKey
+from nacl.exceptions import BadSignatureError
+from nacl.signing import SigningKey, VerifyKey
 
 from aigov_py.trusted.keys import DOMAINS, valid_kid
 
@@ -88,11 +89,16 @@ class ExternalSigner:
         *,
         key_id: str,
         purpose: str,
+        public_key_b64: str,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         _check_identity(key_id, purpose)
         if not 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS:
             raise SignerError("timeout_invalid", f"must be in (0, {MAX_TIMEOUT_SECONDS}] seconds")
+        try:
+            self._verify_key = VerifyKey(base64.b64decode(public_key_b64, validate=True))
+        except (ValueError, TypeError) as exc:
+            raise SignerError("public_key_invalid") from exc
         self._provider = provider
         self.key_id = key_id
         self.purpose = purpose
@@ -116,8 +122,14 @@ class ExternalSigner:
         if not isinstance(reply, str):
             raise SignerError("signer_reply_invalid", "provider returned a non-string signature")
         try:
-            if len(base64.b64decode(reply, validate=True)) != 64:
-                raise ValueError
+            sig = base64.b64decode(reply, validate=True)
         except ValueError as exc:
-            raise SignerError("signer_reply_invalid", "signature is not 64 bytes") from exc
+            raise SignerError("signer_reply_invalid", "signature is not base64") from exc
+        if len(sig) != 64:
+            raise SignerError("signer_reply_invalid", "signature is not 64 bytes")
+        # The reply must verify under the expected key. A provider that signs with another key is refused here.
+        try:
+            self._verify_key.verify(message, sig)
+        except BadSignatureError as exc:
+            raise SignerError("signer_reply_invalid", "signature does not verify for this key") from exc
         return SignResult(self.key_id, self.purpose, reply)

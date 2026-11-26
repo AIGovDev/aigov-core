@@ -295,8 +295,10 @@ prefixes and different databases can run on one machine without touching each ot
 - `ExecutionExecutor(..., registry=...)` verifies authorizations through the registry. Without `registry`, the executor
   verifies against `public_key_b64` exactly as before. Passing neither raises `ValueError`.
 
-Limits: Core does not read the registry; it signs with one configured key id. Trusted timestamps are not available, so
-historical verdicts rely on the signer's `issued_at_utc`. See `docs/operations/key-management-runbook.md`.
+Core verifies the registry (format v2) from genesis against pinned root keys in a trust file and an independent PostgreSQL
+anchor, and signs with the active key. A rotation or revocation takes effect at the next decision, with no restart. The
+executor verifies through the registry, and historical verdicts rely on the signer's `issued_at_utc`. The residual threat
+(simultaneous compromise of PostgreSQL write access and the trust file) is in `docs/operations/key-management-runbook.md`.
 
 ## Production limitations
 
