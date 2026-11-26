@@ -19,9 +19,9 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
-from collections.abc import Mapping
 from urllib.parse import urlsplit
 
 _STDIO_MAX_CHARS: Final[int] = 256 * 1024
