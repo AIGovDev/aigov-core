@@ -63,8 +63,10 @@ struct RunIdQuery {
 
 async fn pool_from_env() -> Result<DbPool, String> {
     if db::postgres_url_configured_nonempty().is_err() {
+        // No database is configured. A key lookup that reaches this pool must fail fast, not wait for the default 30 s.
         return PgPoolOptions::new()
             .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(2))
             .connect_lazy("postgres://localhost:5432/govai_unused")
             .map_err(|e| format!("lazy pool: {e}"));
     }
