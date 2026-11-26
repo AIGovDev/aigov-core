@@ -317,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
         "store": args.store,
         "git_head": _git_head(),
         "python": platform.python_version(),
+        "load_average_1_5_15_at_end": [round(x, 2) for x in os.getloadavg()],
+        "cpu_count": os.cpu_count(),
         "platform": platform.platform(),
         "authorizations_valid": args.authorizations,
         "authorizations_forged": args.forged,

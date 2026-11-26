@@ -1,0 +1,214 @@
+{
+  "authorizations_forged": 20,
+  "authorizations_valid": 120,
+  "core_stand_in": "file-backed Core stand-in (_lifecycle_harness.FileCore), not the Rust Core",
+  "cpu_count": 12,
+  "git_head": "16b0191",
+  "levels": [
+    {
+      "attempts": 140,
+      "authorizations_forged": 20,
+      "authorizations_valid": 120,
+      "concurrency": 1,
+      "db_contention": {
+        "lock_wait_samples": 0,
+        "peak_sessions": 1,
+        "samples": 205
+      },
+      "duplicate_executions": 0,
+      "evidence": {
+        "history": "480 chained events verified",
+        "history_ok": true,
+        "projection": "120 executions agree with their history",
+        "projection_ok": true
+      },
+      "executed_valid_distinct": 120,
+      "false_denials": 0,
+      "latency_executed_ms": {
+        "p50": 40.016,
+        "p95": 81.724,
+        "p99": 91.186,
+        "samples": 120
+      },
+      "latency_ms": {
+        "mean": 40.449,
+        "p50": 35.453,
+        "p95": 81.724,
+        "p99": 91.186,
+        "samples": 140
+      },
+      "receipts_recorded": 120,
+      "refusal_reasons": {
+        "authorization_signature_invalid": 20,
+        "executed": 120
+      },
+      "side_effects_total": 120,
+      "throughput_executed_per_second": 20.25,
+      "unauthorized_executions": 0,
+      "unauthorized_side_effects": 0,
+      "wall_seconds": 5.926,
+      "worker_errors": []
+    },
+    {
+      "attempts": 280,
+      "authorizations_forged": 20,
+      "authorizations_valid": 120,
+      "concurrency": 2,
+      "db_contention": {
+        "lock_wait_samples": 1,
+        "peak_sessions": 2,
+        "samples": 90
+      },
+      "duplicate_executions": 0,
+      "evidence": {
+        "history": "960 chained events verified",
+        "history_ok": true,
+        "projection": "240 executions agree with their history",
+        "projection_ok": true
+      },
+      "executed_valid_distinct": 120,
+      "false_denials": 0,
+      "latency_executed_ms": {
+        "p50": 31.7,
+        "p95": 71.104,
+        "p99": 111.614,
+        "samples": 120
+      },
+      "latency_ms": {
+        "mean": 15.751,
+        "p50": 1.331,
+        "p95": 53.96,
+        "p99": 96.092,
+        "samples": 280
+      },
+      "receipts_recorded": 240,
+      "refusal_reasons": {
+        "authorization_receipt_recorded": 117,
+        "authorization_replayed": 3,
+        "authorization_signature_invalid": 40,
+        "executed": 120
+      },
+      "side_effects_total": 120,
+      "throughput_executed_per_second": 47.85,
+      "unauthorized_executions": 0,
+      "unauthorized_side_effects": 0,
+      "wall_seconds": 2.508,
+      "worker_errors": []
+    },
+    {
+      "attempts": 560,
+      "authorizations_forged": 20,
+      "authorizations_valid": 120,
+      "concurrency": 4,
+      "db_contention": {
+        "lock_wait_samples": 10,
+        "peak_sessions": 4,
+        "samples": 54
+      },
+      "duplicate_executions": 0,
+      "evidence": {
+        "history": "1440 chained events verified",
+        "history_ok": true,
+        "projection": "360 executions agree with their history",
+        "projection_ok": true
+      },
+      "executed_valid_distinct": 120,
+      "false_denials": 0,
+      "latency_executed_ms": {
+        "p50": 29.729,
+        "p95": 77.498,
+        "p99": 129.784,
+        "samples": 120
+      },
+      "latency_ms": {
+        "mean": 8.605,
+        "p50": 0.762,
+        "p95": 33.821,
+        "p99": 78.091,
+        "samples": 560
+      },
+      "receipts_recorded": 360,
+      "refusal_reasons": {
+        "authorization_receipt_recorded": 354,
+        "authorization_replayed": 6,
+        "authorization_signature_invalid": 80,
+        "executed": 120
+      },
+      "side_effects_total": 120,
+      "throughput_executed_per_second": 84.22,
+      "unauthorized_executions": 0,
+      "unauthorized_side_effects": 0,
+      "wall_seconds": 1.425,
+      "worker_errors": []
+    },
+    {
+      "attempts": 1120,
+      "authorizations_forged": 20,
+      "authorizations_valid": 120,
+      "concurrency": 8,
+      "db_contention": {
+        "lock_wait_samples": 9,
+        "peak_sessions": 5,
+        "samples": 49
+      },
+      "duplicate_executions": 0,
+      "evidence": {
+        "history": "1920 chained events verified",
+        "history_ok": true,
+        "projection": "480 executions agree with their history",
+        "projection_ok": true
+      },
+      "executed_valid_distinct": 120,
+      "false_denials": 0,
+      "latency_executed_ms": {
+        "p50": 53.528,
+        "p95": 60.432,
+        "p99": 64.267,
+        "samples": 120
+      },
+      "latency_ms": {
+        "mean": 6.381,
+        "p50": 0.719,
+        "p95": 53.842,
+        "p99": 59.433,
+        "samples": 1120
+      },
+      "receipts_recorded": 480,
+      "refusal_reasons": {
+        "authorization_receipt_recorded": 818,
+        "authorization_replayed": 22,
+        "authorization_signature_invalid": 160,
+        "executed": 120
+      },
+      "side_effects_total": 120,
+      "throughput_executed_per_second": 96.96,
+      "unauthorized_executions": 0,
+      "unauthorized_side_effects": 0,
+      "wall_seconds": 1.238,
+      "worker_errors": []
+    }
+  ],
+  "load_average_1_5_15_at_end": [
+    47.51,
+    24.39,
+    14.76
+  ],
+  "platform": "macOS-26.2-arm64-arm-64bit",
+  "python": "3.12.1",
+  "recovery": {
+    "lease_seconds": 1,
+    "max_ms": 409.9,
+    "ms_after_lease_expiry": [
+      409.9,
+      384.6,
+      120.4,
+      72.1,
+      321.0
+    ],
+    "p50_ms": 321.0,
+    "runs": 5
+  },
+  "started_utc": "2026-11-26T09:49:58Z",
+  "store": "pg",
+  "wall_seconds": 26.3
+}
