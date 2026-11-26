@@ -4,13 +4,13 @@ import sys
 import unittest
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 from public_launch_lib import evaluate_snapshot, load_snapshot, report_text
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SAMPLE = ROOT / "examples/launch/sample-standardization-readiness-snapshot.json"
 
 
@@ -78,3 +78,4 @@ class PublicLaunchToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
