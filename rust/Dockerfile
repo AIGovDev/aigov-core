@@ -35,8 +35,11 @@ WORKDIR /app
 
 COPY --from=builder /app/target/release/aigov_audit /app/aigov_audit
 
+# Listen on all interfaces inside the container's own network namespace. Only a published port reaches the service, so a
+# host or network exposes it only where the operator publishes it. Outside a container the default stays loopback.
 ENV GOVAI_LEDGER_DIR=/var/lib/govai/ledger \
     AIGOV_ENVIRONMENT=prod \
+    AIGOV_BIND=0.0.0.0:8088 \
     HOME=/nonexistent
 
 EXPOSE 8088

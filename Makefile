@@ -5,6 +5,7 @@ export
 AIGOV_MODE ?= ci
 
 .PHONY: \
+	crash-consistency-gate fault-absence-check \
 	FORCE \
 	audit audit_bg audit_stop audit_restart audit_logs require_audit_url \
 	status verify verify_log \
@@ -68,6 +69,21 @@ env_check:
 
 # Compliance "gate" check used by CI:
 # ensure that generated audit reports include the minimum required sections.
+# Release gates for the fault-injection work. The crash tests need a build with the fault-injection feature, built into
+# target-fault/ so the normal release build is not touched. The artifact check fails if a normal build contains crash points.
+PY ?= python3
+
+crash-consistency-gate:
+	cd rust && cargo build --release --locked --bin aigov_audit
+	cd rust && cargo build --release --locked --features fault-injection --bin aigov_audit --target-dir ../target-fault
+	cd python && AIGOV_TEST_FAULT_CORE_BIN=$(CURDIR)/target-fault/release/aigov_audit AIGOV_TEST_CORE_BIN=$(CURDIR)/rust/target/release/aigov_audit PYTHONPATH=$(CURDIR)/python $(PY) -m pytest tests/test_crash_consistency_core.py tests/test_receipt_provenance_core.py tests/test_approval_single_use_two_instances.py -q -p no:cacheprovider
+	@echo "crash-consistency-gate: OK"
+
+fault-absence-check:
+	cd rust && cargo build --release --locked --bin aigov_audit
+	$(PY) scripts/check_no_fault_injection.py rust/target/release/aigov_audit
+	@echo "fault-absence-check: OK"
+
 gate:
 	@python3 scripts/gate_reports.py
 

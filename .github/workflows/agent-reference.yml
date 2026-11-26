@@ -388,6 +388,38 @@ jobs:
           path: ${{ runner.temp }}/acme-validation
           if-no-files-found: error
 
+  crash-consistency:
+    name: crash-consistency-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Install AIGov with the test extras
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          python -m pip install -e "./python[dev,agent-reference]"
+
+      - name: Crash-consistency gate (fault-injection build; receipts; approval single use)
+        run: |
+          set -euo pipefail
+          make crash-consistency-gate PY=python
+
+      - name: The release artifact contains no crash points
+        run: |
+          set -euo pipefail
+          make fault-absence-check PY=python
+
   sdk-wheel:
     name: sdk-wheel-downstream
     runs-on: ubuntu-latest
