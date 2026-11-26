@@ -175,6 +175,7 @@ pub fn enforce_policy_file_trust(
 
 pub async fn build_app_state() -> Result<AppState, String> {
     let deployment_env = govai_environment::resolve_from_env()?;
+    refuse_fault_injection_outside_test(deployment_env)?;
     let bundle_only = match deployment_env {
         GovaiEnvironment::Prod => true,
         GovaiEnvironment::Staging => signed_bundle_configured(deployment_env),
@@ -498,6 +499,27 @@ async fn get_execution_authorization_status(
         .into_response()
 }
 
+/// Test-only process-termination points for the issuance path. Active only when BOTH `AIGOV_TEST_FAULT_INJECTION=1` and
+/// `AIGOV_TEST_CRASH_AT` names this point. Core refuses to start with the gate set in staging or production (see
+/// `refuse_fault_injection_outside_test`). `std::process::exit` skips destructors and flushes, like a killed process.
+fn crash_point(name: &str) {
+    if std::env::var("AIGOV_TEST_FAULT_INJECTION").as_deref() != Ok("1") {
+        return;
+    }
+    if std::env::var("AIGOV_TEST_CRASH_AT").as_deref() == Ok(name) {
+        std::process::exit(137);
+    }
+}
+
+/// Refuse to start with fault injection enabled outside a test environment.
+fn refuse_fault_injection_outside_test(deployment_env: GovaiEnvironment) -> Result<(), String> {
+    let enabled = std::env::var("AIGOV_TEST_FAULT_INJECTION").as_deref() == Ok("1");
+    if enabled && !matches!(deployment_env, GovaiEnvironment::Dev) {
+        return Err("AIGOV_TEST_FAULT_INJECTION is set; refusing to start outside the dev environment".to_string());
+    }
+    Ok(())
+}
+
 async fn post_evidence(
     State(st): State<AppState>,
     headers: HeaderMap,
@@ -661,6 +683,7 @@ async fn post_evidence(
         }
         Ok(())
     };
+    crash_point("before_append");
     let append_result =
         match crate::audit_store::append_record_checked(&log_path, event.clone(), &locked_check) {
             Ok(v) => Ok(v),
@@ -671,6 +694,7 @@ async fn post_evidence(
         };
     match append_result {
         Ok((rec, pre_count)) => {
+            crash_point("after_append_before_sign");
             runtime_metrics::inc_evidence_ingest("appended");
             ops_log::evidence_ingest("appended", 200, &tenant_id);
             let mut body = json!({
@@ -706,6 +730,7 @@ async fn post_evidence(
                     }
                 }
             }
+            crash_point("after_sign_before_response");
             if metering::metering_enabled() {
                 if let Some(extra) = metering::ingest_success_extras(
                     &tenant_id,
