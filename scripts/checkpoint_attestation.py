@@ -33,3 +33,24 @@ def verify_attestation(statement, signature_hex, trust, *, expected_issuer, expe
         return True
     except (ValueError, TypeError, KeyError, BadSignatureError):
         return False
+
+def verify_attested_ledger(stream, statement, signature_hex, trust, *, expected_issuer, expected_tenant, previous_count=0, previous_head="GENESIS"):
+    """Verify signature, full chain and continuity with an external prior anchor."""
+    import hashlib
+    from verify_offline_checkpoint import verify
+    if not verify_attestation(statement, signature_hex, trust,
+                              expected_issuer=expected_issuer,
+                              expected_tenant=expected_tenant,
+                              minimum_count=previous_count):
+        raise ValueError("untrusted attestation")
+    if previous_count == 0 and previous_head != "GENESIS":
+        raise ValueError("invalid prior anchor")
+    def checked_lines():
+        head = "GENESIS"
+        for index, line in enumerate(stream, 1):
+            event = json.loads(line)["event_json"]
+            head = hashlib.sha256((head + "\n" + event).encode("utf-8")).hexdigest()
+            if index == previous_count and head != previous_head:
+                raise ValueError("checkpoint fork")
+            yield line
+    return verify(checked_lines(), statement["count"], statement["head"])
