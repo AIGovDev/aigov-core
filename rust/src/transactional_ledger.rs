@@ -146,3 +146,48 @@ pub async fn lock_tenant_and_read_run(
         .fetch_all(&mut **tx)
         .await
 }
+
+/// Export a consistent tenant chain and verify it against the caller's trusted
+/// checkpoint. A database head alone is not an independent trust anchor.
+pub async fn verify_checkpoint(
+    pool: &PgPool,
+    tenant: &str,
+    expected_sequence: i64,
+    expected_hash: &str,
+) -> Result<(), sqlx::Error> {
+    let invalid = || sqlx::Error::Protocol("ledger checkpoint mismatch".to_owned());
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx).await?;
+    let head = sqlx::query("SELECT seq, head_hash FROM core_ledger_heads WHERE tenant_id=$1")
+        .bind(tenant).fetch_one(&mut *tx).await?;
+    if head.get::<i64, _>("seq") != expected_sequence
+        || head.get::<String, _>("head_hash") != expected_hash {
+        return Err(invalid());
+    }
+    let rows = sqlx::query("SELECT seq,event_id,event_json,prev_hash,record_hash FROM core_ledger_records WHERE tenant_id=$1 ORDER BY seq")
+        .bind(tenant).fetch_all(&mut *tx).await?;
+    let mut previous = "GENESIS".to_owned();
+    let mut sequence = 0i64;
+    for row in rows {
+        sequence = sequence.checked_add(1).ok_or_else(invalid)?;
+        let event: String = row.get("event_json");
+        let id: String = row.get("event_id");
+        let parsed: serde_json::Value = serde_json::from_str(&event).map_err(|_| invalid())?;
+        if row.get::<i64, _>("seq") != sequence
+            || row.get::<String, _>("prev_hash") != previous
+            || parsed.get("event_id").and_then(|v| v.as_str()) != Some(id.as_str()) {
+            return Err(invalid());
+        }
+        let hash = hex::encode(Sha256::digest(format!("{previous}\n{event}").as_bytes()));
+        if row.get::<String, _>("record_hash") != hash {
+            return Err(invalid());
+        }
+        previous = hash;
+    }
+    if sequence != expected_sequence || previous != expected_hash {
+        return Err(invalid());
+    }
+    tx.commit().await?;
+    Ok(())
+}
