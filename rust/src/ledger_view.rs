@@ -30,3 +30,26 @@ impl LedgerView for FileLedgerView<'_> {
         Box::new(events.into_iter())
     }
 }
+
+/// Policy view over a snapshot read under the PostgreSQL tenant lock.
+/// The caller must retain that lock until the decision transaction completes.
+pub struct SnapshotLedgerView {
+    events: Vec<EvidenceEvent>,
+}
+
+impl SnapshotLedgerView {
+    pub fn from_event_json(rows: &[String]) -> Result<Self, serde_json::Error> {
+        let events = rows.iter().map(|row| serde_json::from_str::<EvidenceEvent>(row))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { events })
+    }
+}
+
+impl LedgerView for SnapshotLedgerView {
+    fn iter_events_for_run<'b>(
+        &'b self,
+        run_id: &'b str,
+    ) -> Box<dyn Iterator<Item = EvidenceEvent> + 'b> {
+        Box::new(self.events.iter().filter(move |event| event.run_id == run_id).cloned())
+    }
+}
