@@ -102,6 +102,7 @@ def _smoke_mcp_stdio_handshake(py: str) -> tuple[bool, str]:
             "installation_check",
             "govai_gate_reports",
             "govai_verify_evidence_pack",
+            "govai_request_audit_template_approval",
             "govai_generate_audit_report_template",
         }
         if names != expected:
