@@ -172,3 +172,55 @@ async fn trusted_checkpoint_detects_database_history_tampering() {
         .bind(&tenant).bind(r#"{"event_id":"a","tampered":true}"#).execute(&writer).await.unwrap();
     assert!(verify_checkpoint(&reader, &tenant, anchor.sequence, &anchor.record_hash).await.is_err());
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL; run explicitly in CI"]
+async fn transactional_postgres_throughput() {
+    use aigov_audit::transactional_ledger::verify_checkpoint;
+    use std::time::Instant;
+    let url = std::env::var("GOVAI_DATABASE_URL").expect("disposable PostgreSQL URL");
+    let pool = PgPoolOptions::new().max_connections(8).connect(&url).await.unwrap();
+    db::run_sqlx_migrations(&pool).await.unwrap();
+    let tenant = Uuid::new_v4().to_string();
+    let start = Instant::now();
+    let mut tasks = tokio::task::JoinSet::new();
+    for worker in 0..4 {
+        let pool = pool.clone();
+        let tenant = tenant.clone();
+        tasks.spawn(async move {
+            let mut samples = Vec::new();
+            for i in 0..250 {
+                let id = format!("bench-{worker}-{i}");
+                let event = serde_json::json!({"event_id": id}).to_string();
+                let start = Instant::now();
+                let result = append(&pool, &tenant, &id, &event).await.unwrap();
+                assert!(!result.replay);
+                samples.push((start.elapsed().as_secs_f64()*1000.0, result));
+            }
+            samples
+        });
+    }
+    let mut latencies = Vec::new();
+    let mut anchor = None;
+    while let Some(task) = tasks.join_next().await {
+        for (latency, result) in task.unwrap() {
+            latencies.push(latency);
+            if anchor.as_ref().map_or(true, |a: &aigov_audit::transactional_ledger::AppendResult| a.sequence < result.sequence) {
+                anchor = Some(result);
+            }
+        }
+    }
+    let elapsed = start.elapsed().as_secs_f64();
+    let anchor = anchor.unwrap();
+    assert_eq!(latencies.len(), 1000);
+    assert_eq!(anchor.sequence, 1000);
+    verify_checkpoint(&pool, &tenant, anchor.sequence, &anchor.record_hash).await.unwrap();
+    latencies.sort_by(f64::total_cmp);
+    println!("POSTGRES_LEDGER_BENCHMARK {}", serde_json::json!({
+        "events": 1000, "workers": 4, "elapsed_seconds": elapsed,
+        "events_per_second": 1000.0 / elapsed,
+        "p50_ms": (latencies[499]+latencies[500])/2.0,
+        "p95_ms": latencies[949], "p99_ms": latencies[989],
+        "checkpoint_verified": true
+    }));
+}
