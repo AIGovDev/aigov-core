@@ -4,6 +4,9 @@ on:
     branches: [staging]
     paths:
       - 'scripts/benchmark_core_http.py'
+      - 'rust/src/transactional_ledger.rs'
+      - 'rust/tests/transactional_ledger.rs'
+      - 'rust/migrations/**'
       - '.github/workflows/core-http-benchmark.yml'
       - 'scripts/verify_benchmark_ledger.py'
       - 'scripts/test_verify_benchmark_ledger.py'
@@ -37,6 +40,10 @@ jobs:
       - run: python -m pip install -e ./python
       - run: python -m unittest discover -s scripts -p test_verify_benchmark_ledger.py
       - run: cargo build --manifest-path rust/Cargo.toml --release --locked --bin aigov_audit
+      - name: Test transactional ledger against PostgreSQL
+        env:
+          GOVAI_DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
+        run: cargo test --manifest-path rust/Cargo.toml --release --locked --test transactional_ledger -- --ignored
       - name: Benchmark disposable release Core
         env:
           AIGOV_ENVIRONMENT: dev
