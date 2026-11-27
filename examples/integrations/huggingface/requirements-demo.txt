@@ -1,0 +1,5 @@
+huggingface_hub==0.30.2
+transformers==4.50.3
+torch==2.6.0
+evaluate==0.4.3
+datasets==3.5.0
