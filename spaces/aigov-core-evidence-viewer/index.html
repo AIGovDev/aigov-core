@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <title>AIGov Core Evidence Viewer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0d0f;
+      --panel: #141a1e;
+      --panel-raised: #1b2328;
+      --text: #eceae4;
+      --muted: #a5aaa9;
+      --accent: #6fa8b8;
+      --ok: #7dbb9a;
+      --warn: #e0b978;
+      --bad: #d98782;
+      --border: #303a3e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header { padding: 1.5rem clamp(1rem, 4vw, 3rem); border-bottom: 1px solid var(--border); }
+    h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.1rem); }
+    h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+    h3 { margin: 0 0 .6rem; font-size: .9rem; color: var(--muted); }
+    p { margin: .45rem 0; }
+    .sub, .muted { color: var(--muted); }
+    main { max-width: 1160px; margin: 0 auto; padding: 1.25rem; }
+    .notice { padding: .9rem 1rem; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: .55rem; background: var(--panel); }
+    .notice strong { color: var(--accent); }
+    .loader { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; margin: 1rem 0; padding: 1rem; border: 1px solid var(--border); border-radius: .55rem; background: var(--panel); }
+    input[type="file"] { max-width: 100%; color: var(--text); }
+    button { border: 1px solid var(--accent); border-radius: .4rem; padding: .55rem .8rem; background: var(--accent); color: #0a0d0f; font: inherit; font-weight: 700; cursor: pointer; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+    #status { min-height: 1.5rem; color: var(--muted); }
+    #status[data-kind="error"] { color: var(--bad); }
+    #status[data-kind="success"] { color: var(--ok); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin: 1rem 0; }
+    .card { min-width: 0; padding: 1rem; border: 1px solid var(--border); border-radius: .55rem; background: var(--panel); }
+    .meta { color: var(--muted); overflow-wrap: anywhere; font-size: .92rem; }
+    .verdict { display: inline-block; margin-bottom: .45rem; border-radius: 999px; padding: .12rem .65rem; background: var(--panel-raised); font-weight: 800; }
+    .verdict.VALID { color: var(--ok); }
+    .verdict.INVALID, .verdict.BLOCKED { color: var(--bad); }
+    .verdict.UNKNOWN { color: var(--warn); }
+    .result { font-weight: 700; }
+    .result.ok { color: var(--ok); }
+    .result.fail { color: var(--bad); }
+    .badge { display: inline-block; margin-right: .35rem; border: 1px solid var(--border); border-radius: 999px; padding: .05rem .45rem; color: var(--accent); font-size: .78rem; }
+    ul.timeline { list-style: none; margin: 0; padding: 0; }
+    .timeline li { margin: .55rem 0; padding: .75rem; border: 1px solid var(--border); border-radius: .45rem; background: var(--panel); overflow-wrap: anywhere; }
+    #blockedReasons ul { padding-left: 1.2rem; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code { overflow-wrap: anywhere; }
+    details { margin-top: 1rem; border: 1px solid var(--border); border-radius: .55rem; background: var(--panel); }
+    summary { cursor: pointer; padding: .8rem 1rem; }
+    pre { max-height: 34rem; overflow: auto; padding: 1rem; border-top: 1px solid var(--border); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+    [hidden] { display: none !important; }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } main { padding: .8rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AIGov Core evidence viewer</h1>
+    <p class="sub">Inspect an audit export locally in your browser.</p>
+  </header>
+  <main>
+    <section class="notice" aria-label="Privacy and verification limits">
+      <p><strong>Local-only demo.</strong> The selected JSON file is read in this browser tab; the viewer has no upload endpoint or external script.</p>
+      <p>This viewer recomputes SHA-256 record hashes and checks chain links in the supplied export. A passing chain does not prove who created it, that an action occurred, or that the included chain head is independently trusted. It does not verify export signatures or legal compliance.</p>
+    </section>
+    <section class="loader" aria-label="Load audit export">
+      <label for="file">Choose an audit export JSON file (maximum 8 MiB)</label>
+      <input type="file" id="file" accept="application/json,.json" />
+      <label for="url">Or load a JSON path from this same origin</label>
+      <input type="url" id="url" placeholder="../exports/your-run-id.json" />
+      <button type="button" id="loadUrl">Load path</button>
+      <button type="button" id="clear">Clear</button>
+      <div id="status" role="status" aria-live="polite">No file loaded.</div>
+    </section>
+    <section id="content" hidden>
+      <div class="grid">
+        <article class="card"><h2>Run</h2><div id="runMeta"></div></article>
+        <article class="card"><h2>Ledger verdict</h2><div id="verdict"></div><div id="blockedReasons"></div></article>
+        <article class="card"><h2>Hash-chain check</h2><div id="integrity"></div><p class="meta">Checks each included record hash against SHA-256(previous hash + newline + exact event JSON), beginning with the Core genesis value.</p></article>
+        <article class="card"><h2>Recorded gates</h2><div id="gates"></div></article>
+      </div>
+      <h2>Evidence events in export order</h2>
+      <ul class="timeline" id="timeline"></ul>
+      <details>
+        <summary>Show raw export JSON</summary>
+        <pre id="raw"></pre>
+      </details>
+    </section>
+  </main>
+  <script>
+    "use strict";
+    const MAX_FILE_BYTES = 8 * 1024 * 1024;
+    const MAX_ROWS = 5000;
+    const fileInput = document.getElementById("file");
+    const urlInput = document.getElementById("url");
+    const content = document.getElementById("content");
+    const status = document.getElementById("status");
+
+    function setStatus(message, kind = "info") {
+      status.textContent = message;
+      status.dataset.kind = kind;
+    }
+
+    function addText(parent, tag, className, value) {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      element.textContent = value == null ? "—" : String(value);
+      parent.appendChild(element);
+      return element;
+    }
+
+    function clearRendered() {
+      content.hidden = true;
+      for (const id of ["runMeta", "verdict", "blockedReasons", "integrity", "gates", "timeline", "raw"]) {
+        document.getElementById(id).replaceChildren();
+      }
+    }
+
+    function hex(bytes) {
+      return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    }
+
+    async function sha256Hex(value) {
+      if (!globalThis.crypto || !crypto.subtle) {
+        throw new Error("Web Crypto is unavailable; open this Space over HTTPS.");
+      }
+      const bytes = new TextEncoder().encode(value);
+      return hex(await crypto.subtle.digest("SHA-256", bytes));
+    }
+
+    async function verifyHashChain(chain, declaredHead) {
+      if (!Array.isArray(chain) || chain.length === 0) {
+        return { ok: false, message: "The export contains no log_chain records." };
+      }
+      if (chain.length > MAX_ROWS) {
+        return { ok: false, message: `Chain exceeds the ${MAX_ROWS.toLocaleString()}-record demo limit.` };
+      }
+      let expectedPrev = "GENESIS";
+      for (let index = 0; index < chain.length; index += 1) {
+        const row = chain[index];
+        if (!row || typeof row !== "object" || Array.isArray(row)) {
+          return { ok: false, message: `Invalid record at index ${index}.` };
+        }
+        if (row.prev_hash !== expectedPrev) {
+          return { ok: false, message: `Previous-hash mismatch at record ${index + 1}.` };
+        }
+        if (typeof row.event_json !== "string" || typeof row.record_hash !== "string") {
+          return { ok: false, message: `Missing event_json or record_hash at record ${index + 1}.` };
+        }
+        if (!/^[0-9a-f]{64}$/.test(row.record_hash)) {
+          return { ok: false, message: `Invalid SHA-256 encoding at record ${index + 1}.` };
+        }
+        const computed = await sha256Hex(`${row.prev_hash}\n${row.event_json}`);
+        if (computed !== row.record_hash) {
+          return { ok: false, message: `Record-hash mismatch at record ${index + 1}.` };
+        }
+        expectedPrev = row.record_hash;
+      }
+      if (declaredHead && declaredHead !== expectedPrev) {
+        return { ok: false, message: "The declared chain head does not match the final record." };
+      }
+      return { ok: true, message: `Verified ${chain.length.toLocaleString()} record hash(es) and links.` };
+    }
+
+    function renderReasons(parent, reasons) {
+      parent.replaceChildren();
+      if (!Array.isArray(reasons) || reasons.length === 0) {
+        addText(parent, "p", "meta", "No blocked reasons recorded.");
+        return;
+      }
+      const list = document.createElement("ul");
+      for (const reason of reasons) {
+        const item = document.createElement("li");
+        addText(item, "span", "badge", reason && reason.code);
+        item.appendChild(document.createTextNode(reason && reason.message ? String(reason.message) : ""));
+        list.appendChild(item);
+      }
+      parent.appendChild(list);
+    }
+
+    function renderGates(parent, events, decision) {
+      parent.replaceChildren();
+      const approved = events.some((event) => event && event.event_type === "human_approved");
+      const rows = [
+        `evaluation_passed: ${String(decision.evaluation_passed ?? "not recorded")}`,
+        `human_approved event: ${approved ? "recorded" : "not present in export"}`,
+        `promotion state: ${String((decision.promotion || {}).state || "not recorded")}`,
+      ];
+      for (const row of rows) addText(parent, "p", "", row);
+    }
+
+    async function renderExport(doc) {
+      if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+        throw new Error("The file must contain a JSON object.");
+      }
+      const events = Array.isArray(doc.evidence_events) ? doc.evidence_events : [];
+      const chain = (doc.evidence_hashes || {}).log_chain || [];
+      if (events.length > MAX_ROWS) throw new Error(`Export exceeds the ${MAX_ROWS.toLocaleString()}-event demo limit.`);
+      const run = doc.run || {};
+      const decision = doc.decision || {};
+      const allowedVerdicts = new Set(["VALID", "INVALID", "BLOCKED"]);
+      const rawVerdict = String(decision.verdict || "UNKNOWN").toUpperCase();
+      const verdict = allowedVerdicts.has(rawVerdict) ? rawVerdict : "UNKNOWN";
+
+      const runMeta = document.getElementById("runMeta");
+      runMeta.replaceChildren();
+      addText(runMeta, "p", "", `Run ID: ${run.run_id || "—"}`);
+      addText(runMeta, "p", "meta", `Policy: ${doc.policy_version || "—"} · Environment: ${doc.environment || "—"}`);
+      addText(runMeta, "p", "meta", `Exported: ${doc.exported_at_utc || "—"}`);
+
+      const verdictNode = document.getElementById("verdict");
+      verdictNode.replaceChildren();
+      addText(verdictNode, "span", `verdict ${verdict}`, verdict);
+      renderReasons(document.getElementById("blockedReasons"), decision.blocked_reasons);
+
+      const chainResult = await verifyHashChain(
+        chain,
+        (doc.evidence_hashes || {}).chain_head_record_sha256,
+      );
+      const integrity = document.getElementById("integrity");
+      integrity.replaceChildren();
+      addText(integrity, "p", `result ${chainResult.ok ? "ok" : "fail"}`, chainResult.message);
+      if (chain.length) addText(integrity, "p", "meta", `Chain head in export: ${chain[chain.length - 1].record_hash || "—"}`);
+
+      renderGates(document.getElementById("gates"), events, decision);
+      const timeline = document.getElementById("timeline");
+      timeline.replaceChildren();
+      for (const event of events) {
+        const item = document.createElement("li");
+        addText(item, "span", "badge", event && event.event_type);
+        addText(item, "p", "meta", `Event ID: ${event && event.event_id || "—"}`);
+        addText(item, "p", "meta", `${event && event.ts_utc || "—"} · ${event && event.actor || "—"}`);
+        timeline.appendChild(item);
+      }
+      document.getElementById("raw").textContent = JSON.stringify(doc, null, 2);
+      content.hidden = false;
+      setStatus(
+        chainResult.ok
+          ? "Export loaded locally; the included record hashes and links match."
+          : "Export loaded locally; the included chain did not pass verification.",
+        chainResult.ok ? "success" : "error",
+      );
+    }
+
+    async function loadText(text) {
+      clearRendered();
+      try {
+        await renderExport(JSON.parse(text));
+      } catch (error) {
+        clearRendered();
+        setStatus(error instanceof Error ? error.message : "Could not read this export.", "error");
+      }
+    }
+
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {
+        setStatus("No file loaded.");
+        return;
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        fileInput.value = "";
+        setStatus("File exceeds the 8 MiB demo limit.", "error");
+        return;
+      }
+      await loadText(await file.text());
+    });
+
+    async function loadSameOriginPath() {
+      clearRendered();
+      const rawPath = urlInput.value.trim();
+      if (!rawPath) {
+        setStatus("Enter a path from this same origin.", "error");
+        return;
+      }
+      try {
+        const url = new URL(rawPath, location.href);
+        if (!new Set(["http:", "https:"]).has(url.protocol) || url.origin !== location.origin) {
+          throw new Error("Only HTTP(S) paths on this page's origin are allowed.");
+        }
+        const response = await fetch(url.href, {
+          method: "GET",
+          mode: "same-origin",
+          credentials: "omit",
+          redirect: "error",
+          referrerPolicy: "no-referrer",
+        });
+        if (!response.ok) throw new Error(`Fetch failed: HTTP ${response.status}`);
+        const declaredLength = Number(response.headers.get("content-length") || 0);
+        if (declaredLength > MAX_FILE_BYTES) throw new Error("File exceeds the 8 MiB demo limit.");
+        const text = await response.text();
+        if (new TextEncoder().encode(text).byteLength > MAX_FILE_BYTES) {
+          throw new Error("File exceeds the 8 MiB demo limit.");
+        }
+        await loadText(text);
+      } catch (error) {
+        clearRendered();
+        setStatus(error instanceof Error ? error.message : "Could not fetch this export.", "error");
+      }
+    }
+
+    document.getElementById("loadUrl").addEventListener("click", loadSameOriginPath);
+    const exportPath = new URLSearchParams(location.search).get("export");
+    if (exportPath) {
+      urlInput.value = exportPath;
+      loadSameOriginPath();
+    }
+
+    document.getElementById("clear").addEventListener("click", () => {
+      fileInput.value = "";
+      urlInput.value = "";
+      clearRendered();
+      setStatus("No file loaded.");
+    });
+  </script>
+</body>
+</html>
