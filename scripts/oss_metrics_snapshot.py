@@ -219,7 +219,9 @@ def collect_snapshot(
         timestamp = timestamp.replace(tzinfo=timezone.utc)
     return {
         "schema": SCHEMA,
-        "collected_at": timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "collected_at": timestamp.astimezone(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
         "repository": repo,
         "metrics": metrics,
     }
