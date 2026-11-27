@@ -224,3 +224,27 @@ async fn transactional_postgres_throughput() {
         "checkpoint_verified": true
     }));
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL; run explicitly in CI"]
+async fn checkpoint_export_preserves_exact_event_bytes_and_rejects_tampering() {
+    use aigov_audit::transactional_ledger::export_checkpoint_jsonl;
+    let url = std::env::var("GOVAI_DATABASE_URL").expect("disposable PostgreSQL URL");
+    let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.unwrap();
+    db::run_sqlx_migrations(&pool).await.unwrap();
+    let tenant = Uuid::new_v4().to_string();
+    let other = Uuid::new_v4().to_string();
+    let event = r#"{ "event_id": "a", "value": "test" }"#;
+    let anchor = append(&pool, &tenant, "a", event).await.unwrap();
+    append(&pool, &other, "a", r#"{"event_id":"a","private":true}"#).await.unwrap();
+    let bytes = export_checkpoint_jsonl(&pool, &tenant, anchor.sequence, &anchor.record_hash).await.unwrap();
+    assert_eq!(bytes.last(), Some(&b'\n'));
+    let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(record["event_json"].as_str(), Some(event));
+    assert_eq!(record["prev_hash"].as_str(), Some("GENESIS"));
+    assert_eq!(record["record_hash"].as_str(), Some(anchor.record_hash.as_str()));
+    assert!(export_checkpoint_jsonl(&pool, &other, anchor.sequence, &anchor.record_hash).await.is_err());
+    sqlx::query("UPDATE core_ledger_records SET event_json=$2 WHERE tenant_id=$1 AND seq=1")
+        .bind(&tenant).bind(r#"{"event_id":"a","tampered":true}"#).execute(&pool).await.unwrap();
+    assert!(export_checkpoint_jsonl(&pool, &tenant, anchor.sequence, &anchor.record_hash).await.is_err());
+}
