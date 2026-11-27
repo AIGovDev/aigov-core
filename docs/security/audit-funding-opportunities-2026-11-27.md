@@ -7,6 +7,7 @@
 
 | Route | Current fit | Funding / conditions | Status and next action |
 |---|---|---|---|
+| GitHub Secure Open Source Fund | A possible small-maintainer security program, but the current verified adoption baseline is only 2 stars and low PyPI downloads; its stated fit emphasizes fast-growing dependencies with demonstrated traction. | $10,000 per selected project; rolling applications; selection-based, with 15 hours over 3 weeks plus later check-ins. No audit award or selection is guaranteed. | Current traction criterion is a material weakness. Keep as a later candidate; no application submitted. |
 | OSTIF project audit | Strongest first contact: OSTIF scopes FOSS audits and matches projects with audit firms. | No publicly guaranteed grant amount, award, or deadline. Funding depends on sponsor availability and scoping. | Prepare a no-commitment scoping inquiry to `derek@ostif.org`; ask whether AIGov Core can be considered for a funded or subsidized review. Not sent. |
 | Trail of Bits Patch the Planet | Potentially strong, no-fee program for selected open-source projects. | Selection-based, short focused engagement; selection is not guaranteed and does not imply an endorsement or full security audit. | Prepare application for the Rust ledger, tenant isolation, authorization and release pipeline. Not submitted. |
 | OpenSSF Best Practices badge | Relevant low-cost security baseline; self-assessment is not independent audit evidence. | Free self-certification; no grant or auditor provided. Badge requires meeting and documenting its criteria. | Do not claim a badge. Complete a criterion-by-criterion evidence review separately before applying. |
@@ -42,6 +43,7 @@ AIGov Core maintainers
 
 ## Verification sources
 
+- GitHub Secure Open Source Fund eligibility and conditions: <https://github.com/open-source/github-secure-open-source-fund>
 - OSTIF audit process: <https://ostif.org/get-an-audit/>; project contact: <https://ostif.org/contact/>
 - Trail of Bits Patch the Planet: <https://www.trailofbits.com/patch-the-planet>
 - OpenSSF Best Practices badge: <https://bestpractices.coreinfrastructure.org/en>
