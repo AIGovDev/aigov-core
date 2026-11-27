@@ -32,6 +32,11 @@ authorization or ledger code changes are included.
 The Space files are prepared in this repository only. No Hugging Face Space was
 created or published, and no hosted demo is claimed.
 
+## Evaluation gate
+No model evaluation, policy decision, evidence ingestion, or runtime enforcement
+behavior changed. The browser check reports hash-chain consistency only and must
+not be interpreted as a compliance verdict or an external attestation.
+
 ## Human approval gate
 This PR requires maintainer review and approval before merge. No approval is
 claimed by this report.
