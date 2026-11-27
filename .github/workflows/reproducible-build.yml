@@ -1,0 +1,44 @@
+name: Reproducible Rust build
+on:
+  pull_request:
+    branches: [staging]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca
+      - name: Build twice and compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export CARGO_INCREMENTAL=0
+          mkdir -p "$RUNNER_TEMP/repro-evidence"
+          rustc -vV > "$RUNNER_TEMP/repro-evidence/toolchain.txt"
+          git rev-parse HEAD > "$RUNNER_TEMP/repro-evidence/revision.txt"
+          for label in a b; do
+            root="$RUNNER_TEMP/repro-$label"
+            mkdir -p "$root"
+            git archive HEAD rust | tar -x -C "$root"
+            (
+              cd "$root/rust"
+              export CARGO_TARGET_DIR="$root/target"
+              export RUSTFLAGS="--remap-path-prefix=$root=/build --remap-path-prefix=$HOME/.cargo=/cargo"
+              cargo build --locked --release --bin aigov_audit
+              cp "$CARGO_TARGET_DIR/release/aigov_audit" "$RUNNER_TEMP/repro-evidence/$label.bin"
+            )
+          done
+          cd "$RUNNER_TEMP/repro-evidence"
+          sha256sum a.bin b.bin > sha256.txt
+          cmp a.bin b.bin
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: reproducible-build-evidence
+          path: ${{ runner.temp }}/repro-evidence/
+          if-no-files-found: error
