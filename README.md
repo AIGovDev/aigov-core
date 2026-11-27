@@ -653,10 +653,6 @@ Draft **channel announcements**, **FAQ**, **technical article**, **benchmark sum
 - [`examples/adoption/ai-act-evidence-workflow/`](examples/adoption/ai-act-evidence-workflow/) — interchange JSON samples
 - [`examples/adoption/standards-conformance-kit/`](examples/adoption/standards-conformance-kit/) — offline `run-conformance.sh`
 
-**Contributor growth**
-
-- [First external contributor playbook](docs/community/first-external-contributor-playbook.md) · [Maintainer outreach checklist](docs/community/maintainer-outreach-checklist.md) · [Contributor recognition](docs/community/contributor-recognition.md)
-
 **Readiness checks**
 
 - `make enterprise-readiness-check` — aggregate Core readiness checks (see Makefile targets section above)
@@ -690,11 +686,7 @@ Contributions to **AIGov Core** belong in this repository. See [`CONTRIBUTING.md
 
 ## Community operations
 
-Structured **contributor funnel**, **issue triage**, maintainer cadence, label playbooks (`good first issue`, `help wanted`), adoption feedback, and project-board routines:
-
-- [docs/community/contributor-funnel.md](docs/community/contributor-funnel.md)
-- [docs/community/issue-triage.md](docs/community/issue-triage.md)
-- [docs/community/maintainer-operating-model.md](docs/community/maintainer-operating-model.md)
+Use [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`GOVERNANCE.md`](GOVERNANCE.md) for contributor and maintainer processes. Adoption reporting is documented in [metrics tracking](docs/community/metrics-tracking.md) and the [weekly report template](docs/community/weekly-adoption-report-template.md).
 
 ## Project governance
 
