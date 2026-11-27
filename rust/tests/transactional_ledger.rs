@@ -273,3 +273,19 @@ async fn checked_append_refusals_leave_no_committed_records() {
     assert_eq!(accepted.sequence, 1);
     assert!(!accepted.replay);
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL; run explicitly in CI"]
+async fn checked_append_rejects_malformed_policy_snapshot() {
+    use aigov_audit::transactional_ledger::checked_append;
+    let url = std::env::var("GOVAI_DATABASE_URL").expect("disposable PostgreSQL URL");
+    let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.unwrap();
+    db::run_sqlx_migrations(&pool).await.unwrap();
+    let tenant = Uuid::new_v4().to_string();
+    let anchor = append(&pool, &tenant, "malformed", r#"{"event_id":"malformed"}"#).await.unwrap();
+    let result = checked_append(&pool, &tenant, "decision", r#"{"event_id":"decision"}"#, |_| {
+        panic!("policy callback must not run on malformed evidence")
+    }).await;
+    assert!(matches!(result, Err(sqlx::Error::Protocol(ref message)) if message.starts_with("invalid policy snapshot:")));
+    aigov_audit::transactional_ledger::verify_checkpoint(&pool, &tenant, anchor.sequence, &anchor.record_hash).await.unwrap();
+}
