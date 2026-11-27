@@ -39,7 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           . .venv/bin/activate
-          python -m pytest tests/test_standards_conformance.py -q
+          python -m pytest tests/test_standards_conformance.py tests/test_huggingface_provenance.py tests/test_huggingface_evaluation.py tests/test_huggingface_transformers.py -q
 
       - name: Write Python smoke summary
         if: always()
