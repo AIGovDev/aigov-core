@@ -40,3 +40,18 @@ python -m pytest tests/test_huggingface_provenance.py -q
 ```
 
 Submit feature changes to `staging` before promotion to `main`.
+
+## CPU evaluation demonstration (experimental)
+
+```sh
+python -m pip install -e ./python huggingface_hub transformers torch evaluate datasets
+python examples/integrations/huggingface/evaluation_demo.py
+```
+
+The demo uses a tiny random BERT model and synthetic labels. It pins the resolved
+Hub revision for that run, checks selected safetensors and tokenizer files, runs
+CPU inference and a local Evaluate metric, then detects a modified metric record.
+The model is not a quality benchmark. Dependencies and initial Hub revision are
+not locked across runs. The in-memory anchor demonstrates integrity only; an
+independent verifier must obtain its anchor through a trusted channel. The toy
+policy is a reference, not an enforced policy. Live execution is pending validation.
