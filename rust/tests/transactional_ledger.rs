@@ -248,3 +248,28 @@ async fn checkpoint_export_preserves_exact_event_bytes_and_rejects_tampering() {
         .bind(&tenant).bind(r#"{"event_id":"a","tampered":true}"#).execute(&pool).await.unwrap();
     assert!(export_checkpoint_jsonl(&pool, &tenant, anchor.sequence, &anchor.record_hash).await.is_err());
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL; run explicitly in CI"]
+async fn checked_append_refusals_leave_no_committed_records() {
+    use aigov_audit::transactional_ledger::checked_append;
+    let url = std::env::var("GOVAI_DATABASE_URL").expect("disposable PostgreSQL URL");
+    let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.unwrap();
+    db::run_sqlx_migrations(&pool).await.unwrap();
+    let tenant = Uuid::new_v4().to_string();
+    let event = r#"{"event_id":"decision"}"#;
+    let denied = checked_append(&pool, &tenant, "decision", event, |_| {
+        Err("policy refused".to_owned())
+    }).await;
+    assert!(matches!(denied, Err(sqlx::Error::Protocol(ref message)) if message == "policy refused"));
+    let missing = checked_append(&pool, &tenant, "decision", event, |_| {
+        Ok(Some("missing-approval".to_owned()))
+    }).await;
+    assert!(matches!(missing, Err(sqlx::Error::Database(ref error)) if error.code().as_deref() == Some("23503")));
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM core_ledger_records WHERE tenant_id=$1")
+        .bind(&tenant).fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 0);
+    let accepted = checked_append(&pool, &tenant, "decision", event, |_| Ok(None)).await.unwrap();
+    assert_eq!(accepted.sequence, 1);
+    assert!(!accepted.replay);
+}
