@@ -20,18 +20,24 @@ SCHEMA = "aigov.opensource.metrics.v1"
 USER_AGENT = "aigov-oss-metrics/1.0"
 
 
-class GitHubAPIError(Exception):
+class HTTPAPIError(Exception):
     def __init__(self, status: int):
-        super().__init__(f"GitHub API returned HTTP {status}")
+        super().__init__(f"Remote API returned HTTP {status}")
         self.status = status
 
 
+GitHubAPIError = HTTPAPIError
+
+
 def request_json(url: str, token: str | None = None) -> tuple[Any, dict[str, str]]:
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": USER_AGENT,
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    headers = {"User-Agent": USER_AGENT}
+    if urlsplit(url).netloc == "api.github.com":
+        headers.update(
+            {
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+        )
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = Request(url, headers=headers)
@@ -43,7 +49,7 @@ def request_json(url: str, token: str | None = None) -> tuple[Any, dict[str, str
     except HTTPError as exc:
         raise GitHubAPIError(exc.code) from None
     except URLError as exc:
-        raise RuntimeError("Could not reach the GitHub API") from exc
+        raise RuntimeError("Could not reach the remote API") from exc
     if status == 202:
         raise GitHubAPIError(status)
     try:
@@ -91,7 +97,7 @@ def _unavailable(reason: str, source: str) -> dict[str, Any]:
     return {"status": "unavailable", "reason": reason, "source": source}
 
 
-def _unavailable_reason(exc: GitHubAPIError, token: str | None) -> str:
+def _unavailable_reason(exc: HTTPAPIError, token: str | None) -> str:
     if exc.status == 202:
         return "github_computation_pending"
     if exc.status == 403:
@@ -109,6 +115,7 @@ def collect_snapshot(
     repo: str,
     *,
     token: str | None = None,
+    pypi_package: str | None = None,
     now: datetime | None = None,
     fetcher: Callable[[str, str | None], tuple[Any, dict[str, str]]] = request_json,
 ) -> dict[str, Any]:
@@ -140,10 +147,32 @@ def collect_snapshot(
         metrics["contributors_listed"] = _available(
             len(contributors),
             contributors_source,
+            "Legacy compatible entry count, including anonymous entries.",
+        )
+        human_account_ids = set()
+        bot_account_ids = set()
+        for contributor in contributors:
+            if not isinstance(contributor, dict):
+                raise TypeError("GitHub API returned an invalid contributor entry")
+            account_id = contributor.get("id")
+            if not _nonnegative_int(account_id):
+                continue
+            if contributor.get("type") == "Bot":
+                bot_account_ids.add(account_id)
+            elif contributor.get("type") == "User":
+                human_account_ids.add(account_id)
+        metrics["contributors_unique_accounts"] = _available(
+            len(human_account_ids),
+            contributors_source,
             (
-                "Count of API entries, including anonymous entries when returned; "
-                "not a unique-human count. GitHub may cache this endpoint."
+                "Distinct non-bot GitHub account IDs; identities are not retained. "
+                "Aliases across multiple accounts cannot be resolved."
             ),
+        )
+        metrics["contributors_bot_accounts"] = _available(
+            len(bot_account_ids),
+            contributors_source,
+            "Distinct GitHub bot account IDs, reported separately from user accounts.",
         )
     except (GitHubAPIError, RuntimeError, TypeError) as exc:
         reason = (
@@ -152,6 +181,64 @@ def collect_snapshot(
             else "invalid_api_response"
         )
         metrics["contributors_listed"] = _unavailable(reason, contributors_source)
+        metrics["contributors_unique_accounts"] = _unavailable(
+            reason, contributors_source
+        )
+        metrics["contributors_bot_accounts"] = _unavailable(
+            reason, contributors_source
+        )
+
+    if pypi_package:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", pypi_package):
+            raise ValueError(
+                "PyPI package name contains unsupported characters"
+            )
+        package_url = (
+            f"https://pypistats.org/api/packages/{quote(pypi_package, safe='')}/recent"
+        )
+        source = f"GET {package_url}"
+        try:
+            payload, _ = fetcher(package_url, None)
+            data = payload.get("data") if isinstance(payload, dict) else None
+            values = (
+                {
+                    period: data.get(f"last_{period}")
+                    for period in ("day", "week", "month")
+                }
+                if isinstance(data, dict)
+                else {}
+            )
+            if payload.get("package") != pypi_package or not all(
+                _nonnegative_int(value) for value in values.values()
+            ) or len(values) != 3:
+                raise RuntimeError(
+                    "PyPI Stats returned invalid or mismatched package data"
+                )
+            metrics["pypi_downloads"] = _available(
+                values,
+                source,
+                (
+                    "Aggregate PyPI downloads for rolling day/week/month windows; "
+                    "known mirrors are excluded. Downloads are not unique installs "
+                    "or users."
+                ),
+            )
+        except (HTTPAPIError, RuntimeError, TypeError, AttributeError) as exc:
+            if isinstance(exc, HTTPAPIError):
+                reason = (
+                    "package_not_found"
+                    if exc.status == 404
+                    else "rate_limited"
+                    if exc.status == 429
+                    else f"pypi_http_{exc.status}"
+                )
+            else:
+                reason = "invalid_api_response"
+            metrics["pypi_downloads"] = _unavailable(reason, source)
+    else:
+        metrics["pypi_downloads"] = _unavailable(
+            "package_not_configured", "PyPI Stats API"
+        )
 
     releases_source = f"GET /repos/{repo}/releases"
     try:
@@ -252,14 +339,18 @@ def compare_snapshots(
         elif isinstance(new_value, dict) and isinstance(old_value, dict):
             deltas = {
                 key: new_value[key] - old_value[key]
-                for key in ("total", "unique")
-                if _nonnegative_int(new_value.get(key))
+                for key in new_value.keys() & old_value.keys()
+                if key != "window_days"
+                and _nonnegative_int(new_value.get(key))
                 and _nonnegative_int(old_value.get(key))
             }
             changes[name] = {
                 "status": "available" if deltas else "unavailable",
                 "delta": deltas if deltas else None,
-                "note": "Rolling 14-day windows overlap; this is not a daily count.",
+                "note": (
+                    "Difference between overlapping rolling-window totals; "
+                    "not a count of downloads or visits during the interval."
+                ),
             }
         else:
             changes[name] = {"status": "unavailable"}
@@ -285,6 +376,10 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", required=True, help="GitHub repository in OWNER/REPO form"
     )
     parser.add_argument(
+        "--pypi-package",
+        help="Optional exact PyPI project name for aggregate package downloads",
+    )
+    parser.add_argument(
         "--output", type=Path, help="Write JSON to a file instead of stdout"
     )
     parser.add_argument(
@@ -293,7 +388,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     token = os.environ.get("GITHUB_TOKEN") or None
     try:
-        snapshot = collect_snapshot(args.repo, token=token)
+        snapshot = collect_snapshot(
+            args.repo, token=token, pypi_package=args.pypi_package
+        )
         if args.previous:
             snapshot["comparison"] = compare_snapshots(
                 snapshot, _load_snapshot(args.previous)

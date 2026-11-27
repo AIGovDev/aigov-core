@@ -15,8 +15,10 @@ from oss_metrics_snapshot import (
 class FakeAPI:
     def __init__(self, responses):
         self.responses = responses
+        self.calls = []
 
     def __call__(self, url, token=None):
+        self.calls.append((url, token))
         value = self.responses.get(url)
         if isinstance(value, Exception):
             raise value
@@ -37,10 +39,19 @@ def base_responses():
             {},
         ),
         f"{root}/contributors?anon=1&per_page=100": (
-            [{"login": "alice"}],
+            [
+                {"id": 101, "login": "alice", "type": "User"},
+                {"id": 202, "login": "build-bot", "type": "Bot"},
+            ],
             {"Link": '<https://api.github.com/page/2>; rel="next"'},
         ),
-        "https://api.github.com/page/2": ([{"name": "Anonymous"}], {}),
+        "https://api.github.com/page/2": (
+            [
+                {"id": 101, "login": "alice-renamed", "type": "User"},
+                {"name": "Anonymous contributor", "contributions": 3},
+            ],
+            {},
+        ),
         f"{root}/releases?per_page=100": (
             [
                 {"assets": [{"download_count": 7}, {"download_count": 3}]},
@@ -52,7 +63,7 @@ def base_responses():
 
 
 class OSSMetricsSnapshotTests(unittest.TestCase):
-    def test_snapshot_counts_public_metrics_and_paginates_contributors(self):
+    def test_snapshot_counts_metrics_and_deduplicates_accounts(self):
         _, responses = base_responses()
         snapshot = collect_snapshot(
             "AIGovDev/aigov-core",
@@ -63,33 +74,41 @@ class OSSMetricsSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["metrics"]["stars"]["value"], 17)
         self.assertEqual(snapshot["metrics"]["forks"]["value"], 4)
         self.assertEqual(snapshot["metrics"]["open_issues_and_prs"]["value"], 8)
-        self.assertEqual(snapshot["metrics"]["contributors_listed"]["value"], 2)
+        self.assertEqual(snapshot["metrics"]["contributors_listed"]["value"], 4)
+        self.assertEqual(
+            snapshot["metrics"]["contributors_unique_accounts"]["value"], 1
+        )
+        self.assertEqual(snapshot["metrics"]["contributors_bot_accounts"]["value"], 1)
+        self.assertEqual(
+            snapshot["metrics"]["pypi_downloads"]["reason"],
+            "package_not_configured",
+        )
         self.assertEqual(snapshot["metrics"]["release_asset_downloads"]["value"], 10)
         self.assertEqual(
-            snapshot["metrics"]["traffic_views_14d"],
-            {
-                "status": "unavailable",
-                "reason": "token_not_provided",
-                "source": "GET /repos/AIGovDev/aigov-core/traffic/views",
-            },
+            snapshot["metrics"]["traffic_views_14d"]["reason"],
+            "token_not_provided",
         )
         self.assertEqual(snapshot["collected_at"], "2026-11-27T00:00:00Z")
 
     def test_pagination_link_cannot_send_token_to_another_host(self):
         root, responses = base_responses()
         responses[f"{root}/contributors?anon=1&per_page=100"] = (
-            [{"login": "alice"}],
+            [{"id": 101, "login": "alice", "type": "User"}],
             {"Link": '<https://attacker.example/collect>; rel="next"'},
         )
         responses[f"{root}/traffic/views"] = GitHubAPIError(403)
         responses[f"{root}/traffic/clones"] = GitHubAPIError(403)
+        fake = FakeAPI(responses)
         snapshot = collect_snapshot(
-            "AIGovDev/aigov-core", token="secret-token", fetcher=FakeAPI(responses)
+            "AIGovDev/aigov-core", token="secret-token", fetcher=fake
         )
 
-        metric = snapshot["metrics"]["contributors_listed"]
+        metric = snapshot["metrics"]["contributors_unique_accounts"]
         self.assertEqual(metric["status"], "unavailable")
         self.assertEqual(metric["reason"], "invalid_api_response")
+        self.assertNotIn(
+            ("https://attacker.example/collect", "secret-token"), fake.calls
+        )
         self.assertNotIn("secret-token", repr(snapshot))
 
     def test_restricted_traffic_is_unavailable_not_zero(self):
@@ -109,6 +128,66 @@ class OSSMetricsSnapshotTests(unittest.TestCase):
             self.assertNotIn("value", metric)
         self.assertNotIn("do-not-store-this", repr(snapshot))
 
+    def test_pypi_downloads_and_window_deltas(self):
+        root, responses = base_responses()
+        responses["https://pypistats.org/api/packages/aigov-py/recent"] = (
+            {
+                "package": "aigov-py",
+                "data": {"last_day": 3, "last_week": 12, "last_month": 40},
+            },
+            {},
+        )
+        fake = FakeAPI(responses)
+        current = collect_snapshot(
+            "AIGovDev/aigov-core",
+            pypi_package="aigov-py",
+            fetcher=fake,
+        )
+        self.assertEqual(
+            current["metrics"]["pypi_downloads"]["value"],
+            {"day": 3, "week": 12, "month": 40},
+        )
+        self.assertIn(
+            ("https://pypistats.org/api/packages/aigov-py/recent", None), fake.calls
+        )
+        previous = {
+            "schema": current["schema"],
+            "repository": current["repository"],
+            "collected_at": "2026-11-26T00:00:00Z",
+            "metrics": {
+                "pypi_downloads": {
+                    "status": "available",
+                    "value": {"day": 2, "week": 10, "month": 35},
+                }
+            },
+        }
+        comparison = compare_snapshots(current, previous)
+        self.assertEqual(
+            comparison["changes"]["pypi_downloads"]["delta"],
+            {"day": 1, "week": 2, "month": 5},
+        )
+        self.assertIn(
+            "overlapping rolling-window",
+            comparison["changes"]["pypi_downloads"]["note"],
+        )
+
+    def test_pypi_mismatched_project_fails_unavailable(self):
+        _, responses = base_responses()
+        responses["https://pypistats.org/api/packages/aigov-py/recent"] = (
+            {"package": "another-project", "data": {}},
+            {},
+        )
+        snapshot = collect_snapshot(
+            "AIGovDev/aigov-core",
+            pypi_package="aigov-py",
+            fetcher=FakeAPI(responses),
+        )
+        self.assertEqual(snapshot["metrics"]["pypi_downloads"]["status"], "unavailable")
+        self.assertEqual(
+            snapshot["metrics"]["pypi_downloads"]["reason"],
+            "invalid_api_response",
+        )
+
     def test_traffic_snapshot_and_growth_delta_are_explicit(self):
         root, responses = base_responses()
         responses[f"{root}/traffic/views"] = ({"count": 31, "uniques": 20}, {})
@@ -127,6 +206,8 @@ class OSSMetricsSnapshotTests(unittest.TestCase):
                     "forks",
                     "open_issues_and_prs",
                     "contributors_listed",
+                    "contributors_unique_accounts",
+                    "contributors_bot_accounts",
                     "release_asset_downloads",
                 )
             },
