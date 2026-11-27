@@ -224,3 +224,32 @@ async fn validate_snapshot(
     tx.commit().await?;
     Ok(output)
 }
+
+/// Execute a caller-supplied policy check while holding the tenant lock.
+/// The check returns the validated approval identity, if one is required.
+/// Replays never produce a fresh authorization candidate.
+pub async fn checked_append<F>(
+    pool: &PgPool,
+    tenant: &str,
+    event_id: &str,
+    event_json: &str,
+    check: F,
+) -> Result<AppendResult, sqlx::Error>
+where
+    F: FnOnce(&crate::ledger_view::SnapshotLedgerView) -> Result<Option<String>, String>,
+{
+    let mut tx = pool.begin().await?;
+    let rows = lock_tenant_and_read(&mut tx, tenant).await?;
+    let view = crate::ledger_view::SnapshotLedgerView::from_event_json(&rows)
+        .map_err(|e| sqlx::Error::Protocol(format!("invalid policy snapshot: {e}")))?;
+    let approval = check(&view).map_err(sqlx::Error::Protocol)?;
+    let result = append_in_transaction(&mut tx, tenant, event_id, event_json).await?;
+    if result.replay {
+        return Err(sqlx::Error::Protocol("checked append refuses replay".to_owned()));
+    }
+    if let Some(approval_id) = approval {
+        reserve_validated_approval(&mut tx, tenant, &approval_id, event_id).await?;
+    }
+    tx.commit().await?;
+    Ok(result)
+}
