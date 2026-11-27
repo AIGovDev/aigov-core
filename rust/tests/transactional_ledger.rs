@@ -98,3 +98,30 @@ async fn approval_reservation_is_atomic_and_single_use() {
     assert!(reserve_validated_approval(&mut tx, &other, "approval", "decision").await.is_err());
     tx.rollback().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL; run explicitly in CI"]
+async fn run_snapshot_serializes_independent_connections() {
+    use aigov_audit::transactional_ledger::{append_in_transaction, lock_tenant_and_read_run};
+    let url = std::env::var("GOVAI_DATABASE_URL").unwrap();
+    let first = PgPoolOptions::new().max_connections(2).connect(&url).await.unwrap();
+    let second = PgPoolOptions::new().max_connections(2).connect(&url).await.unwrap();
+    db::run_sqlx_migrations(&first).await.unwrap();
+    let tenant = Uuid::new_v4().to_string();
+    append(&first, &tenant, "a", r#"{"event_id":"a","run_id":"one"}"#).await.unwrap();
+    append(&first, &tenant, "b", r#"{"event_id":"b","run_id":"two"}"#).await.unwrap();
+    let mut tx = first.begin().await.unwrap();
+    assert_eq!(lock_tenant_and_read_run(&mut tx, &tenant, "one").await.unwrap().len(), 1);
+    let mut competing = second.begin().await.unwrap();
+    sqlx::query("SET LOCAL lock_timeout = '200ms'").execute(&mut *competing).await.unwrap();
+    let error = lock_tenant_and_read_run(&mut competing, &tenant, "one").await.unwrap_err();
+    assert_eq!(error.as_database_error().and_then(|e| e.code()).as_deref(), Some("55P03"));
+    competing.rollback().await.unwrap();
+    append_in_transaction(&mut tx, &tenant, "c", r#"{"event_id":"c","run_id":"one"}"#).await.unwrap();
+    tx.commit().await.unwrap();
+    first.close().await;
+    let mut recovered = second.begin().await.unwrap();
+    let events = lock_tenant_and_read_run(&mut recovered, &tenant, "one").await.unwrap();
+    assert_eq!(events, vec![r#"{"event_id":"a","run_id":"one"}"#.to_owned(), r#"{"event_id":"c","run_id":"one"}"#.to_owned()]);
+    recovered.rollback().await.unwrap();
+}
