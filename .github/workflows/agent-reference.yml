@@ -341,6 +341,19 @@ jobs:
             --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_quickstart" \
             --port 18299
 
+      - name: Validate smolagents against release Core
+        run: |
+          set -euo pipefail
+          python -m pip install smolagents==1.22.0
+          python -c "import smolagents"
+          python -m pytest python/tests/test_smolagents_adapter.py -q
+          python - <<'PY'
+          import psycopg
+          with psycopg.connect("postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai", autocommit=True) as conn:
+              conn.execute("CREATE DATABASE govai_smolagents")
+          PY
+          python examples/integrations/huggingface/smolagents_live.py --binary "${GITHUB_WORKSPACE}/rust/target/release/aigov_audit" --database-url "postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai_smolagents"
+
       - name: Create an isolated database for the recovery validation
         run: |
           set -euo pipefail
