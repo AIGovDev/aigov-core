@@ -184,15 +184,11 @@ def collect_snapshot(
         metrics["contributors_unique_accounts"] = _unavailable(
             reason, contributors_source
         )
-        metrics["contributors_bot_accounts"] = _unavailable(
-            reason, contributors_source
-        )
+        metrics["contributors_bot_accounts"] = _unavailable(reason, contributors_source)
 
     if pypi_package:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", pypi_package):
-            raise ValueError(
-                "PyPI package name contains unsupported characters"
-            )
+            raise ValueError("PyPI package name contains unsupported characters")
         package_url = (
             f"https://pypistats.org/api/packages/{quote(pypi_package, safe='')}/recent"
         )
@@ -208,9 +204,11 @@ def collect_snapshot(
                 if isinstance(data, dict)
                 else {}
             )
-            if payload.get("package") != pypi_package or not all(
-                _nonnegative_int(value) for value in values.values()
-            ) or len(values) != 3:
+            if (
+                payload.get("package") != pypi_package
+                or not all(_nonnegative_int(value) for value in values.values())
+                or len(values) != 3
+            ):
                 raise RuntimeError(
                     "PyPI Stats returned invalid or mismatched package data"
                 )
