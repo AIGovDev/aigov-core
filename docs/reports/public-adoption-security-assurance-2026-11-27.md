@@ -3,6 +3,14 @@
 **Target base:** `staging` at `be28b0dd231f980d105a93d76ee2db2f1f7cbd6a`  
 **Scope:** adoption documentation, a static export viewer package, and publication/metrics workflows.
 
+## Evaluation gate
+
+**CONDITIONAL GO for review.** Local viewer/package checks pass. The first exact-head CI run found one lint issue, which has been removed. The latest head's complete CI is still running; do not treat this as a release approval. No production ledger, policy, authorization, tenant, or cryptographic algorithm behavior is changed by this PR.
+
+## Human approval gate
+
+No financial, legal, deployment, or external-publication approval is requested by this code change. The Hugging Face workflow is manually dispatched and requires an authorized repository secret. The Core PR itself remains subject to normal maintainer review and must not be auto-merged.
+
 ## Change impact
 
 This change does not modify the Rust ledger, policy evaluation, authorization decisions, tenant identity mapping, cryptographic primitives, or evidence-verification algorithm. It adds a deterministic synthetic JSON export, expands tests around the existing browser viewer, and adds a manually dispatched workflow that can copy the checked static package to the fixed Hugging Face Space ID when a write token is configured.
