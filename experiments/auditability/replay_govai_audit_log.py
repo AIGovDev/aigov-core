@@ -226,13 +226,13 @@ def evaluate_runs(runs):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Replay GovAI JSONL audit logs into auditability detection evaluation."
+        description="Replay AIGov Core JSONL audit logs into auditability detection evaluation."
     )
 
     parser.add_argument(
         "--input",
         required=True,
-        help="Path to GovAI audit event JSONL file.",
+        help="Path to AIGov Core audit event JSONL file.",
     )
 
     parser.add_argument(

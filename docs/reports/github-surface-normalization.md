@@ -16,7 +16,7 @@ Human approval evidence remains **ledger-authoritative** (`human_approved`, `ris
 
 | Asset | Before | After |
 |-------|--------|-------|
-| `ISSUE_TEMPLATE/config.yml` | Links to `aigov-compliance-engine` | Links to `MonikaDvorackova/govai-core` |
+| `ISSUE_TEMPLATE/config.yml` | Links to `aigov-compliance-engine` | Links to `AIGovDev/aigov-core` |
 | Issue templates | Generic “GovAI”; onboarding/hosted framing | **GovAI Core** scope; platform called out as separate |
 | `pull_request_template.md` | Staging workflow only | Staging workflow + core invariants + check matrix |
 | `DISCUSSION_TEMPLATE/` | Missing | General, Integrations, Governance categories |
@@ -63,12 +63,12 @@ No Rust or runtime code changes in this PR.
 
 ## Appendix: recommended GitHub metadata commands (Part B)
 
-**Do not run blindly.** Review org permissions and current repo settings first (`gh repo view MonikaDvorackova/govai-core`).
+**Do not run blindly.** Review org permissions and current repo settings first (`gh repo view AIGovDev/aigov-core`).
 
 ### 1. Repository description and topics
 
 ```bash
-gh repo edit MonikaDvorackova/govai-core \
+gh repo edit AIGovDev/aigov-core \
   --description "Open-source ledger-authoritative AI governance audit runtime (aigov_audit): append-only evidence, deterministic compliance summary, audit export, verify." \
   --add-topic govai \
   --add-topic ai-governance \
@@ -82,7 +82,7 @@ gh repo edit MonikaDvorackova/govai-core \
 Remove stale topics if present (adjust per `gh label list` / repo settings UI):
 
 ```bash
-gh repo edit MonikaDvorackova/govai-core \
+gh repo edit AIGovDev/aigov-core \
   --remove-topic compliance-engine \
   --remove-topic saas \
   --remove-topic billing
@@ -91,7 +91,7 @@ gh repo edit MonikaDvorackova/govai-core \
 ### 2. Discussions
 
 ```bash
-gh repo edit MonikaDvorackova/govai-core --enable-discussions
+gh repo edit AIGovDev/aigov-core --enable-discussions
 ```
 
 Suggested **categories** (create in GitHub Settings → Discussions → Categories if not using templates only):
@@ -114,8 +114,8 @@ Suggested **categories** (create in GitHub Settings → Discussions → Categori
 Inspect current rules:
 
 ```bash
-gh api repos/MonikaDvorackova/govai-core/branches/staging/protection
-gh api repos/MonikaDvorackova/govai-core/branches/main/protection
+gh api repos/AIGovDev/aigov-core/branches/staging/protection
+gh api repos/AIGovDev/aigov-core/branches/main/protection
 ```
 
 Recommended policy (apply via Settings or `gh api` when ready):
@@ -127,7 +127,7 @@ Example (illustrative — IDs vary per repo):
 
 ```bash
 # Requires admin; customize contexts to match your required checks
-gh api repos/MonikaDvorackova/govai-core/branches/staging/protection \
+gh api repos/AIGovDev/aigov-core/branches/staging/protection \
   --method PUT \
   -f required_status_checks='{"strict":true,"contexts":["govai-core-portable"]}' \
   -f enforce_admins=true \
@@ -165,17 +165,17 @@ Upload repository social preview image (Settings → General → Social preview)
 | Platform split hygiene | Docs clearly labeled platform-only |
 
 ```bash
-gh api repos/MonikaDvorackova/govai-core/milestones -f title="Core runtime hardening" -f state=open
+gh api repos/AIGovDev/aigov-core/milestones -f title="Core runtime hardening" -f state=open
 ```
 
 ### 8. Labels — add (if missing)
 
 ```bash
-gh label create "runtime" --color "1D76DB" --description "aigov_audit HTTP runtime" -R MonikaDvorackova/govai-core
-gh label create "integrations" --color "0E8A16" --description "Reference integrations and SDK adoption" -R MonikaDvorackova/govai-core
-gh label create "tenant-isolation" --color "B60205" --description "API key tenant mapping / isolation" -R MonikaDvorackova/govai-core
-gh label create "audit-export" --color "5319E7" --description "aigov.audit_export.v1 and verify" -R MonikaDvorackova/govai-core
-gh label create "platform-out-of-scope" --color "FBCA04" --description "GovAI Platform; redirect or close per scope" -R MonikaDvorackova/govai-core
+gh label create "runtime" --color "1D76DB" --description "aigov_audit HTTP runtime" -R AIGovDev/aigov-core
+gh label create "integrations" --color "0E8A16" --description "Reference integrations and SDK adoption" -R AIGovDev/aigov-core
+gh label create "tenant-isolation" --color "B60205" --description "API key tenant mapping / isolation" -R AIGovDev/aigov-core
+gh label create "audit-export" --color "5319E7" --description "aigov.audit_export.v1 and verify" -R AIGovDev/aigov-core
+gh label create "platform-out-of-scope" --color "FBCA04" --description "GovAI Platform; redirect or close per scope" -R AIGovDev/aigov-core
 ```
 
 ### 9. Labels — delete or repurpose (review first)
@@ -183,24 +183,24 @@ gh label create "platform-out-of-scope" --color "FBCA04" --description "GovAI Pl
 List all labels:
 
 ```bash
-gh label list -R MonikaDvorackova/govai-core --limit 100
+gh label list -R AIGovDev/aigov-core --limit 100
 ```
 
 Candidates to **delete** if unused and misleading (verify no open issues first):
 
 ```bash
 # Examples only — replace NAME with actual stale labels from `gh label list`
-gh label delete "saas" -R MonikaDvorackova/govai-core --yes
-gh label delete "billing" -R MonikaDvorackova/govai-core --yes
-gh label delete "onboarding" -R MonikaDvorackova/govai-core --yes
-gh label delete "hosted-dashboard" -R MonikaDvorackova/govai-core --yes
-gh label delete "kovali" -R MonikaDvorackova/govai-core --yes
+gh label delete "saas" -R AIGovDev/aigov-core --yes
+gh label delete "billing" -R AIGovDev/aigov-core --yes
+gh label delete "onboarding" -R AIGovDev/aigov-core --yes
+gh label delete "hosted-dashboard" -R AIGovDev/aigov-core --yes
+gh label delete "kovali" -R AIGovDev/aigov-core --yes
 ```
 
 ### 10. Enable security features (recommended)
 
 ```bash
-gh api repos/MonikaDvorackova/govai-core -X PATCH \
+gh api repos/AIGovDev/aigov-core -X PATCH \
   -f has_issues=true \
   -f has_wiki=false \
   -f has_projects=true

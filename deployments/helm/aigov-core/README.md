@@ -12,4 +12,4 @@ helm upgrade --install aigov-core ./deployments/helm/aigov-core
 
 The chart was previously named **`govai-core`** (directory, chart `name`, and default Kubernetes labels). After the GitHub repository rename to **`aigov-core`**, use this chart name for new installs.
 
-Existing clusters that installed `helm release` / namespace **`govai-core`** continue to work until you migrate releases manually. GitHub redirects `MonikaDvorackova/govai-core` → `AIGovDev/aigov-core` for git operations only; Helm release names are not redirected automatically.
+Existing clusters that installed `helm release` / namespace **`govai-core`** continue to work until you migrate releases manually. GitHub redirects `AIGovDev/aigov-core` → `AIGovDev/aigov-core` for git operations only; Helm release names are not redirected automatically.

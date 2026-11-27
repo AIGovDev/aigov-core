@@ -42,7 +42,7 @@ jobs:
           path: artefacts
 
       - name: Artefact-bound AIGov Core gate
-        uses: MonikaDvorackova/aigov-core@v1
+        uses: AIGovDev/aigov-core@v1
         with:
           run_id: ${{ vars.GOVAI_RUN_ID }}
           artifacts_path: artefacts

@@ -1,6 +1,6 @@
 # Runtime safety, guardrails, and human oversight
 
-Phase 21 provides **offline**, **deterministic** tooling to reason about GovAI-related runtime safety: input and tool guardrails, escalation to humans, oversight coverage, and emergency override readiness. It complements [runtime observability](../observability/README.md) by focusing on **safety posture** rather than generic service health.
+Phase 21 provides **offline**, **deterministic** tooling to reason about AIGov Core-related runtime safety: input and tool guardrails, escalation to humans, oversight coverage, and emergency override readiness. It complements [runtime observability](../observability/README.md) by focusing on **safety posture** rather than generic service health.
 
 ## Machine-readable index
 
