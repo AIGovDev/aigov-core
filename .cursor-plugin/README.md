@@ -52,7 +52,10 @@ Exposed by `mcp/govai_mcp_server.py` (CLI subcommands mirror MCP tool names with
 | `govai_verify_evidence_pack` / `govai-verify-evidence-pack` | read-only | Offline validation of a Governance Evidence Pack via `aigov_py.standards.cli`. |
 | `govai_gate_reports` / `govai-gate-reports` | read-only | Runs `scripts/gate_reports.py` (required headings in `docs/reports/*.md`). |
 | `govai_make_gate` / `govai-make-gate` | read-only | Runs `make gate` (full Makefile gate; heavier than `gate_reports` alone). |
-| `govai_generate_audit_report_template` / `govai-generate-audit-report-template` | **write** | Creates `docs/reports/<stem>.md` with required headings. Use `--dry-run` or MCP `dry_run: true` for a **preview only** (no disk write). |
+| `govai_request_audit_template_approval` | governance | Records an agent request; a distinct human approver must approve the exact call before execution. |
+| `govai_generate_audit_report_template` / `govai-generate-audit-report-template` | **write** | Creates `docs/reports/<stem>.md` through the trusted executor after a signed Core authorization. Use MCP `dry_run: true` for a local preview (no disk write). |
+
+The trusted MCP path requires distinct agent and executor credentials, a pinned Core authorization public key, an executor audience, and a pre-migrated executor store. Configure secrets through the MCP host environment, not static configuration. See [`docs/runtime/mcp-preexecution-authorization.md`](../docs/runtime/mcp-preexecution-authorization.md).
 
 All subprocess invocations use **explicit argument lists** (no shell interpolation), **timeouts**, and structured JSON including `command`, `exit_code`, `stdout`, `stderr`, and `duration_ms` for executed commands. Large streams are truncated with `stdout_truncated` / `stderr_truncated` flags when needed.
 
@@ -80,7 +83,7 @@ Each skill lives under `skills/<kebab-name>/SKILL.md` with YAML frontmatter (`na
 - **Local execution** — The MCP server runs as the developer user with workspace credentials; treat MCP as **privileged** in regulated environments.
 - **No outbound network** in default tool paths (local pytest, local scripts, offline evidence validation). `govai_make_gate` runs `make gate`, which matches your Makefile definition (still local to the repo).
 - **Path constraint** — Evidence pack validation rejects paths outside the repository root.
-- **Write boundary** — Only `govai_generate_audit_report_template` mutates disk by default; **`dry_run`** previews without writing.
+- **Write boundary** — MCP and CLI real writes require the trusted Core authorization flow and separate human approval; **`dry_run`** previews without writing. Direct shell or Python code outside those entry points remains a possible bypass unless the environment restricts it.
 - **Timeouts** — Subprocess calls use bounded wall-clock limits to reduce hung-agent risk.
 
 ## Non-goals
