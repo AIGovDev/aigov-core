@@ -30,6 +30,12 @@ This page complements GitHub’s **`good first issue`** label: it explains **wha
 
 If you are excited about these areas, open a **design discussion issue** first and link prior art from `docs/governance/`.
 
+## Current issue queue
+
+For a curated view of 20 existing repository issues, their technical scope, and a known duplicate-title cluster, see [Curated open issues](curated-open-issues.md). These are already-open issues, not new proposals; do not file copies.
+
+The live [good first issue queue](https://github.com/AIGovDev/aigov-core/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) is the source of truth for newcomer work. Some older issue acceptance criteria may already be implemented, so verify the repository before starting.
+
 ## How issues are picked
 
 1. Filter labelled **`good first issue`**.
@@ -41,3 +47,4 @@ If you are excited about these areas, open a **design discussion issue** first a
 - [First contribution guide](first-contribution-guide.md)
 - [Contributor pathways](contributor-pathways.md)
 - [Label taxonomy](../project/label_taxonomy.md)
+

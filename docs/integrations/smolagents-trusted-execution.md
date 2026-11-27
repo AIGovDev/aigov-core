@@ -43,3 +43,7 @@ python -m pip install -e "./python[dev,agent-reference]"
 python -m pytest python/tests/test_smolagents_adapter.py -q
 ```
 
+
+## CI recovery
+
+A conflicting PR cannot trigger normal pull_request workflows. Merge the current staging into the feature branch, preserve both smoke suites, and verify Actions head_sha against the new PR head. Do not use pull_request_target to execute PR code or treat CLA as project CI.

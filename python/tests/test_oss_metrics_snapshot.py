@@ -1,0 +1,252 @@
+import sys
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+
+from oss_metrics_snapshot import (
+    GitHubAPIError,
+    collect_snapshot,
+    compare_snapshots,
+)
+
+
+class FakeAPI:
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    def __call__(self, url, token=None):
+        self.calls.append((url, token))
+        value = self.responses.get(url)
+        if isinstance(value, Exception):
+            raise value
+        if value is None:
+            raise AssertionError(f"Unexpected request: {url}")
+        return value
+
+
+def base_responses():
+    root = "https://api.github.com/repos/AIGovDev/aigov-core"
+    return root, {
+        root: (
+            {
+                "stargazers_count": 17,
+                "forks_count": 4,
+                "open_issues_count": 8,
+            },
+            {},
+        ),
+        f"{root}/contributors?anon=1&per_page=100": (
+            [
+                {"id": 101, "login": "alice", "type": "User"},
+                {"id": 202, "login": "build-bot", "type": "Bot"},
+            ],
+            {"Link": '<https://api.github.com/page/2>; rel="next"'},
+        ),
+        "https://api.github.com/page/2": (
+            [
+                {"id": 101, "login": "alice-renamed", "type": "User"},
+                {"name": "Anonymous contributor", "contributions": 3},
+            ],
+            {},
+        ),
+        f"{root}/releases?per_page=100": (
+            [
+                {"assets": [{"download_count": 7}, {"download_count": 3}]},
+                {"assets": []},
+            ],
+            {},
+        ),
+    }
+
+
+class OSSMetricsSnapshotTests(unittest.TestCase):
+    def test_snapshot_counts_metrics_and_deduplicates_accounts(self):
+        _, responses = base_responses()
+        snapshot = collect_snapshot(
+            "AIGovDev/aigov-core",
+            now=datetime(2026, 11, 27, tzinfo=timezone.utc),
+            fetcher=FakeAPI(responses),
+        )
+
+        self.assertEqual(snapshot["metrics"]["stars"]["value"], 17)
+        self.assertEqual(snapshot["metrics"]["forks"]["value"], 4)
+        self.assertEqual(snapshot["metrics"]["open_issues_and_prs"]["value"], 8)
+        self.assertEqual(snapshot["metrics"]["contributors_listed"]["value"], 4)
+        self.assertEqual(
+            snapshot["metrics"]["contributors_unique_accounts"]["value"], 1
+        )
+        self.assertEqual(snapshot["metrics"]["contributors_bot_accounts"]["value"], 1)
+        self.assertEqual(
+            snapshot["metrics"]["pypi_downloads"]["reason"],
+            "package_not_configured",
+        )
+        self.assertEqual(snapshot["metrics"]["release_asset_downloads"]["value"], 10)
+        self.assertEqual(
+            snapshot["metrics"]["traffic_views_14d"]["reason"],
+            "token_not_provided",
+        )
+        self.assertEqual(snapshot["collected_at"], "2026-11-27T00:00:00Z")
+
+    def test_pagination_link_cannot_send_token_to_another_host(self):
+        root, responses = base_responses()
+        responses[f"{root}/contributors?anon=1&per_page=100"] = (
+            [{"id": 101, "login": "alice", "type": "User"}],
+            {"Link": '<https://attacker.example/collect>; rel="next"'},
+        )
+        responses[f"{root}/traffic/views"] = GitHubAPIError(403)
+        responses[f"{root}/traffic/clones"] = GitHubAPIError(403)
+        fake = FakeAPI(responses)
+        snapshot = collect_snapshot(
+            "AIGovDev/aigov-core", token="secret-token", fetcher=fake
+        )
+
+        metric = snapshot["metrics"]["contributors_unique_accounts"]
+        self.assertEqual(metric["status"], "unavailable")
+        self.assertEqual(metric["reason"], "invalid_api_response")
+        self.assertNotIn(
+            ("https://attacker.example/collect", "secret-token"), fake.calls
+        )
+        self.assertNotIn("secret-token", repr(snapshot))
+
+    def test_restricted_traffic_is_unavailable_not_zero(self):
+        root, responses = base_responses()
+        responses[f"{root}/traffic/views"] = GitHubAPIError(403)
+        responses[f"{root}/traffic/clones"] = GitHubAPIError(403)
+        snapshot = collect_snapshot(
+            "AIGovDev/aigov-core",
+            token="do-not-store-this",
+            fetcher=FakeAPI(responses),
+        )
+
+        for name in ("traffic_views_14d", "traffic_clones_14d"):
+            metric = snapshot["metrics"][name]
+            self.assertEqual(metric["status"], "unavailable")
+            self.assertEqual(metric["reason"], "permission_or_rate_limit")
+            self.assertNotIn("value", metric)
+        self.assertNotIn("do-not-store-this", repr(snapshot))
+
+    def test_pypi_downloads_and_window_deltas(self):
+        _, responses = base_responses()
+        responses["https://pypistats.org/api/packages/aigov-py/recent"] = (
+            {
+                "package": "aigov-py",
+                "data": {"last_day": 3, "last_week": 12, "last_month": 40},
+            },
+            {},
+        )
+        fake = FakeAPI(responses)
+        current = collect_snapshot(
+            "AIGovDev/aigov-core",
+            pypi_package="aigov-py",
+            fetcher=fake,
+        )
+        self.assertEqual(
+            current["metrics"]["pypi_downloads"]["value"],
+            {"day": 3, "week": 12, "month": 40},
+        )
+        self.assertIn(
+            ("https://pypistats.org/api/packages/aigov-py/recent", None), fake.calls
+        )
+        previous = {
+            "schema": current["schema"],
+            "repository": current["repository"],
+            "collected_at": "2026-11-26T00:00:00Z",
+            "metrics": {
+                "pypi_downloads": {
+                    "status": "available",
+                    "value": {"day": 2, "week": 10, "month": 35},
+                }
+            },
+        }
+        comparison = compare_snapshots(current, previous)
+        self.assertEqual(
+            comparison["changes"]["pypi_downloads"]["delta"],
+            {"day": 1, "week": 2, "month": 5},
+        )
+        self.assertIn(
+            "overlapping rolling-window",
+            comparison["changes"]["pypi_downloads"]["note"],
+        )
+
+    def test_pypi_mismatched_project_fails_unavailable(self):
+        _, responses = base_responses()
+        responses["https://pypistats.org/api/packages/aigov-py/recent"] = (
+            {"package": "another-project", "data": {}},
+            {},
+        )
+        snapshot = collect_snapshot(
+            "AIGovDev/aigov-core",
+            pypi_package="aigov-py",
+            fetcher=FakeAPI(responses),
+        )
+        self.assertEqual(snapshot["metrics"]["pypi_downloads"]["status"], "unavailable")
+        self.assertEqual(
+            snapshot["metrics"]["pypi_downloads"]["reason"],
+            "invalid_api_response",
+        )
+
+    def test_traffic_snapshot_and_growth_delta_are_explicit(self):
+        root, responses = base_responses()
+        responses[f"{root}/traffic/views"] = ({"count": 31, "uniques": 20}, {})
+        responses[f"{root}/traffic/clones"] = ({"count": 12, "uniques": 9}, {})
+        current = collect_snapshot(
+            "AIGovDev/aigov-core", token="token", fetcher=FakeAPI(responses)
+        )
+        previous = {
+            "schema": current["schema"],
+            "repository": current["repository"],
+            "collected_at": "2026-11-26T00:00:00Z",
+            "metrics": {
+                name: {"status": "available", "value": 10}
+                for name in (
+                    "stars",
+                    "forks",
+                    "open_issues_and_prs",
+                    "contributors_listed",
+                    "contributors_unique_accounts",
+                    "contributors_bot_accounts",
+                    "release_asset_downloads",
+                )
+            },
+        }
+        previous["metrics"]["traffic_views_14d"] = {
+            "status": "available",
+            "value": {"total": 24, "unique": 16, "window_days": 14},
+        }
+        previous["metrics"]["traffic_clones_14d"] = {
+            "status": "unavailable",
+            "reason": "token_not_provided",
+        }
+        comparison = compare_snapshots(current, previous)
+
+        self.assertEqual(comparison["changes"]["stars"]["delta"], 7)
+        self.assertEqual(
+            comparison["changes"]["traffic_views_14d"]["delta"],
+            {"total": 7, "unique": 4},
+        )
+        self.assertEqual(
+            comparison["changes"]["traffic_clones_14d"]["status"], "unavailable"
+        )
+
+    def test_invalid_repo_and_mismatched_previous_snapshot_fail_closed(self):
+        with self.assertRaises(ValueError):
+            collect_snapshot("not a repo")
+        snapshot = {
+            "schema": "aigov.opensource.metrics.v1",
+            "repository": "a/b",
+            "metrics": {},
+        }
+        previous = {
+            "schema": "aigov.opensource.metrics.v1",
+            "repository": "a/c",
+            "metrics": {},
+        }
+        with self.assertRaises(ValueError):
+            compare_snapshots(snapshot, previous)
+
+
+if __name__ == "__main__":
+    unittest.main()
