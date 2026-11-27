@@ -84,3 +84,24 @@ pub async fn append_in_transaction(
         .bind(tenant).bind(sequence).bind(&record_hash).execute(&mut **tx).await?;
     Ok(AppendResult { sequence, record_hash, replay: false })
 }
+
+/// Storage-only reservation. The caller must independently validate approval
+/// identity, role, action binding and policy revision before invoking this.
+/// Both referenced events must exist in the same tenant ledger.
+/// A conflict aborts the transaction; do not issue authorization on failure.
+pub async fn reserve_validated_approval(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant: &str,
+    approval_event_id: &str,
+    decision_event_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO core_approval_consumptions (tenant_id, approval_event_id, decision_event_id) VALUES ($1,$2,$3)",
+    )
+    .bind(tenant)
+    .bind(approval_event_id)
+    .bind(decision_event_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
