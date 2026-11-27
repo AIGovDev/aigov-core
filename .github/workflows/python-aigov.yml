@@ -34,17 +34,18 @@ jobs:
           python -m venv .venv
           . .venv/bin/activate
           pip install -U pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev]" smolagents==1.22.0
+          python -c "import smolagents"
 
       - name: Python smoke tests
         working-directory: python
         run: |
           set -euo pipefail
           . .venv/bin/activate
-          python -m pytest tests/test_standards_conformance.py tests/test_mcp_preexecution_authorization.py tests/test_huggingface_provenance.py tests/test_huggingface_evaluation.py tests/test_huggingface_transformers.py tests/test_huggingface_evaluate.py tests/test_huggingface_submission.py tests/test_oss_metrics_snapshot.py tests/test_hf_space_package.py -q
+          python -m pytest tests/test_standards_conformance.py tests/test_mcp_preexecution_authorization.py tests/test_huggingface_provenance.py tests/test_huggingface_evaluation.py tests/test_huggingface_transformers.py tests/test_huggingface_evaluate.py tests/test_huggingface_submission.py tests/test_smolagents_adapter.py tests/test_oss_metrics_snapshot.py tests/test_ci_workflow_coverage.py tests/test_hf_space_package.py -q
           node ../examples/reconstructible-agent-demo/viewer/test_hash_chain.mjs
-          ruff check ../mcp/aigov_mcp_server.py ../examples/mcp-trusted-execution/approve_template_request.py tests/test_mcp_preexecution_authorization.py ../scripts/oss_metrics_snapshot.py ../scripts/prepare_hf_space.py tests/test_oss_metrics_snapshot.py tests/test_hf_space_package.py
-          ruff format --check ../examples/mcp-trusted-execution/approve_template_request.py tests/test_mcp_preexecution_authorization.py ../scripts/oss_metrics_snapshot.py ../scripts/prepare_hf_space.py tests/test_oss_metrics_snapshot.py tests/test_hf_space_package.py
+          ruff check ../mcp/aigov_mcp_server.py ../examples/mcp-trusted-execution/approve_template_request.py ../examples/integrations/huggingface/smolagents_live.py aigov_py/runtime/adapters/smolagents.py tests/test_mcp_preexecution_authorization.py tests/test_smolagents_adapter.py ../scripts/oss_metrics_snapshot.py tests/test_oss_metrics_snapshot.py ../scripts/prepare_hf_space.py tests/test_hf_space_package.py
+          ruff format --check ../examples/mcp-trusted-execution/approve_template_request.py ../examples/integrations/huggingface/smolagents_live.py aigov_py/runtime/adapters/smolagents.py tests/test_mcp_preexecution_authorization.py tests/test_smolagents_adapter.py ../scripts/oss_metrics_snapshot.py tests/test_oss_metrics_snapshot.py ../scripts/prepare_hf_space.py tests/test_hf_space_package.py
 
       - name: Write Python smoke summary
         if: always()
@@ -56,4 +57,3 @@ jobs:
             echo "Status: ${{ job.status }}"
             echo "Full Python pytest runs in nightly-full-validation and release-validation."
           } >> "${GITHUB_STEP_SUMMARY}"
-
