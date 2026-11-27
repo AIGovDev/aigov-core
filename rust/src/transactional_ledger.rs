@@ -188,12 +188,16 @@ async fn validate_snapshot(
         || head.get::<String, _>("head_hash") != expected_hash {
         return Err(invalid());
     }
-    let rows = sqlx::query("SELECT seq,event_id,event_json,prev_hash,record_hash FROM core_ledger_records WHERE tenant_id=$1 ORDER BY seq")
-        .bind(tenant).fetch_all(&mut *tx).await?;
     let mut output = Vec::new();
     let mut previous = "GENESIS".to_owned();
     let mut sequence = 0i64;
-    for row in rows {
+    loop {
+        let rows = sqlx::query("SELECT seq,event_id,event_json,prev_hash,record_hash FROM core_ledger_records WHERE tenant_id=$1 AND seq>$2 ORDER BY seq LIMIT 1024")
+            .bind(tenant).bind(sequence).fetch_all(&mut *tx).await?;
+        if rows.is_empty() {
+            break;
+        }
+        for row in rows {
         sequence = sequence.checked_add(1).ok_or_else(invalid)?;
         let event: String = row.get("event_json");
         let id: String = row.get("event_id");
@@ -212,6 +216,7 @@ async fn validate_snapshot(
             output.push(b'\n');
         }
         previous = hash;
+        }
     }
     if sequence != expected_sequence || previous != expected_hash {
         return Err(invalid());
