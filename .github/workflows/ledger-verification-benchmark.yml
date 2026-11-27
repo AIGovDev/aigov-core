@@ -1,0 +1,46 @@
+name: Rust ledger verification benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      record_counts:
+        description: Comma-separated ledger sizes
+        required: true
+        default: "1000,10000,100000"
+        type: string
+      iterations:
+        description: Timed iterations per scenario (1–100)
+        required: true
+        default: "5"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ledger-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+
+      - name: Run production verifier benchmark
+        env:
+          AIGOV_BENCHMARK_REVISION: ${{ github.sha }}
+          AIGOV_LEDGER_BENCHMARK_OUT: ${{ runner.temp }}/ledger-verification.json
+          AIGOV_LEDGER_BENCHMARK_SIZES: ${{ inputs.record_counts }}
+          AIGOV_LEDGER_BENCHMARK_ITERATIONS: ${{ inputs.iterations }}
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path rust/Cargo.toml --release --locked \
+            --test long_ledger_benchmark long_ledger_verification_benchmark \
+            -- --ignored --nocapture
+
+      - name: Upload machine-readable benchmark artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ledger-verification-${{ github.sha }}
+          path: ${{ runner.temp }}/ledger-verification.json
+          if-no-files-found: error
