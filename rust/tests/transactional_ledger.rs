@@ -154,3 +154,21 @@ async fn terminated_backend_rolls_back_decision_and_approval() {
     assert!(replay.replay);
     assert_eq!(replay.record_hash, result.record_hash);
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL; run explicitly in CI"]
+async fn trusted_checkpoint_detects_database_history_tampering() {
+    use aigov_audit::transactional_ledger::verify_checkpoint;
+    let url = std::env::var("GOVAI_DATABASE_URL").expect("disposable PostgreSQL URL");
+    let writer = PgPoolOptions::new().max_connections(2).connect(&url).await.unwrap();
+    let reader = PgPoolOptions::new().max_connections(2).connect(&url).await.unwrap();
+    db::run_sqlx_migrations(&writer).await.unwrap();
+    let tenant = Uuid::new_v4().to_string();
+    append(&writer, &tenant, "a", r#"{"event_id":"a"}"#).await.unwrap();
+    let anchor = append(&writer, &tenant, "b", r#"{"event_id":"b"}"#).await.unwrap();
+    verify_checkpoint(&reader, &tenant, anchor.sequence, &anchor.record_hash).await.unwrap();
+    assert!(verify_checkpoint(&reader, &tenant, anchor.sequence, &"0".repeat(64)).await.is_err());
+    sqlx::query("UPDATE core_ledger_records SET event_json=$2 WHERE tenant_id=$1 AND seq=1")
+        .bind(&tenant).bind(r#"{"event_id":"a","tampered":true}"#).execute(&writer).await.unwrap();
+    assert!(verify_checkpoint(&reader, &tenant, anchor.sequence, &anchor.record_hash).await.is_err());
+}
