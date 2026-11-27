@@ -39,7 +39,7 @@ The replay engine uses `replay_projection.rs` (wraps `projection.rs` + `complian
 
 ## Replay vs tracing
 
-| Tracing / observability | GovAI deterministic replay |
+| Tracing / observability | AIGov Core deterministic replay |
 |-------------------------|------------------------------|
 | Sampled spans, best-effort order | Ordered evidence events |
 | Inferred outcomes | Ledger projection rules |
@@ -68,7 +68,7 @@ Build the replay helper:
 cd rust && cargo build --bin replay_audit_export_once
 ```
 
-Run via GovAI CLI:
+Run via AIGov Core CLI:
 
 ```bash
 govai replay-audit-export --path exports/run-123.json

@@ -1,6 +1,6 @@
-# GovAI standards and policy pack registry (Phase 15)
+# AIGov Core standards and policy pack registry (Phase 15)
 
-This directory holds **deterministic, versioned JSON catalogs** that describe GovAI’s portable governance interchange, curated example policy packs, benchmark metadata, certification levels, and the capability taxonomy used for ecosystem documentation.
+This directory holds **deterministic, versioned JSON catalogs** that describe AIGov Core’s portable governance interchange, curated example policy packs, benchmark metadata, certification levels, and the capability taxonomy used for ecosystem documentation.
 
 ## Files
 

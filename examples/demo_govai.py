@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-end GovAI audit demo: one run_id, full v0.4_human_approval lifecycle.
+End-to-end AIGov Core audit demo: one run_id, full v0.4_human_approval lifecycle.
 
 Requires the Rust audit service (see README Quickstart). No mocks.
 

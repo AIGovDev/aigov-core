@@ -1,4 +1,4 @@
-# Why GovAI
+# Why AIGov Core
 
 ## The Problem
 
@@ -12,9 +12,9 @@ This creates the auditability gap.
 
 AI governance becomes operational only when governance requirements are translated into technical controls that can block unsupported decisions.
 
-## The GovAI Approach
+## The AIGov Core Approach
 
-GovAI enforces decision-level auditability through:
+AIGov Core enforces decision-level auditability through:
 
 - Evidence bundles
 - Digest continuity
@@ -33,12 +33,12 @@ Without enforceable controls:
 - Accountability may be weakened
 - Risk may increase
 
-GovAI ensures that unsupported decisions are blocked rather than silently accepted.
+AIGov Core ensures that unsupported decisions are blocked rather than silently accepted.
 
 ## Strategic Importance
 
-GovAI provides a practical path from governance policies and regulatory expectations to operational enforcement inside engineering workflows.
+AIGov Core provides a practical path from governance policies and regulatory expectations to operational enforcement inside engineering workflows.
 
 ## Summary
 
-GovAI exists because responsible AI requires more than model metrics and policies. It requires technical systems that verify whether important decisions are supported by complete, verifiable, and auditable evidence.
+AIGov Core exists because responsible AI requires more than model metrics and policies. It requires technical systems that verify whether important decisions are supported by complete, verifiable, and auditable evidence.

@@ -1,6 +1,6 @@
-# GovAI standards registry and policy pack ecosystem (overview)
+# AIGov Core standards registry and policy pack ecosystem (overview)
 
-GovAI ships a **documentation-first registry layer** so operators, partners, and contributors can discover **interchange standards**, **curated policy packs**, **benchmark metadata**, **certification levels**, and a **capability taxonomy** without implying new runtime enforcement.
+AIGov Core ships a **documentation-first registry layer** so operators, partners, and contributors can discover **interchange standards**, **curated policy packs**, **benchmark metadata**, **certification levels**, and a **capability taxonomy** without implying new runtime enforcement.
 
 ## What lives where
 
@@ -25,7 +25,7 @@ Neither registry type changes **hosted verdict semantics**; they help humans and
 
 ## Trust posture (short)
 
-The registry describes **process and file layout expectations**. **Signing and provenance** are layered concepts: see [trust-and-signing.md](trust-and-signing.md). GovAI still treats the **audit service and ledger** as authoritative for deployment decisions when configured.
+The registry describes **process and file layout expectations**. **Signing and provenance** are layered concepts: see [trust-and-signing.md](trust-and-signing.md). AIGov Core still treats the **audit service and ledger** as authoritative for deployment decisions when configured.
 
 ## Submissions and review
 

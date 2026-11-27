@@ -8,7 +8,7 @@ AIGov Core is the **open-source**, ledger-authoritative audit runtime for recons
 
 ## What this repository is
 
-| In scope (AIGov Core) | Out of scope (GovAI Platform — separate product) |
+| In scope (AIGov Core) | Out of scope (AIGov Platform — separate product) |
 |----------------------|--------------------------------------------------|
 | Append-only evidence ingest (`POST /evidence`) | Hosted SaaS operations |
 | Ledger integrity and `GET /verify` | Stripe / billing / pricing |
@@ -78,11 +78,11 @@ Regenerate the demo fixture locally: `python3 scripts/generate_signed_audit_expo
 
 Verifier reference: [`docs/signed-audit-export-verifier.md`](docs/signed-audit-export-verifier.md) · Full runtime walkthrough: [`docs/quickstart-runtime.md`](docs/quickstart-runtime.md)
 
-Historical documentation under `docs/hosted/`, `docs/billing/`, `docs/pricing/`, and `dashboard/` describes the **GovAI Platform** and is retained for reference only — it is **not** part of the core runtime surface mounted by `aigov_audit`.
+Historical documentation under `docs/hosted/`, `docs/billing/`, `docs/pricing/`, and `dashboard/` describes the **AIGov Platform** and is retained for reference only — it is **not** part of the core runtime surface mounted by `aigov_audit`.
 
 ## Strategy: audit engine, portable standards, interchange, and offline validation
 
-GovAI is positioned at four complementary ideas:
+AIGov Core is positioned at four complementary ideas:
 
 1. **Audit-backed governance engine** — hosted or self-hosted service that ingests evidence, enforces policy at write time, and exposes **`GET /compliance-summary`** with **VALID / INVALID / BLOCKED** semantics (**evidence-first**, **fail-closed** where configured).
 2. **Portable AI governance standards layer** — machine-readable artefacts (capability policies, delegation graphs, trace verification plans, governance evidence packs) with **deterministic validators** and **canonical digests** under `python/aigov_py/standards/` and `docs/standards/`.
@@ -95,7 +95,7 @@ GovAI is positioned at four complementary ideas:
 
 ### Governance standards registry (interchange)
 
-GovAI publishes an **explicit, versioned registry** of portable governance JSON artefacts (`governance_evidence_pack`, `governance_policy_module`, `governance_decision_trace`, `delegation_graph`, `capability_policy`, `trace_verification_plan`) with matching **JSON Schema** files under `schemas/` and deterministic validators in `python/aigov_py/standards/`. External implementers should start with `docs/standards/interchange-specification.md`, `docs/standards/registry.md`, and `docs/standards/conformance.md`.
+AIGov Core publishes an **explicit, versioned registry** of portable governance JSON artefacts (`governance_evidence_pack`, `governance_policy_module`, `governance_decision_trace`, `delegation_graph`, `capability_policy`, `trace_verification_plan`) with matching **JSON Schema** files under `schemas/` and deterministic validators in `python/aigov_py/standards/`. External implementers should start with `docs/standards/interchange-specification.md`, `docs/standards/registry.md`, and `docs/standards/conformance.md`.
 
 **Conformance validation** (one JSON object on stdout with `--json`; fields include `ok`, `artifact_type`, `version`, `checks`, `failures`, `warnings`, `digest`):
 
@@ -104,7 +104,7 @@ govai standards validate --json examples/standards/evidence-pack.valid.json
 make standards-conformance
 ```
 
-`make governance-standards-check` is a no-op placeholder in Core (platform-specific validation lives in GovAI Platform).
+`make governance-standards-check` is a no-op placeholder in Core (platform-specific validation lives in AIGov Platform).
 
 ### Standards registry and policy pack catalogs
 
@@ -165,7 +165,7 @@ Contributor-oriented Makefile targets also include evidence-pack flows (`make bu
 
 ## Cursor / IDE integration
 
-GovAI ships a **repository-bundled Cursor plugin pack** under **`.cursor-plugin/`** (rules, Agent skills in **`skills/<name>/SKILL.md`**, Marketplace-oriented **`plugin.json`**, plugin-level **`mcp.json`**, and a local **stdio MCP** bridge to **`mcp/govai_mcp_server.py`**). It aligns local agent behaviour with the same scripts and gates used in CI; **hosted audit services, Rust enforcement, and database policy remain authoritative** for production compliance.
+AIGov Core ships a **repository-bundled Cursor plugin pack** under **`.cursor-plugin/`** (rules, Agent skills in **`skills/<name>/SKILL.md`**, Marketplace-oriented **`plugin.json`**, plugin-level **`mcp.json`**, and a local **stdio MCP** bridge to **`mcp/govai_mcp_server.py`**). It aligns local agent behaviour with the same scripts and gates used in CI; **hosted audit services, Rust enforcement, and database policy remain authoritative** for production compliance.
 
 - **Start here:** [`.cursor-plugin/quickstart.md`](.cursor-plugin/quickstart.md) — install steps, MCP wiring, first gate, troubleshooting.
 - **Reference:** [`.cursor-plugin/README.md`](.cursor-plugin/README.md) — tools, security model, and marketplace readiness notes.
@@ -270,7 +270,7 @@ git clone https://github.com/AIGovDev/aigov-core.git
 cd aigov-core
 ```
 
-2. Run GovAI (Docker)
+2. Run AIGov Core (Docker)
 
 ```bash
 docker compose up -d --build
@@ -331,18 +331,18 @@ Non-guarantees:
 
 ## Bring your own policy
 
-GovAI is **policy-agnostic**: the engine enforces evidence completeness and deterministic decision semantics, not a specific legal framework.
+AIGov Core is **policy-agnostic**: the engine enforces evidence completeness and deterministic decision semantics, not a specific legal framework.
 Policy is a **configuration layer** that compiles into a flat `required_evidence` set (static mapping, no runtime logic).
-Customers can replace the AI Act mapping with an internal policy module **without changing the core GovAI engine**.
+Customers can replace the AI Act mapping with an internal policy module **without changing the AIGov Core engine**.
 The engine remains deterministic: evidence log + policy requirements → `GET /compliance-summary` → `VALID` / `BLOCKED` / `INVALID`.
 Use `govai policy compile --path <policy.yaml>` to inspect the flat `required_evidence` set for a policy module.
 See `docs/customer-policy-modules.md` and `docs/policies/`.
 
-## How GovAI decides what is required
+## How AIGov Core decides what is required
 
-GovAI compiles “what is required” into a deterministic **flat set**:
+AIGov Core compiles “what is required” into a deterministic **flat set**:
 
-`discovery (context detection)` + `policy modules (static mapping)` → `required_evidence (flat set)` → existing GovAI engine → verdict (`VALID` / `INVALID` / `BLOCKED`)
+`discovery (context detection)` + `policy modules (static mapping)` → `required_evidence (flat set)` → existing AIGov Core engine → verdict (`VALID` / `INVALID` / `BLOCKED`)
 
 Key constraints:
 
@@ -355,15 +355,15 @@ See:
 - `docs/discovery-v2.md`
 - `docs/customer-policy-modules.md`
 
-## When to use GovAI
+## When to use AIGov Core
 
 - deploying ML models via CI/CD
 - enforcing approval workflows before release
 - requiring audit evidence for decisions
 
-## GovAI Platform (not in AIGov Core)
+## AIGov Platform (not in AIGov Core)
 
-Commercial hosting, billing, pricing, dashboard ACL, onboarding, and managed tenant provisioning belong to the **GovAI Platform** product (separate from this repository). Reference material may appear under `docs/pricing/`, `docs/billing/`, `docs/hosted/`, and `dashboard/` for historical context only.
+Commercial hosting, billing, pricing, dashboard ACL, onboarding, and managed tenant provisioning belong to the **AIGov Platform** product (separate from this repository). Reference material may appear under `docs/pricing/`, `docs/billing/`, `docs/hosted/`, and `dashboard/` for historical context only.
 
 ## Decision states
 
@@ -380,7 +380,7 @@ Not eligible for promotion: **missing required evidence**, **missing risk/human 
 
 ## Install
 
-**GovAI CLI (PyPI — official):**
+**AIGov Core CLI (PyPI — official):**
 
 ```bash
 python -m pip install --upgrade pip
@@ -408,11 +408,11 @@ Quickstarts:
 - `docs/customer-quickstart.md` (legacy customer / CI quickstart)
 - `docs/pilot-onboarding.md` (private pilot onboarding)
 - `docs/billing.md` (minimal Stripe webhook + usage summary)
-- `docs/product/differentiation.md` (GovAI as **decision enforcement** vs supply-chain attestation)
+- `docs/product/differentiation.md` (AIGov Core as **decision enforcement** vs supply-chain attestation)
 
 ## Hosted pilot prerequisites
 
-GovAI is **ready for GitHub Marketplace draft and hosted pilot onboarding**.
+AIGov Core is **ready for GitHub Marketplace draft and hosted pilot onboarding**.
 
 It is **not yet a full self-serve SaaS**.
 
@@ -425,7 +425,7 @@ Repeatable operator + customer steps (pilot runbook):
 
 Minimum hosted-pilot path (what must exist before a new pilot user can reach `VALID`):
 
-- **How a pilot user gets `base_url`**: the operator provides a hosted HTTPS audit API base URL (the GovAI audit service), for example `https://audit.example.com`.
+- **How a pilot user gets `base_url`**: the operator provides a hosted HTTPS audit API base URL (the AIGov Core audit service), for example `https://audit.example.com`.
 - **Example**: `GOVAI_AUDIT_BASE_URL=https://audit.govbase.dev`
 - **How a pilot user gets an API key**: the operator provisions and distributes a bearer token (one per customer/team). This is manual or semi-automated in a pilot.
 - **How a pilot user creates/receives `run_id`**: the pilot user generates a UUID (or the operator provides one). The same `run_id` must be reused for evidence submission, the CI gate, and export.
@@ -435,23 +435,23 @@ Minimum hosted-pilot path (what must exist before a new pilot user can reach `VA
 
 ## Canonical flow (discovery → requirements → BLOCKED → evidence → VALID → export → CI)
 
-GovAI is designed around **one evidence run id** (`run_id`) and **one authoritative decision projection** exposed through `GET /compliance-summary`. Use CI gates when you also need artefact-bound digests.
+AIGov Core is designed around **one evidence run id** (`run_id`) and **one authoritative decision projection** exposed through `GET /compliance-summary`. Use CI gates when you also need artefact-bound digests.
 
 Canonical customer flow:
 
 1. **Discovery finds AI usage** (signals are recorded as evidence for a specific `run_id`).
-2. **GovAI derives requirements** from the current policy and any discovery signals (required evidence can increase when discovery indicates AI usage).
+2. **AIGov Core derives requirements** from the current policy and any discovery signals (required evidence can increase when discovery indicates AI usage).
 3. **The run is `BLOCKED` while it is not eligible for promotion** (the summary reports `verdict: BLOCKED` and explains why, via `missing_evidence` and/or `blocked_reasons`).
 4. **The customer submits the missing evidence** for the same `run_id` (additional events are appended via `POST /evidence`).
 5. **The run becomes `VALID`** once the required evidence is present and policy rules pass (the authoritative source is still `GET /compliance-summary`).
 6. **The customer exports audit JSON** for archiving and review (`govai export-run` or `GET /api/export/<run_id>`).
 7. **The CI gate passes only on `VALID`** for the artefact-bound path above (verify exit **`0`** only when digest + export rules (if required) + verdict **`VALID`**). For a **lighter** readout without digest/export binding, **`govai check`** still calls **`GET /compliance-summary`** and exits non-zero unless the verdict is **`VALID`** — that is not the same guarantee as **`verify-evidence-pack`**.
 
-## Why GovAI
+## Why AIGov Core
 
 If you cannot prove why a specific model version was deployed, you do not have a deployment decision — you have a story.
 
-GovAI makes deployment decisions verifiable and reproducible by:
+AIGov Core makes deployment decisions verifiable and reproducible by:
 
 - accepting lifecycle events as structured evidence (POST /evidence) into an append-only ledger
 - enforcing policy at write time (out-of-order or missing prerequisites are rejected)
@@ -509,7 +509,7 @@ For **production** merges, prefer the **artefact-bound** path: **`submit-evidenc
 
 **`govai check`** is a **convenience readout**: it does not bind CI artefacts to the ledger digest; it calls **`GET /compliance-summary`** and exits non-zero unless the server verdict is **`VALID`**. Use it for quick checks or smoke, not as a substitute for **`verify-evidence-pack`** when you need cryptographic continuity to CI outputs.
 
-Use **one** GovAI evidence run id (`GOVAI_RUN_ID`) for every evidence submission, the gate, and export.
+Use **one** AIGov Core evidence run id (`GOVAI_RUN_ID`) for every evidence submission, the gate, and export.
 
 If you are onboarding a new pilot customer, follow `docs/hosted-pilot-runbook.md` end-to-end first (hosted backend + key + deterministic demo + CI gate + export).
 
@@ -517,15 +517,15 @@ If you are onboarding a new pilot customer, follow `docs/hosted-pilot-runbook.md
 
 1) Set repository configuration in **Settings → Secrets and variables → Actions**:
 
-- Variable `GOVAI_AUDIT_BASE_URL`: `https://<your GovAI audit API base URL>`
+- Variable `GOVAI_AUDIT_BASE_URL`: `https://<your AIGov Core audit API base URL>`
 - Variable `GOVAI_RUN_ID`: `<your evidence run id>` (not GitHub’s `github.run_id`)
 - Secret `GOVAI_API_KEY`: `<your API key>` (required; missing key fails CI immediately)
 
 2) Wire the **composite action** after you have a directory of CI evidence artefacts (`evidence_digest_manifest.json` and `<run_id>.json`). Example step (paths depend on your artefact download layout):
 
 ```yaml
-      - name: GovAI artefact-bound gate (submit + verify digest + VALID)
-        uses: MonikaDvorackova/aigov-core@v1
+      - name: AIGov Core artefact-bound gate (submit + verify digest + VALID)
+        uses: AIGovDev/aigov-core@v1
         with:
           run_id: ${{ vars.GOVAI_RUN_ID }}
           artifacts_path: ${{ github.workspace }}/downloaded-artifacts
@@ -539,13 +539,13 @@ See `docs/github-action.md` for inputs, exit codes, and hosted semantics.
 
 ### First-time end-to-end (reach `BLOCKED` then `VALID`)
 
-To validate your setup before relying on the CI gate, run the hosted deterministic onboarding flow locally against your GovAI audit API:
+To validate your setup before relying on the CI gate, run the hosted deterministic onboarding flow locally against your AIGov Core audit API:
 
 ```bash
 python -m pip install --upgrade pip
 python -m pip install "aigov-py==0.2.1"
 
-export GOVAI_AUDIT_BASE_URL="https://<your GovAI audit API base URL>"
+export GOVAI_AUDIT_BASE_URL="https://<your AIGov Core audit API base URL>"
 export GOVAI_API_KEY="YOUR_API_KEY"
 
 export GOVAI_RUN_ID="$(python3 - <<'PY'
@@ -601,7 +601,7 @@ Note: a run can be `BLOCKED` even when `missing_evidence: []` if approval/promot
 
 ## API usage tiers
 
-Hosted platform plans expose usage limits via `GET /usage` (runs and events per billing period). Commercial packaging is a GovAI Platform concern (not documented in this Core repository); engineering limits follow your deployment configuration and order form.
+Hosted platform plans expose usage limits via `GET /usage` (runs and events per billing period). Commercial packaging is a AIGov Platform concern (not documented in this Core repository); engineering limits follow your deployment configuration and order form.
 
 ## Auditability and Trust
 
@@ -617,7 +617,7 @@ Minimal definitions and non-claims:
 
 ## Current maturity
 
-GovAI is **ready for hosted pilots with manual or semi-automated onboarding** (for example: an admin provisions `GOVAI_AUDIT_BASE_URL` and an API key, and you run the canonical onboarding flow).
+AIGov Core is **ready for hosted pilots with manual or semi-automated onboarding** (for example: an admin provisions `GOVAI_AUDIT_BASE_URL` and an API key, and you run the canonical onboarding flow).
 
 It is **not yet a full self-serve SaaS** (no productized signup, automated provisioning, or account lifecycle).
 

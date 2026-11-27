@@ -47,7 +47,7 @@ discovery_scan:
 
 FORCE:
 
-# Optional operator-provided audit HTTP base URL (GovAI Platform or customer self-host).
+# Optional operator-provided audit HTTP base URL (AIGov Platform or customer self-host).
 # AIGov Core does not start, background-manage, or readiness-poll a hosted audit server.
 AUDIT_URL ?= $(GOVAI_AUDIT_BASE_URL)
 
@@ -325,7 +325,7 @@ enterprise-readiness-check:
 	@python3 benchmarks/auditability-failures/run_benchmark.py
 	@echo "enterprise-readiness-check: OK"
 
-# GovAI Cursor plugin (manifest, rules, skills, local MCP bridge)
+# AIGov Core Cursor plugin (manifest, rules, skills, local MCP bridge)
 cursor-plugin-validate:
 	@python3 scripts/validate_cursor_plugin.py
 
@@ -362,7 +362,7 @@ release-readiness-check:
 
 # Optional: read-only probe against operator-configured GOVAI_AUDIT_BASE_URL (Platform/self-host). Core does not start a server.
 local-demo:
-	@echo "local-demo: requires GovAI Platform scripts/run_local_demo.py (not shipped in AIGov Core)."
+	@echo "local-demo: requires AIGov Platform scripts/run_local_demo.py (not shipped in AIGov Core)."
 	@exit 2
 
 local-demo-curl:
@@ -384,12 +384,12 @@ run-audit: build-audit
 
 audit_bg audit_stop audit_restart audit_logs:
 	@echo "$@: AIGov Core does not manage a hosted audit HTTP service lifecycle."
-	@echo "Run the GovAI Platform repository for SaaS runtime orchestration, or configure GOVAI_AUDIT_BASE_URL to your operator runtime."
+	@echo "Run the AIGov Platform repository for SaaS runtime orchestration, or configure GOVAI_AUDIT_BASE_URL to your operator runtime."
 	@exit 2
 require_audit_url:
 	@if [ -z "$${GOVAI_AUDIT_BASE_URL:-}" ]; then \
 		echo "GOVAI_AUDIT_BASE_URL is required (AIGov Core does not start a local audit server)."; \
-		echo "Point it at GovAI Platform or your self-host runtime, or use offline targets: governance-standards-check, scripts/ci_portable_artifact_bundle.py"; \
+		echo "Point it at AIGov Platform or your self-host runtime, or use offline targets: governance-standards-check, scripts/ci_portable_artifact_bundle.py"; \
 		exit 2; \
 	fi
 

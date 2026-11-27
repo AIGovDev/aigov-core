@@ -1,8 +1,8 @@
 # AIGov Core open-source scope
 
-This repository **is** [AIGov Core](https://github.com/MonikaDvorackova/aigov-core): the ledger-authoritative audit runtime, portable contracts, integrator SDKs, and offline validation tooling.
+This repository **is** [AIGov Core](https://github.com/AIGovDev/aigov-core): the ledger-authoritative audit runtime, portable contracts, integrator SDKs, and offline validation tooling.
 
-The **GovAI Platform** (hosted SaaS, billing, dashboard, enterprise control plane) is a **separate product** and is not implemented by the `aigov_audit` HTTP surface in this tree.
+The **AIGov Platform** (hosted SaaS, billing, dashboard, enterprise control plane) is a **separate product** and is not implemented by the `aigov_audit` HTTP surface in this tree.
 
 Canonical terminology: [docs/terminology.md](docs/terminology.md). Architecture boundary: [docs/architecture/platform-vs-core-boundary.md](docs/architecture/platform-vs-core-boundary.md).
 
@@ -60,7 +60,7 @@ Contributors must preserve:
 | `aigov_audit` HTTP API | This repo | Core routes only |
 | Python (`aigov-py`) | This repo | CLI + `RuntimeGovernanceClient` |
 | TypeScript SDK | Published from core releases when available | See `packages/` / docs |
-| GovAI Platform | Separate product / repository | Proprietary hosted APIs |
+| AIGov Platform | Separate product / repository | Proprietary hosted APIs |
 
 ## Out of scope (product claims)
 

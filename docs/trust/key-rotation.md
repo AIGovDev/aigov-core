@@ -8,7 +8,7 @@ Long-lived signing keys increase blast radius if compromised. This document alig
 - **Maximum active age** — `max_active_signing_key_days` is a planning knob; enforce it with your HSM or cloud KMS policies.
 - **Emergency rotation** — document break-glass steps (who approves, how tenants are notified, how ledgers and signed exports are re-verified).
 
-## GovAI interaction
+## AIGov Core interaction
 
 Key rotation for **API keys** (`GOVAI_API_KEY`) is independent of artefact signing keys. Both should be tracked in your CMDB: one gates **ingest**, the other gates **offline integrity** of exports.
 

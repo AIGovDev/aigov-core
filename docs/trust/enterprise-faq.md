@@ -1,10 +1,10 @@
 # Enterprise FAQ
 
-Frequently asked questions from **security**, **platform**, and **procurement** stakeholders evaluating GovAI.
+Frequently asked questions from **security**, **platform**, and **procurement** stakeholders evaluating AIGov Core.
 
-## Is GovAI a certified compliance product?
+## Is AIGov Core a certified compliance product?
 
-No. GovAI is **governance and audit infrastructure**. It helps you **evidence** controls and enforce gates; it does not replace lawyers, auditors, or regulators.
+No. AIGov Core is **governance and audit infrastructure**. It helps you **evidence** controls and enforce gates; it does not replace lawyers, auditors, or regulators.
 
 ## How is multi-tenant isolation enforced?
 
@@ -16,7 +16,7 @@ The OSS stack can be self-hosted with your Postgres and networking boundaries. H
 
 ## What data leaves our environment?
 
-By default, **only what you configure** to call external services (for example a hosted GovAI URL, Stripe, or telemetry). Review [../security/data-handling.md](../security/data-handling.md) and your deployment diagram.
+By default, **only what you configure** to call external services (for example a hosted AIGov Core URL, Stripe, or telemetry). Review [../security/data-handling.md](../security/data-handling.md) and your deployment diagram.
 
 ## How do we integrate with CI?
 

@@ -1,6 +1,6 @@
-# GovAI Roadmap
+# AIGov Core Roadmap
 
-GovAI is an evidence-first governance layer for AI systems focused on decision-level auditability, fail-closed enforcement, evidence continuity, and operational AI governance.
+AIGov Core is an evidence-first governance layer for AI systems focused on decision-level auditability, fail-closed enforcement, evidence continuity, and operational AI governance.
 
 ## Phase 1: Enforcement core
 

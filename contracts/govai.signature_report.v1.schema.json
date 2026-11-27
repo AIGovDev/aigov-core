@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aigov.dev/schemas/govai.signature_report.v1.schema.json",
-  "title": "GovAI Signature Verification Report (v1)",
+  "title": "AIGov Core Signature Verification Report (v1)",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "created_at_utc", "target", "results", "ok"],

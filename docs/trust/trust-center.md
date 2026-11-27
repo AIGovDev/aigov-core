@@ -1,18 +1,18 @@
 # Trust center
 
-The **trust center** is the single entry point for security, privacy, and reliability questions from **enterprise buyers** evaluating GovAI. Deep dives live in `docs/security/` and the pages below.
+The **trust center** is the single entry point for security, privacy, and reliability questions from **enterprise buyers** evaluating AIGov Core. Deep dives live in `docs/security/` and the pages below.
 
 ```docs
 preset: trust-controls
 ```
 
-## What GovAI provides
+## What AIGov Core provides
 
 - **Evidence-first governance** — auditable artefacts tied to policy and run identifiers.
 - **Deterministic OSS gates** — repository checks (including documentation presence and link integrity) that teams can mirror in CI.
 - **Clear isolation story** — tenant boundaries for ledger-backed operations are rooted in **server-side key mapping** (see [../security/tenant-isolation.md](../security/tenant-isolation.md)).
 
-## What GovAI does not provide by itself
+## What AIGov Core does not provide by itself
 
 - Legal advice or regulatory **certification**.
 - Your SOC 2 control implementation — we document **interfaces**; you operate **controls**.

@@ -41,8 +41,8 @@ jobs:
           name: evidence_packs
           path: artefacts
 
-      - name: Artefact-bound GovAI gate
-        uses: MonikaDvorackova/aigov-core@v1
+      - name: Artefact-bound AIGov Core gate
+        uses: AIGovDev/aigov-core@v1
         with:
           run_id: ${{ vars.GOVAI_RUN_ID }}
           artifacts_path: artefacts

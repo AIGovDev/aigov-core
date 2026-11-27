@@ -1,6 +1,6 @@
 # Runtime governance documentation
 
-GovAI’s **hosted audit contract** is unchanged: append-only **`POST /evidence`**, authoritative **`GET /compliance-summary`**, and **VALID / INVALID / BLOCKED** semantics defined in OpenAPI and enforced in Rust.
+AIGov Core’s **hosted audit contract** is unchanged: append-only **`POST /evidence`**, authoritative **`GET /compliance-summary`**, and **VALID / INVALID / BLOCKED** semantics defined in OpenAPI and enforced in Rust.
 
 This folder documents how to **embed** those calls from production AI applications using the **stdlib-only** Python runtime SDK (`python/aigov_py/runtime/`), optional framework adapters, and runnable examples.
 

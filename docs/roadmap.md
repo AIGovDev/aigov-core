@@ -1,6 +1,6 @@
 # Roadmap
 
-Public-facing plan for GovAI / GovBase. **Shipped** items exist in this repository today. **In progress** items have partial implementation or active PR streams. **Planned** items are directionally committed but not yet productized—timelines shift with pilot feedback.
+Public-facing plan for AIGov Core / GovBase. **Shipped** items exist in this repository today. **In progress** items have partial implementation or active PR streams. **Planned** items are directionally committed but not yet productized—timelines shift with pilot feedback.
 
 ```docs
 preset: roadmap-board

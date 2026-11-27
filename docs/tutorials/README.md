@@ -1,10 +1,10 @@
-# GovAI tutorials
+# AIGov Core tutorials
 
 Step-by-step guides for **first governance gate**, **evidence packs**, **debugging failures**, **Cursor plugin usage**, and **pilot demos**.
 
 | Tutorial | Audience |
 | --- | --- |
-| [First governance gate](first-governance-gate.md) | Engineers new to GovAI CI |
+| [First governance gate](first-governance-gate.md) | Engineers new to AIGov Core CI |
 | [Evidence pack walkthrough](evidence-pack-walkthrough.md) | Security and platform reviewers |
 | [Debugging a failed gate](debugging-failed-gate.md) | On-call responders |
 | [Cursor plugin walkthrough](cursor-plugin-walkthrough.md) | Cursor users |

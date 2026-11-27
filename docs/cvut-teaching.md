@@ -1,6 +1,6 @@
 # ČVUT-style teaching page (minimal)
 
-This page is a teaching-friendly entry point for academic courses and student startups using GovAI as a verifiable CI gate and evidence ledger.
+This page is a teaching-friendly entry point for academic courses and student startups using AIGov Core as a verifiable CI gate and evidence ledger.
 
 It focuses on **what can be checked mechanically** and what remains out of scope.
 

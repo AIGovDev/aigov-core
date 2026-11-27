@@ -35,7 +35,7 @@ There is **no edge** between the two subgraphs on purpose: enterprise tables and
 
 ## Product Scope
 
-GovAI is a CI compliance gate for AI systems with audit evidence export.
+AIGov Core is a CI compliance gate for AI systems with audit evidence export.
 
 It:
 
@@ -57,7 +57,7 @@ Non-guarantees:
 - not full compliance coverage
 - does not generate missing evidence
 
-## When to use GovAI
+## When to use AIGov Core
 
 - deploying ML models via CI/CD
 - enforcing approval workflows before release
@@ -193,7 +193,7 @@ Environment variables commonly used: `RUN_ID`, `AIGOV_AUDIT_URL` / `AIGOV_AUDIT_
 
 ## Dashboard (`dashboard/`)
 
-**Not shipped in AIGov Core.** `dashboard/` in this repository currently contains only a brand asset (`dashboard/brand/`) — there is no Next.js application, `package.json`, or `app/` tree committed here. The description below is the **intended/hosted-Platform** shape (`/login`, `/runs` list, `/runs/[id]` detail, reading run rows from Supabase after `db_ingest`, optionally rendering the frozen `GET /compliance-summary` contract) — it documents what the hosted GovAI Platform dashboard does, not code present in this OSS repository. Any `cd dashboard && npm install` instruction elsewhere in these docs will not work against a clean clone of AIGov Core.
+**Not shipped in AIGov Core.** `dashboard/` in this repository currently contains only a brand asset (`dashboard/brand/`) — there is no Next.js application, `package.json`, or `app/` tree committed here. The description below is the **intended/hosted-Platform** shape (`/login`, `/runs` list, `/runs/[id]` detail, reading run rows from Supabase after `db_ingest`, optionally rendering the frozen `GET /compliance-summary` contract) — it documents what the hosted AIGov Platform dashboard does, not code present in this OSS repository. Any `cd dashboard && npm install` instruction elsewhere in these docs will not work against a clean clone of AIGov Core.
 
 ## EU AI Act (mapping only)
 

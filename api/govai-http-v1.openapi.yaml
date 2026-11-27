@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: GovAI Audit HTTP API
+  title: AIGov Core Audit HTTP API
   version: 1.0.0
   description: |
-    # GovAI HTTP API — frozen contract (v1)
+    # AIGov Core HTTP API — frozen contract (v1)
 
     ## API version
 
@@ -24,7 +24,7 @@ info:
 
     **Internal only:** `GET /` (service banner), `GET /ready` (operational readiness), `GET /metrics` (Prometheus exposition for operators).
 
-    This is the complete HTTP surface **mounted by the `aigov_audit` binary in this repository** (`rust/src/govai_api.rs`). Billing, pricing, the enterprise `/api/*` console routes (`/api/me`, `/api/assessments`, `/api/compliance-workflow*`), `/api/functions/v2/*`, and the `/v1/runtime/*` preview namespace are **not mounted here** — an earlier version of this document described them as `stable`, which was inaccurate; they belong to the hosted GovAI Platform or were never implemented in Core. See `ENTERPRISE_LAYER.md` and `docs/architecture/platform-vs-core-boundary.md`.
+    This is the complete HTTP surface **mounted by the `aigov_audit` binary in this repository** (`rust/src/govai_api.rs`). Billing, pricing, the enterprise `/api/*` console routes (`/api/me`, `/api/assessments`, `/api/compliance-workflow*`), `/api/functions/v2/*`, and the `/v1/runtime/*` preview namespace are **not mounted here** — an earlier version of this document described them as `stable`, which was inaccurate; they belong to the hosted AIGov Platform or were never implemented in Core. See `ENTERPRISE_LAYER.md` and `docs/architecture/platform-vs-core-boundary.md`.
 
     ## Breaking vs non-breaking changes (v1)
 

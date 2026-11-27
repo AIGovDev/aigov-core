@@ -23,7 +23,7 @@ Security relevant areas include:
 
 ## Tenant isolation
 
-GovAI tenant isolation is derived from server-side API key mapping.
+AIGov Core tenant isolation is derived from server-side API key mapping.
 
 Headers such as X-GovAI-Project are metadata only and must not be treated as security boundaries.
 
@@ -35,7 +35,7 @@ Security reports involving evidence tampering, digest mismatch bypasses, replay 
 
 ## Fail-closed behavior
 
-GovAI should fail closed when required evidence, approval, audit context, or integrity guarantees are missing.
+AIGov Core should fail closed when required evidence, approval, audit context, or integrity guarantees are missing.
 
 Reports showing fail-open behavior are security relevant.
 
@@ -53,7 +53,7 @@ After a report is received:
 
 ## Out of scope
 
-The following are generally out of scope unless they affect GovAI security boundaries:
+The following are generally out of scope unless they affect AIGov Core security boundaries:
 - purely cosmetic UI issues
 - documentation typos
 - local misconfiguration without security impact

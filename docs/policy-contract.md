@@ -1,4 +1,4 @@
-# GovAI policy contract
+# AIGov Core policy contract
 
 This document defines the **runtime policy layer**: what is configurable from files, what is fixed in code, and how enforcement behaves. Deployment tier resolution (`dev` / `staging` / `prod`) is documented separately in [`env-resolution.md`](env-resolution.md).
 

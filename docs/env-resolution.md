@@ -1,4 +1,4 @@
-# GovAI deployment environment resolution
+# AIGov Core deployment environment resolution
 
 This document is the **single contract** for how `dev`, `staging`, and `prod` are chosen. The Rust audit service and Python tooling implement the same rules.
 

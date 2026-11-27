@@ -10,7 +10,7 @@ body:
         - Runtime quickstart: [docs/quickstart-runtime.md](../../docs/quickstart-runtime.md)
         - Reference integrations: [docs/reference-integrations.md](../../docs/reference-integrations.md)
 
-        For security vulnerabilities, use [GitHub Security Advisories](https://github.com/MonikaDvorackova/aigov-core/security/advisories/new), not public discussions.
+        For security vulnerabilities, use [GitHub Security Advisories](https://github.com/AIGovDev/aigov-core/security/advisories/new), not public discussions.
   - type: textarea
     id: body
     attributes:

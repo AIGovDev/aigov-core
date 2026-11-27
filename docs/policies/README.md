@@ -1,8 +1,8 @@
 ## Policies (customer-replaceable modules)
 
-GovAI’s core engine evaluates runs against a **flat set of `required_evidence` codes** and produces deterministic verdicts (`VALID`, `BLOCKED`, `INVALID`) via `GET /compliance-summary`.
+AIGov Core’s core engine evaluates runs against a **flat set of `required_evidence` codes** and produces deterministic verdicts (`VALID`, `BLOCKED`, `INVALID`) via `GET /compliance-summary`.
 
-GovAI does **not** enforce legal frameworks directly.
+AIGov Core does **not** enforce legal frameworks directly.
 
 Instead, legal/regulatory/internal frameworks are modeled as a **product-layer policy module** that maps “what your policy requires” → “which evidence codes must exist for a run”.
 
@@ -30,7 +30,7 @@ The EU AI Act can be one policy module among many:
 - sector policy (health/finance)
 - customer contract policy (procurement requirements)
 
-GovAI remains policy-agnostic: it enforces **evidence completeness and deterministic decision semantics**, not legal interpretation.
+AIGov Core remains policy-agnostic: it enforces **evidence completeness and deterministic decision semantics**, not legal interpretation.
 
 ---
 
@@ -65,7 +65,7 @@ govai policy compile --path docs/policies/ai-act-high-risk.example.yaml --json
 3) Update `requirements[*]`:
 
 - each requirement has a stable `code`
-- each requirement lists `required_evidence` codes (existing GovAI evidence codes)
+- each requirement lists `required_evidence` codes (existing AIGov Core evidence codes)
 
 4) Compile and inspect the required evidence:
 

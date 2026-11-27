@@ -1,11 +1,11 @@
-# GovAI Functions 2.0
+# AIGov Core Functions 2.0
 
 > [!summary]
 > Read-only flight-recorder APIs that package decision intelligence for operators, counsel, and executives — without replacing the immutable ledger verdict from `compliance-summary`.
 
 ## Summary
 
-GovAI Functions 2.0 extends the **append-only** AI decision flight recorder (Postgres-backed trace events with **hash-chain** integrity) with richer `event_type` values, a structured `govai_functions_v2` rollup inside trace **export**, and HTTP read APIs for packaged decision intelligence.
+AIGov Core Functions 2.0 extends the **append-only** AI decision flight recorder (Postgres-backed trace events with **hash-chain** integrity) with richer `event_type` values, a structured `govai_functions_v2` rollup inside trace **export**, and HTTP read APIs for packaged decision intelligence.
 
 > [!compliance]
 > **`GET /compliance-summary`** remains the **only authoritative immutable-ledger verdict** for a run. Functions 2.0 explains and packages flight-recorder evidence; it does **not** replace ledger promotion or export semantics.
@@ -156,4 +156,4 @@ Event ingestion uses `POST /api/ai-decision-traces/{run_id}/events`. Invalid pay
 
 ## Hosted platform
 
-On **govbase.dev**, the same routes are available on the GovAI audit origin when enterprise authentication is configured.
+On **govbase.dev**, the same routes are available on the AIGov Core audit origin when enterprise authentication is configured.

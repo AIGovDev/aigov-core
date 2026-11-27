@@ -1,6 +1,6 @@
 # Common API errors and fixes
 
-All GovAI API error responses use this JSON shape:
+All AIGov Core API error responses use this JSON shape:
 
 ```json
 {
@@ -22,7 +22,7 @@ All GovAI API error responses use this JSON shape:
 
 ### `INVALID_API_KEY` (401)
 - **Meaning**: The API key is present but not recognized.
-- **Fix**: Verify you’re using the GovAI API key (not a JWT), and update your integration if the key was rotated.
+- **Fix**: Verify you’re using the AIGov Core API key (not a JWT), and update your integration if the key was rotated.
 
 ### `MISSING_TENANT_CONTEXT` (400)
 - **Meaning**: The request is missing tenant context in `staging`/`prod`.

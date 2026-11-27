@@ -1,6 +1,6 @@
 # Local developer quickstart (≤5 minutes)
 
-If you are integrating with a hosted GovAI backend, start here instead (canonical):
+If you are integrating with a hosted AIGov Core backend, start here instead (canonical):
 
 - [customer-onboarding-10min.md](customer-onboarding-10min.md)
 
@@ -40,7 +40,7 @@ govai --version
 
 ## 1) Create an API key (shared secret)
 
-GovAI audit API keys are **configured on the audit service** via `GOVAI_API_KEYS` (comma-separated). When set, audit routes require `Authorization: Bearer <secret>`.
+AIGov Core audit API keys are **configured on the audit service** via `GOVAI_API_KEYS` (comma-separated). When set, audit routes require `Authorization: Bearer <secret>`.
 
 **Note (local/dev vs hosted):**
 This quickstart uses `GOVAI_API_KEYS` for simple local/dev setups. **Hosted / staging / production deployments MUST define `GOVAI_API_KEYS_JSON`** so each API key is mapped to a tenant id and ledger isolation is enforced correctly. **Dev mode without API keys is not suitable for pilots**: hosted pilots must run with real key → tenant mapping.

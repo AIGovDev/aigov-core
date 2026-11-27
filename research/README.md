@@ -1,6 +1,6 @@
-# GovAI research and academic publication artefacts
+# AIGov Core research and academic publication artefacts
 
-This directory holds **machine-readable** metadata for reproducible evaluation, citation, and replication studies of GovAI. The bundle is validated by `python3 scripts/validate_research_manifest.py` and aggregated by `python3 scripts/research_package_check.py` (see `make research-package-check`).
+This directory holds **machine-readable** metadata for reproducible evaluation, citation, and replication studies of AIGov Core. The bundle is validated by `python3 scripts/validate_research_manifest.py` and aggregated by `python3 scripts/research_package_check.py` (see `make research-package-check`).
 
 ## Contents
 

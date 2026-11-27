@@ -1,6 +1,6 @@
-## GovAI contracts (versioned)
+## AIGov Core contracts (versioned)
 
-This folder contains **machine-readable, versioned contract schemas** for GovAI’s governance core.
+This folder contains **machine-readable, versioned contract schemas** for AIGov Core’s governance core.
 
 These schemas are treated as **public, stable interfaces** between:
 

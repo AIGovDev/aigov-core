@@ -1,6 +1,6 @@
-# GovAI RFC Process
+# AIGov Core RFC Process
 
-GovAI uses RFCs (Request for Comments) for significant architectural, governance, enforcement, or operational changes.
+AIGov Core uses RFCs (Request for Comments) for significant architectural, governance, enforcement, or operational changes.
 
 RFCs help:
 - document architectural decisions
@@ -57,7 +57,7 @@ Good RFCs should include:
 
 ## Governance philosophy
 
-GovAI prioritizes:
+AIGov Core prioritizes:
 - deterministic behavior
 - fail-closed enforcement
 - operational clarity

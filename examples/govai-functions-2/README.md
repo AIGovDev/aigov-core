@@ -1,6 +1,6 @@
-# GovAI Functions 2.0 examples
+# AIGov Core Functions 2.0 examples
 
-This directory holds fixtures for the **GovAI Functions 2.0** decision intelligence layer:
+This directory holds fixtures for the **AIGov Core Functions 2.0** decision intelligence layer:
 
 - Append-only AI decision flight recorder extensions (new `event_type` values on `POST /api/ai-decision-traces/{run_id}/events`).
 - Read APIs under `GET /api/functions/v2/{run_id}/*` (flight pack, executive summary, legal evidence manifest, governance scorecard).

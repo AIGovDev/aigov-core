@@ -82,7 +82,7 @@ govai check --run-id "$GOVAI_RUN_ID"
 
 Common causes:
 
-- Wrong `GOVAI_RUN_ID` (typo, different UUID, using CI run id instead of GovAI run id)
+- Wrong `GOVAI_RUN_ID` (typo, different UUID, using CI run id instead of AIGov Core run id)
 - Wrong `GOVAI_AUDIT_BASE_URL` (pointing at another environment)
 - Evidence was submitted under a different run id
 
@@ -180,7 +180,7 @@ Escalation checklist (include in ticket/slack message):
 - `govai health` output
 - `govai status` output
 - `govai check --run-id ...` output
-# GovAI troubleshooting
+# AIGov Core troubleshooting
 
 ## Step 1: Identify failure type
 

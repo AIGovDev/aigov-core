@@ -19,7 +19,7 @@ def _evidence_path(run_id: str) -> Path:
 
 
 def audit_base_url() -> str:
-    """Resolve GovAI audit base URL consistently with write_digest_manifest / Makefile defaults."""
+    """Resolve AIGov Core audit base URL consistently with write_digest_manifest / Makefile defaults."""
     return (
         os.environ.get("AIGOV_AUDIT_ENDPOINT")
         or os.environ.get("AIGOV_AUDIT_URL")

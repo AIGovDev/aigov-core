@@ -1,6 +1,6 @@
-# GovAI Glossary
+# AIGov Core Glossary
 
-This glossary defines core GovAI concepts used across documentation, issues, PRs, and RFCs.
+This glossary defines AIGov Core concepts used across documentation, issues, PRs, and RFCs.
 
 ## Auditability
 
@@ -72,8 +72,8 @@ A cryptographic hash representing the content of an exported artifact.
 
 ## Compliance gate
 
-A CI/CD or runtime control that permits or blocks progression based on GovAI verdicts.
+A CI/CD or runtime control that permits or blocks progression based on AIGov Core verdicts.
 
 ## AI Act mapping
 
-A structured mapping between GovAI evidence requirements and EU AI Act oriented governance controls.
+A structured mapping between AIGov Core evidence requirements and EU AI Act oriented governance controls.

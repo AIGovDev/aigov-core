@@ -2,7 +2,7 @@
 
 Run the open-source **`aigov_audit`** binary: append evidence to a tenant-scoped ledger, read a ledger-authoritative compliance verdict, export an audit bundle, and verify the hash chain.
 
-This guide uses **GovAI** terminology only. It does not start a hosted SaaS stack, background polling loop, or platform dashboard.
+This guide uses **AIGov Core** terminology only. It does not start a hosted SaaS stack, background polling loop, or platform dashboard.
 
 ## What you need
 

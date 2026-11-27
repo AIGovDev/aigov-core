@@ -77,7 +77,7 @@ A reconstructible multi-agent system must:
 
 ## Difference from distributed tracing
 
-| Concern | Distributed tracing (OTel) | GovAI lineage |
+| Concern | Distributed tracing (OTel) | AIGov Core lineage |
 |---------|---------------------------|---------------|
 | Primary goal | Latency, request flow | Governance verdicts and evidence |
 | Authority | Trace backend | Append-only ledger |
