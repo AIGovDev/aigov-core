@@ -34,3 +34,38 @@ def test_unknown_tool_refused():
     with pytest.raises(Refused):
         invoke_registered_tool(agent, executor, "unknown", {})
     executor.execute.assert_not_called()
+
+
+def test_allow_without_signed_authorization_is_fail_closed():
+    agent, executor = setup()
+    agent.read.return_value = CoreDecision(Decision.ALLOW, "ok", "event", None, 200, 0)
+    result = invoke_registered_tool(agent, executor, "tool", {})
+    assert result["decision"] == "INDETERMINATE"
+    executor.execute.assert_not_called()
+
+
+def test_signed_authorization_is_forwarded_to_executor():
+    agent, executor = setup()
+    signed = {"payload": {"args_binding_hash": "digest"}, "signature": "fixture"}
+    agent.read.return_value = CoreDecision(
+        Decision.ALLOW, "ok", "event", None, 200, 0, authorization=signed)
+    executor.execute.return_value = Mock(executed=True, reason="ok", receipt_recorded=True)
+    assert invoke_registered_tool(agent, executor, "tool", {"x": 1})["executed"]
+    executor.execute.assert_called_once_with(
+        run_id="run", tool="tool", arguments={"x": 1}, signed=signed)
+
+
+def test_executor_refusal_is_not_bypassed():
+    agent, executor = setup()
+    agent.read.return_value = CoreDecision(
+        Decision.ALLOW, "ok", "event", None, 200, 0, authorization={"fixture": True})
+    executor.execute.side_effect = Refused("authorization_arguments_mismatch")
+    with pytest.raises(Refused, match="authorization_arguments_mismatch"):
+        invoke_registered_tool(agent, executor, "tool", {"x": 2})
+
+
+def test_approval_requires_original_call_id():
+    agent, executor = setup("write")
+    with pytest.raises(Refused, match="approval_call_id_required"):
+        invoke_registered_tool(agent, executor, "tool", {}, approval_event_id="approval")
+    executor.execute.assert_not_called()
