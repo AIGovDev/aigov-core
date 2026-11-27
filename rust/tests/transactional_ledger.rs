@@ -125,3 +125,32 @@ async fn run_snapshot_serializes_independent_connections() {
     assert_eq!(events, vec![r#"{"event_id":"a","run_id":"one"}"#.to_owned(), r#"{"event_id":"c","run_id":"one"}"#.to_owned()]);
     recovered.rollback().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL; run explicitly in CI"]
+async fn terminated_backend_rolls_back_decision_and_approval() {
+    use aigov_audit::transactional_ledger::{append_in_transaction, reserve_validated_approval};
+    let url = std::env::var("GOVAI_DATABASE_URL").expect("disposable PostgreSQL URL");
+    let pool = PgPoolOptions::new().max_connections(4).connect(&url).await.unwrap();
+    db::run_sqlx_migrations(&pool).await.unwrap();
+    let tenant = Uuid::new_v4().to_string();
+    let anchor = append(&pool, &tenant, "approval", r#"{"event_id":"approval"}"#).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()").fetch_one(&mut *tx).await.unwrap();
+    append_in_transaction(&mut tx, &tenant, "decision", r#"{"event_id":"decision"}"#).await.unwrap();
+    reserve_validated_approval(&mut tx, &tenant, "approval", "decision").await.unwrap();
+    let terminated: bool = sqlx::query_scalar("SELECT pg_terminate_backend($1)").bind(pid).fetch_one(&pool).await.unwrap();
+    assert!(terminated);
+    assert!(tx.commit().await.is_err());
+    let mut retry = pool.begin().await.unwrap();
+    let result = append_in_transaction(&mut retry, &tenant, "decision", r#"{"event_id":"decision"}"#).await.unwrap();
+    assert!(!result.replay);
+    assert_eq!(result.sequence, anchor.sequence + 1);
+    reserve_validated_approval(&mut retry, &tenant, "approval", "decision").await.unwrap();
+    retry.commit().await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM core_approval_consumptions WHERE tenant_id=$1").bind(&tenant).fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 1);
+    let replay = append(&pool, &tenant, "decision", r#"{"event_id":"decision"}"#).await.unwrap();
+    assert!(replay.replay);
+    assert_eq!(replay.record_hash, result.record_hash);
+}
