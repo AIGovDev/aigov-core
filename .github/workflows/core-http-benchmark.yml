@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/benchmark_core_http.py'
       - '.github/workflows/core-http-benchmark.yml'
+      - 'scripts/verify_benchmark_ledger.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -40,6 +41,7 @@ jobs:
           AIGOV_BIND: 127.0.0.1:18089
           GOVAI_DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
           GOVAI_API_USAGE_STORE: memory
+          GOVAI_AUTO_MIGRATE: "true"
           GOVAI_API_KEY: test-key-tenant-a-0001
           GOVAI_API_KEYS: test-key-tenant-a-0001
           GOVAI_API_KEYS_JSON: '{"test-key-tenant-a-0001":"tenant-a"}'
@@ -60,6 +62,9 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:18089/health >/dev/null
           python scripts/benchmark_core_http.py --url http://127.0.0.1:18089 --events 100 --workers 4 --disposable --out "$RUNNER_TEMP/http-benchmark.json"
+          kill "$pid"
+          wait "$pid" || true
+          python scripts/verify_benchmark_ledger.py --ledger "$GOVAI_LEDGER_DIR/audit_log__tenant-a.jsonl" --result "$RUNNER_TEMP/http-benchmark.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: core-http-benchmark-${{ github.sha }}
