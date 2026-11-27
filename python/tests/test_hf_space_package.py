@@ -27,7 +27,9 @@ class HuggingFaceStaticSpaceTests(unittest.TestCase):
         )
         lowered = source.lower()
         self.assertIn("file.size > max_file_bytes", lowered)
-        self.assertIn("new textencoder().encode(text).bytelength > max_file_bytes", lowered)
+        self.assertIn(
+            "new textencoder().encode(text).bytelength > max_file_bytes", lowered
+        )
         self.assertIn('url.origin !== location.origin', source)
         self.assertIn('new Set(["http:", "https:"])', source)
         self.assertIn('redirect: "error"', source)
@@ -43,7 +45,9 @@ class HuggingFaceStaticSpaceTests(unittest.TestCase):
         sample = json.loads(OUTPUT.read_text(encoding="utf-8"))
         self.assertEqual(sample, build_sample())
         self.assertIn("Synthetic demonstration data", sample["sample_notice"])
-        self.assertEqual(sample["evidence_hashes"]["log_chain"][0]["prev_hash"], "GENESIS")
+        self.assertEqual(
+            sample["evidence_hashes"]["log_chain"][0]["prev_hash"], "GENESIS"
+        )
 
 
 if __name__ == "__main__":
