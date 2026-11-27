@@ -35,6 +35,11 @@ RUN cargo build --locked --release --bin aigov_audit \
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
 
 RUN apt-get update \
+  && apt-get install -y --no-install-recommends --only-upgrade \
+    libpam-modules \
+    libpam-modules-bin \
+    libpam-runtime \
+    libpam0g \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
