@@ -48,3 +48,53 @@ async fn concurrent_writers_and_replays() {
     assert_eq!(result.sequence, 1);
     assert!(!result.replay);
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL; run explicitly in CI"]
+async fn approval_reservation_is_atomic_and_single_use() {
+    use aigov_audit::transactional_ledger::{append_in_transaction, reserve_validated_approval};
+    let url = std::env::var("GOVAI_DATABASE_URL").expect("disposable PostgreSQL URL");
+    let pool = PgPoolOptions::new().max_connections(8).connect(&url).await.unwrap();
+    db::run_sqlx_migrations(&pool).await.unwrap();
+    let tenant = Uuid::new_v4().to_string();
+    append(&pool, &tenant, "approval", r#"{"event_id":"approval"}"#).await.unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    append_in_transaction(&mut tx, &tenant, "aborted", r#"{"event_id":"aborted"}"#).await.unwrap();
+    reserve_validated_approval(&mut tx, &tenant, "approval", "aborted").await.unwrap();
+    tx.rollback().await.unwrap();
+    let mut tasks = tokio::task::JoinSet::new();
+    for i in 0..8 {
+        let pool = pool.clone();
+        let tenant = tenant.clone();
+        tasks.spawn(async move {
+            let id = format!("decision-{i}");
+            let event = serde_json::json!({"event_id": id}).to_string();
+            let mut tx = pool.begin().await.unwrap();
+            append_in_transaction(&mut tx, &tenant, &id, &event).await.unwrap();
+            match reserve_validated_approval(&mut tx, &tenant, "approval", &id).await {
+                Ok(()) => { tx.commit().await.unwrap(); true }
+                Err(error) => {
+                    assert_eq!(error.as_database_error().and_then(|e| e.code()).as_deref(), Some("23505"));
+                    tx.rollback().await.unwrap();
+                    false
+                }
+            }
+        });
+    }
+    let mut winners = 0;
+    while let Some(result) = tasks.join_next().await {
+        if result.unwrap() { winners += 1; }
+    }
+    assert_eq!(winners, 1);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM core_ledger_records WHERE tenant_id=$1")
+        .bind(&tenant).fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 2);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM core_approval_consumptions WHERE tenant_id=$1")
+        .bind(&tenant).fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 1);
+    let other = Uuid::new_v4().to_string();
+    let mut tx = pool.begin().await.unwrap();
+    append_in_transaction(&mut tx, &other, "decision", r#"{"event_id":"decision"}"#).await.unwrap();
+    assert!(reserve_validated_approval(&mut tx, &other, "approval", "decision").await.is_err());
+    tx.rollback().await.unwrap();
+}
