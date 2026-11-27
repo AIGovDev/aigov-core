@@ -15,14 +15,6 @@ pub async fn append(
     event_id: &str,
     event_json: &str,
 ) -> Result<AppendResult, sqlx::Error> {
-    let invalid = |message: &str| sqlx::Error::Protocol(message.to_owned());
-    let event: serde_json::Value = serde_json::from_str(event_json)
-        .map_err(|_| invalid("invalid event JSON"))?;
-    if tenant.is_empty() || event_id.is_empty()
-        || event.get("event_id").and_then(|v| v.as_str()) != Some(event_id)
-    {
-        return Err(invalid("invalid tenant or event identity"));
-    }
     let mut tx = pool.begin().await?;
     let result = append_in_transaction(&mut tx, tenant, event_id, event_json).await?;
     tx.commit().await?;
@@ -104,4 +96,28 @@ pub async fn reserve_validated_approval(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+/// Lock the tenant head before reading policy evidence. All writers must use
+/// this same lock; the caller owns the transaction and must not release it
+/// between policy evaluation and append.
+pub async fn lock_tenant_and_read(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    if tenant.is_empty() {
+        return Err(sqlx::Error::Protocol("empty tenant".to_owned()));
+    }
+    sqlx::query("INSERT INTO core_ledger_heads VALUES ($1, 0, 'GENESIS') ON CONFLICT DO NOTHING")
+        .bind(tenant)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("SELECT seq FROM core_ledger_heads WHERE tenant_id=$1 FOR UPDATE")
+        .bind(tenant)
+        .fetch_one(&mut **tx)
+        .await?;
+    sqlx::query_scalar("SELECT event_json FROM core_ledger_records WHERE tenant_id=$1 ORDER BY seq")
+        .bind(tenant)
+        .fetch_all(&mut **tx)
+        .await
 }
