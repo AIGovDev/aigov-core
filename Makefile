@@ -24,7 +24,7 @@ AIGOV_MODE ?= ci
 	conformity-workflow-check regulatory-workflow-check \
 	research-package-check academic-publication-check \
 	regulatory-manifest ai-act-obligations regulatory-evidence regulatory-export regulatory-check \
-	microbenchmark-check empirical-evaluation-run empirical-evaluation-check manuscript-evidence-check \
+	microbenchmark-check long-ledger-verification-benchmark empirical-evaluation-run empirical-evaluation-check manuscript-evidence-check \
 	evidence-quality-check \
 	agent-governance agent-governance-manifest agent-delegation-snapshot agent-governance-score agent-governance-report agent-governance-check \
 	policy-intelligence policy-intelligence-manifest governance-control-snapshot policy-coverage-score governance-control-report policy-intelligence-check \
@@ -177,6 +177,13 @@ academic-publication-check: research-package-check
 
 microbenchmark-check:
 	@python3 scripts/microbenchmark_audit_engine.py
+
+long-ledger-verification-benchmark:
+	AIGOV_BENCHMARK_REVISION="$(git rev-parse HEAD)" \
+	AIGOV_LEDGER_BENCHMARK_OUT="${AIGOV_LEDGER_BENCHMARK_OUT:-$(CURDIR)/benchmark-runs/ledger-verification.json}" \
+	cargo test --manifest-path rust/Cargo.toml --release --locked \
+		--test long_ledger_benchmark long_ledger_verification_benchmark \
+		-- --ignored --nocapture
 
 empirical-evaluation-run:
 	@python3 scripts/run_full_empirical_evaluation.py
