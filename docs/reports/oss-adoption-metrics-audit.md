@@ -26,7 +26,7 @@ The script is a manually invoked GET-only tool. It does not change GitHub reposi
 
 ## Risk assessment
 
-The main measurement risks are API cache delay, contributor records not equaling unique people, GitHub traffic covering only a rolling 14-day window, and release asset downloads excluding source archives and package registries. These are labeled in the output and documentation. Missing or unauthorized metrics remain unavailable and never become zero. Credentials are read only from the `GITHUB_TOKEN` environment variable and are not written to output.
+The main measurement risks are API cache delay, contributor records not equaling unique people, GitHub traffic covering only a rolling 14-day window, and release asset downloads excluding source archives and package registries. These are labeled in the output and documentation. Missing or unauthorized metrics remain unavailable and never become zero. Credentials are read only from the `GITHUB_TOKEN` environment variable and are not written to output. Pagination links are restricted to HTTPS `api.github.com` before a request can carry the token.
 
 ## Rollback plan
 

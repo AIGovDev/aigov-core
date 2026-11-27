@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 API_ROOT = "https://api.github.com"
@@ -69,7 +69,14 @@ def _pages(
         if not isinstance(payload, list):
             raise RuntimeError("GitHub API returned an unexpected paginated response")
         yield from payload
-        url = _next_url(headers.get("Link", headers.get("link", ""))) or ""
+        next_page = _next_url(headers.get("Link", headers.get("link", "")))
+        if not next_page:
+            url = ""
+            continue
+        parsed = urlsplit(next_page)
+        if parsed.scheme != "https" or parsed.netloc != "api.github.com":
+            raise RuntimeError("GitHub pagination link is outside the API host")
+        url = next_page
 
 
 def _available(value: Any, source: str, note: str | None = None) -> dict[str, Any]:

@@ -75,6 +75,23 @@ class OSSMetricsSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(snapshot["collected_at"], "2026-11-27T00:00:00Z")
 
+    def test_pagination_link_cannot_send_token_to_another_host(self):
+        root, responses = base_responses()
+        responses[f"{root}/contributors?anon=1&per_page=100"] = (
+            [{"login": "alice"}],
+            {"Link": '<https://attacker.example/collect>; rel="next"'},
+        )
+        responses[f"{root}/traffic/views"] = GitHubAPIError(403)
+        responses[f"{root}/traffic/clones"] = GitHubAPIError(403)
+        snapshot = collect_snapshot(
+            "AIGovDev/aigov-core", token="secret-token", fetcher=FakeAPI(responses)
+        )
+
+        metric = snapshot["metrics"]["contributors_listed"]
+        self.assertEqual(metric["status"], "unavailable")
+        self.assertEqual(metric["reason"], "invalid_api_response")
+        self.assertNotIn("secret-token", repr(snapshot))
+
     def test_restricted_traffic_is_unavailable_not_zero(self):
         root, responses = base_responses()
         responses[f"{root}/traffic/views"] = GitHubAPIError(403)
