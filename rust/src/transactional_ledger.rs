@@ -155,7 +155,7 @@ pub async fn verify_checkpoint(
     expected_sequence: i64,
     expected_hash: &str,
 ) -> Result<(), sqlx::Error> {
-    export_checkpoint_jsonl(pool, tenant, expected_sequence, expected_hash)
+    validate_snapshot(pool, tenant, expected_sequence, expected_hash, false)
         .await
         .map(|_| ())
 }
@@ -167,6 +167,16 @@ pub async fn export_checkpoint_jsonl(
     tenant: &str,
     expected_sequence: i64,
     expected_hash: &str,
+) -> Result<Vec<u8>, sqlx::Error> {
+    validate_snapshot(pool, tenant, expected_sequence, expected_hash, true).await
+}
+
+async fn validate_snapshot(
+    pool: &PgPool,
+    tenant: &str,
+    expected_sequence: i64,
+    expected_hash: &str,
+    export: bool,
 ) -> Result<Vec<u8>, sqlx::Error> {
     let invalid = || sqlx::Error::Protocol("ledger export checkpoint mismatch".to_owned());
     let mut tx = pool.begin().await?;
@@ -195,10 +205,12 @@ pub async fn export_checkpoint_jsonl(
             || parsed.get("event_id").and_then(|v| v.as_str()) != Some(id.as_str()) {
             return Err(invalid());
         }
-        serde_json::to_writer(&mut output, &serde_json::json!({
+        if export {
+            serde_json::to_writer(&mut output, &serde_json::json!({
             "event_json": event, "prev_hash": previous, "record_hash": hash
         })).map_err(|_| invalid())?;
-        output.push(b'\n');
+            output.push(b'\n');
+        }
         previous = hash;
     }
     if sequence != expected_sequence || previous != expected_hash {
