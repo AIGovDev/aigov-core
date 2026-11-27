@@ -1,7 +1,7 @@
 # Curated list submission opportunities
 
 **Reviewed:** 2026-11-27  
-**Status:** Research and draft copy only. No external submissions have been made.
+**Status:** Catalog research and draft copy, plus one verified external submission now open for maintainer review.
 
 This note records a small set of relevant third-party catalogs for a maintainer to review. It complements the repository's existing launch, onboarding, adoption, and metrics documentation; it does not replace those materials. Inclusion is a curator decision, not a promised launch outcome.
 
@@ -65,4 +65,4 @@ The following requested channels were checked against their current public contr
 
 ### Submission status
 
-Verified external catalog PRs: **0**. The AIGov Core PR #536 documents three catalog prospects but is internal research, not an external submission. No opportunity was submitted where fit, active maintenance, or the receiving project's eligibility gate was not verified. The priority next step is to ask the AI Governance Tools and Awesome GenAI Security maintainers whether they want a governance evidence runtime in scope; then prepare one focused fork/branch/PR per confirmed catalog.
+Verified external catalog PRs: **1 open**. [AIGov Core in Awesome AI Governance](https://github.com/Aperintelligence/awesome-ai-governance/pull/14) was submitted after checking the current category and contribution policy; it discloses the maintainer relationship and states hash-chain verification limits. Its status is open and inclusion is pending maintainer decision. The AIGov Core PR #536 remains internal research. Other candidates were not submitted where fit, active maintenance, or eligibility could not be verified.
