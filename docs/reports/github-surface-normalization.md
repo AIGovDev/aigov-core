@@ -2,7 +2,7 @@
 
 ## Summary
 
-Normalized the **GitHub operational surface** of GovAI Core so the repository presents as an open-source, ledger-authoritative audit runtime (`aigov_audit`). Updated issue and PR templates, discussion templates, `config.yml` contact links, `CODEOWNERS`, composite action description, and operator support doc. No runtime semantics changed.
+Normalized the **GitHub operational surface** of AIGov Core Core so the repository presents as an open-source, ledger-authoritative audit runtime (`aigov_audit`). Updated issue and PR templates, discussion templates, `config.yml` contact links, `CODEOWNERS`, composite action description, and operator support doc. No runtime semantics changed.
 
 ## Evaluation gate
 
@@ -17,7 +17,7 @@ Human approval evidence remains **ledger-authoritative** (`human_approved`, `ris
 | Asset | Before | After |
 |-------|--------|-------|
 | `ISSUE_TEMPLATE/config.yml` | Links to `aigov-compliance-engine` | Links to `AIGovDev/aigov-core` |
-| Issue templates | Generic “GovAI”; onboarding/hosted framing | **GovAI Core** scope; platform called out as separate |
+| Issue templates | Generic “AIGov Core”; onboarding/hosted framing | **AIGov Core Core** scope; platform called out as separate |
 | `pull_request_template.md` | Staging workflow only | Staging workflow + core invariants + check matrix |
 | `DISCUSSION_TEMPLATE/` | Missing | General, Integrations, Governance categories |
 | `SUPPORT.md` | Missing | Core support routing |
@@ -31,7 +31,7 @@ README, SECURITY, CONTRIBUTING, and GOVERNANCE were already aligned from prior O
 
 ### Git-tracked (this PR)
 
-- `.github/ISSUE_TEMPLATE/*` — GovAI Core descriptions, tenant/API key hints, platform exclusion
+- `.github/ISSUE_TEMPLATE/*` — AIGov Core Core descriptions, tenant/API key hints, platform exclusion
 - `.github/pull_request_template.md` — `staging` target, invariant checklist, verification commands
 - `.github/DISCUSSION_TEMPLATE/*` — new discussion forms
 - `.github/SUPPORT.md` — support matrix
@@ -41,7 +41,7 @@ README, SECURITY, CONTRIBUTING, and GOVERNANCE were already aligned from prior O
 
 ### Valid historical references (unchanged)
 
-- `govai-ci.yml` / `compliance.yml` comments that hosted SaaS belongs to GovAI Platform
+- `govai-ci.yml` / `compliance.yml` comments that hosted SaaS belongs to AIGov Platform
 - Workflow `paths:` filters including `dashboard/**` (monorepo layout; does not mount dashboard on `aigov_audit`)
 - `docs/hosted/`, `docs/billing/` in README as **platform reference only**
 
@@ -98,14 +98,14 @@ Suggested **categories** (create in GitHub Settings → Discussions → Categori
 
 | Category | Purpose |
 |----------|---------|
-| General | Questions about GovAI Core runtime and docs |
+| General | Questions about AIGov Core Core runtime and docs |
 | Integrations | App/CI integration patterns |
 | Governance & standards | Portable standards, policy packs, RFC ideas |
 | Announcements | Releases and maintainer notices (maintainers only post) |
 
 ### 3. Suggested pinned discussions (create then pin in UI)
 
-1. **“GovAI Core quickstart — evidence → compliance summary → export → verify”** — link `docs/quickstart-runtime.md`
+1. **“AIGov Core Core quickstart — evidence → compliance summary → export → verify”** — link `docs/quickstart-runtime.md`
 2. **“Reference integrations index”** — link `docs/reference-integrations.md`
 3. **“Contributing: staging branch workflow”** — link `CONTRIBUTING.md` branching section
 
@@ -153,7 +153,7 @@ gh release create v1.0.0 --generate-notes --target main
 
 ### 6. Social preview
 
-Upload repository social preview image (Settings → General → Social preview) showing **GovAI Core** + “ledger-authoritative audit runtime”. No Stripe/dashboard imagery.
+Upload repository social preview image (Settings → General → Social preview) showing **AIGov Core Core** + “ledger-authoritative audit runtime”. No Stripe/dashboard imagery.
 
 ### 7. Milestones (suggested)
 
@@ -175,7 +175,7 @@ gh label create "runtime" --color "1D76DB" --description "aigov_audit HTTP runti
 gh label create "integrations" --color "0E8A16" --description "Reference integrations and SDK adoption" -R AIGovDev/aigov-core
 gh label create "tenant-isolation" --color "B60205" --description "API key tenant mapping / isolation" -R AIGovDev/aigov-core
 gh label create "audit-export" --color "5319E7" --description "aigov.audit_export.v1 and verify" -R AIGovDev/aigov-core
-gh label create "platform-out-of-scope" --color "FBCA04" --description "GovAI Platform; redirect or close per scope" -R AIGovDev/aigov-core
+gh label create "platform-out-of-scope" --color "FBCA04" --description "AIGov Platform; redirect or close per scope" -R AIGovDev/aigov-core
 ```
 
 ### 9. Labels — delete or repurpose (review first)
