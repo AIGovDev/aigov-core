@@ -634,3 +634,35 @@ fn read_authorization_can_be_receipted() {
     );
     assert!(check_trusted(&[read], &receipt).is_ok());
 }
+
+#[test]
+fn huggingface_observation_cannot_satisfy_passed_evaluation_gate() {
+    let mut p = policy();
+    p.event_rules.insert(
+        "huggingface_evaluation_observed".into(),
+        rule(&[], &["record_sha256"], vec![]),
+    );
+    p.event_rules.insert(
+        "model_promoted".into(),
+        rule(
+            &[],
+            &[],
+            vec![Gate::RequiresPassedEvaluation {
+                code: "evaluation_required".into(),
+                message: "passed evaluation required".into(),
+            }],
+        ),
+    );
+    let observation = ev(
+        "hf-1",
+        "huggingface_evaluation_observed",
+        APPROVED_AT,
+        json!({"record_sha256": "a".repeat(64), "passed": true}),
+    );
+    let now = now_at(APPROVED_AT);
+    assert!(enforce_ingest_at(&p, &observation, &Ledger(vec![]), now).is_ok());
+    let promotion = ev("promote-1", "model_promoted", APPROVED_AT, json!({}));
+    assert!(enforce_ingest_at(&p, &promotion, &Ledger(vec![observation]), now).is_err());
+    let evaluation = ev("eval-1", "evaluation_reported", APPROVED_AT, json!({"passed": true}));
+    assert!(enforce_ingest_at(&p, &promotion, &Ledger(vec![evaluation]), now).is_ok());
+}
