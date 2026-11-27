@@ -69,3 +69,17 @@ def test_approval_requires_original_call_id():
     with pytest.raises(Refused, match="approval_call_id_required"):
         invoke_registered_tool(agent, executor, "tool", {}, approval_event_id="approval")
     executor.execute.assert_not_called()
+
+
+def test_real_smolagents_tool():
+    import json
+    smolagents = pytest.importorskip("smolagents")
+    from aigov_py.runtime.adapters.smolagents import make_smolagents_tool
+
+    agent, executor = setup()
+    agent.read.return_value = CoreDecision(Decision.DENY, "blocked", None, None, 400, 0)
+    tool = make_smolagents_tool(agent, executor, "tool", description="Governed test",
+                                inputs={"x": {"type": "string", "description": "Input"}})
+    assert isinstance(tool, smolagents.Tool)
+    assert json.loads(tool(x="hello"))["decision"] == "DENY"
+    executor.execute.assert_not_called()
