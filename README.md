@@ -1,6 +1,6 @@
 # AIGov Core
 
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/AIGovDev/aigov-core/govai-ci.yml)](https://github.com/AIGovDev/aigov-core/actions/workflows/govai-ci.yml) [![GitHub License](https://img.shields.io/github/license/AIGovDev/aigov-core)](https://github.com/AIGovDev/aigov-core/blob/main/LICENSE) [![Crates.io](https://img.shields.io/badge/crates.io-not%20published-lightgrey)]() [![PyPI Version](https://img.shields.io/pypi/v/aigov-py)](https://pypi.org/project/aigov-py/) [![Documentation](https://img.shields.io/badge/docs-GitHub-blue)](https://github.com/AIGovDev/aigov-core/tree/main/docs)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/AIGovDev/aigov-core/aigov-ci.yml)](https://github.com/AIGovDev/aigov-core/actions/workflows/aigov-ci.yml) [![GitHub License](https://img.shields.io/github/license/AIGovDev/aigov-core)](https://github.com/AIGovDev/aigov-core/blob/main/LICENSE) [![Crates.io](https://img.shields.io/badge/crates.io-not%20published-lightgrey)]() [![PyPI Version](https://img.shields.io/pypi/v/aigov-py)](https://pypi.org/project/aigov-py/) [![Documentation](https://img.shields.io/badge/docs-GitHub-blue)](https://github.com/AIGovDev/aigov-core/tree/main/docs)
 
 AIGov Core is the **open-source**, ledger-authoritative audit runtime for reconstructible AI governance. The `aigov_audit` service appends evidence to tenant-scoped ledgers, enforces policy at ingest, derives **VALID / INVALID / BLOCKED** from ledger projection (`GET /compliance-summary`), exports `aigov.audit_export.v1`, and verifies hash chains.
 
@@ -159,7 +159,7 @@ All targets are defined in the repository **`Makefile`**. Common checks:
 
 **Fail-closed BLOCKED demo:** after Compose + `python/.venv` + `GOVAI_*` are aligned, run **`bash examples/blocked_deployment.sh`** (checks **`GET /ready`**, posts minimal evidence, asserts **`govai check`** exit code **3**). See **`examples/local-demo/CONTRACT.md`**.
 
-**CI workflows:** `.github/workflows/govai-ci.yml` (portable Core CI), `.github/workflows/oss-developer-experience.yml` (`make cursor-plugin-check`, `make enterprise-readiness-check`), `.github/workflows/supply-chain-audit.yml` (`cargo audit`, `pip-audit`), `.github/workflows/security-scan.yml` (gitleaks, Trivy).
+**CI workflows:** `.github/workflows/aigov-ci.yml` (portable Core CI), `.github/workflows/oss-developer-experience.yml` (`make cursor-plugin-check`, `make enterprise-readiness-check`), `.github/workflows/supply-chain-audit.yml` (`cargo audit`, `pip-audit`), `.github/workflows/security-scan.yml` (gitleaks, Trivy).
 
 Contributor-oriented Makefile targets also include evidence-pack flows (`make bundle`, `make verify_cli`), demo drivers (`make demo`, `make flow`), and engineering helpers (`make env_check`, `make engineering_loc`). These require **`GOVAI_AUDIT_BASE_URL`** / **`RUN_ID`** where noted in the Makefile — Core does not background-manage a localhost audit server.
 
