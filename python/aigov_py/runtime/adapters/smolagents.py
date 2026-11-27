@@ -46,3 +46,33 @@ def invoke_registered_tool(
                                signed=decision.authorization)
     return {"decision": "ALLOW", "call_id": cid, "executed": outcome.executed,
             "reason": outcome.reason, "receipt_recorded": outcome.receipt_recorded}
+
+
+def make_smolagents_tool(agent: AgentActor, executor: Executor, tool: str,
+                         *, description: str, inputs: dict[str, Any]) -> Any:
+    """Expose a registered tool as a status-returning smolagents Tool.
+
+    The host supplies the schema. Approval resumption remains host-only.
+    """
+    from smolagents import Tool
+
+    if tool not in agent.tools:
+        raise Refused("tool_not_registered")
+    if not isinstance(inputs, dict):
+        raise ValueError("Tool inputs must be a mapping")
+    if {"call_id", "approval_event_id"} & inputs.keys():
+        raise ValueError("Reserved host-only input")
+
+    class GovernedTool(Tool):
+        name = tool
+        output_type = "string"
+        skip_forward_signature_validation = True
+
+        def forward(self, **kwargs: Any) -> str:
+            if not kwargs.keys() <= self.inputs.keys():
+                raise Refused("unexpected_tool_argument")
+            return json.dumps(invoke_registered_tool(agent, executor, tool, kwargs))
+
+    GovernedTool.description = description
+    GovernedTool.inputs = json.loads(json.dumps(inputs))
+    return GovernedTool()
