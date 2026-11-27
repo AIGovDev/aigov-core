@@ -121,3 +121,28 @@ pub async fn lock_tenant_and_read(
         .fetch_all(&mut **tx)
         .await
 }
+
+/// Read only the requested run while holding the tenant serialization lock.
+/// This does not replace tenant-wide checks such as global event uniqueness.
+pub async fn lock_tenant_and_read_run(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant: &str,
+    run_id: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    if tenant.is_empty() || run_id.is_empty() {
+        return Err(sqlx::Error::Protocol("empty tenant or run".to_owned()));
+    }
+    sqlx::query("INSERT INTO core_ledger_heads VALUES ($1, 0, 'GENESIS') ON CONFLICT DO NOTHING")
+        .bind(tenant)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("SELECT seq FROM core_ledger_heads WHERE tenant_id=$1 FOR UPDATE")
+        .bind(tenant)
+        .fetch_one(&mut **tx)
+        .await?;
+    sqlx::query_scalar("SELECT event_json FROM core_ledger_records WHERE tenant_id=$1 AND event_json::jsonb->>'run_id'=$2 ORDER BY seq")
+        .bind(tenant)
+        .bind(run_id)
+        .fetch_all(&mut **tx)
+        .await
+}
