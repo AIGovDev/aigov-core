@@ -344,7 +344,7 @@ jobs:
       - name: Validate smolagents against release Core
         run: |
           set -euo pipefail
-          python -m pip install smolagents==1.22.0
+          python -m pip install smolagents==1.26.0
           python -c "import smolagents"
           python -m pytest python/tests/test_smolagents_adapter.py -q
           python - <<'PY'
