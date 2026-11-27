@@ -40,3 +40,19 @@ python -m pytest tests/test_huggingface_provenance.py -q
 ```
 
 Submit feature changes to `staging` before promotion to `main`.
+
+## CPU evaluation demonstration (experimental)
+
+```sh
+python -m pip install -e ./python -r examples/integrations/huggingface/requirements-demo.txt
+REVISION=$(python -c 'from huggingface_hub import HfApi; print(HfApi().model_info("hf-internal-testing/tiny-random-bert", token=False).sha)')
+python examples/integrations/huggingface/evaluation_demo.py --revision "$REVISION"
+```
+
+The demo uses a tiny random BERT model and synthetic labels. It pins the resolved
+Hub revision for that run, checks selected safetensors and tokenizer files, runs
+CPU inference and a local Evaluate metric, then detects a modified metric record.
+The model is not a quality benchmark. Direct demo dependencies are pinned; transitive dependencies are not locked.
+Save REVISION and reuse it for subsequent runs. The in-memory anchor demonstrates integrity only; an
+independent verifier must obtain its anchor through a trusted channel. The toy
+policy is a reference, not an enforced policy. Live execution is pending validation.
