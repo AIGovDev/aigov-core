@@ -49,7 +49,7 @@ jobs:
       - name: Test transactional ledger against PostgreSQL
         env:
           GOVAI_DATABASE_URL: postgresql://aigov_test:aigov_ci_only@127.0.0.1:5432/govai
-        run: cargo test --manifest-path rust/Cargo.toml --release --locked --test transactional_ledger -- --ignored
+        run: cargo test --manifest-path rust/Cargo.toml --release --locked --test transactional_ledger -- --ignored --nocapture
       - name: Benchmark disposable release Core
         env:
           AIGOV_ENVIRONMENT: dev
