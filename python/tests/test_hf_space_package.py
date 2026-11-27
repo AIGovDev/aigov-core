@@ -22,15 +22,15 @@ class HuggingFaceStaticSpaceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
     def test_viewer_security_contract(self):
-        source = (ROOT / "examples/reconstructible-agent-demo/viewer/index.html").read_text(
-            encoding="utf-8"
-        )
+        source = (
+            ROOT / "examples/reconstructible-agent-demo/viewer/index.html"
+        ).read_text(encoding="utf-8")
         lowered = source.lower()
         self.assertIn("file.size > max_file_bytes", lowered)
         self.assertIn(
             "new textencoder().encode(text).bytelength > max_file_bytes", lowered
         )
-        self.assertIn('url.origin !== location.origin', source)
+        self.assertIn("url.origin !== location.origin", source)
         self.assertIn('new Set(["http:", "https:"])', source)
         self.assertIn('redirect: "error"', source)
         self.assertIn('credentials: "omit"', source)
