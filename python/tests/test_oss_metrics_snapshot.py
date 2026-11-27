@@ -129,7 +129,7 @@ class OSSMetricsSnapshotTests(unittest.TestCase):
         self.assertNotIn("do-not-store-this", repr(snapshot))
 
     def test_pypi_downloads_and_window_deltas(self):
-        root, responses = base_responses()
+        _, responses = base_responses()
         responses["https://pypistats.org/api/packages/aigov-py/recent"] = (
             {
                 "package": "aigov-py",
