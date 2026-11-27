@@ -8,6 +8,7 @@ This document describes **empirically measured** performance characteristics of 
 |----------|----------|------|
 | Event ingestion pipeline | `scripts/run_event_ingestion_benchmarks.py` | JSON construction plus SHA-256 record hashing per event |
 | Hash-chain verification | `scripts/run_hash_chain_benchmarks.py` | Full linear verification over in-memory chains |
+| Rust on-disk chain verification | [`benchmarks/ledger-verification/`](../../benchmarks/ledger-verification/README.md) | Release-mode measurements of the production Rust file-backed verifier; excludes HTTP and PostgreSQL |
 | Export / compression | `scripts/run_export_benchmarks.py` | `json.dumps` plus `gzip.compress` |
 | Storage projections | `scripts/run_storage_benchmarks.py` | Derived from measured average bytes per event |
 | Multi-tenant synthetic load | `scripts/run_multi_tenant_benchmarks.py` | Sequential tenant-scoped workloads |
@@ -18,6 +19,7 @@ This document describes **empirically measured** performance characteristics of 
 - End-to-end HTTP load against a production cluster at datacenter scale (unless you opt into optional HTTP probes).
 - Database query planning under concurrent writers across many nodes.
 - Statistical inference over a population of independent deployments.
+- Cross-product comparative performance; no aligned competitor study has been published. Python in-memory timings are not an apples-to-apples runtime comparison.
 
 ## Machine-readable outputs
 

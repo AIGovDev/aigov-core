@@ -31,7 +31,7 @@ python3 examples/reconstructible-agent-demo/run_demo.py
 7. `GET /api/export/:run_id` → `exports/<run_id>.json`  
 8. `GET /verify/:run_id`  
 9. Offline deterministic replay and epistemic-readiness evaluation
-10. Offline replay viewer in `viewer/index.html`
+10. Browser-local export viewer in `viewer/index.html` (recomputes the included SHA-256 record chain)
 
 ## Mocked vs live
 
@@ -42,12 +42,11 @@ python3 examples/reconstructible-agent-demo/run_demo.py
 
 ## Replay viewer
 
-Open `viewer/index.html` in a browser (local static file or simple HTTP server for `fetch`).
+Open `viewer/index.html` in a browser and select `exports/<run_id>.json` with the file picker. The viewer reads the selected export in the browser; it has no upload endpoint or external script.
 
-- File picker: load `exports/<run_id>.json`  
-- Query param: `?export=../exports/<run_id>.json` (needs a local server)  
+The viewer recomputes each record hash and its predecessor link in `evidence_hashes.log_chain`. It does not verify export signatures or a separately trusted chain head, establish signer identity, prove that an AI action occurred, or determine legal compliance. A person who can replace the entire export can also recompute its chain.
 
-Shows ordered evidence timeline, tool/approval gates, ledger verdict, and hash-chain integrity from `evidence_hashes.log_chain`.
+The same viewer is packaged for a static Hugging Face Space in [`spaces/aigov-core-evidence-viewer/`](../../spaces/aigov-core-evidence-viewer/). Refresh and verify that package from the repo root with `python3 scripts/prepare_hf_space.py` and `python3 scripts/prepare_hf_space.py --check`. Run the browser-side hash-chain regression test with `node examples/reconstructible-agent-demo/viewer/test_hash_chain.mjs`.
 
 The run also executes `replay_audit_export_once` and the offline epistemic-readiness evaluator. It writes `exports/<run_id>-offline-readiness.json` and reports the reconstructed verdict separately from readiness. The demo deliberately evaluates without archived policy bytes, so a compliance-valid export may still be epistemically `partial`. The model invocation is also `digest_only`: it records digests, not reconstructible prompt or response content.
 
@@ -63,3 +62,4 @@ The run also executes `replay_audit_export_once` and the offline epistemic-readi
 
 - [Reconstructible agent demo](../../docs/reconstructible-agent-demo.md)
 - [Audit report](../../docs/reports/reconstructible-agent-demo.md)
+

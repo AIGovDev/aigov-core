@@ -28,6 +28,7 @@ and this project adheres to the [versioning policy](docs/releases/versioning-pol
 
 ### Added
 
+- An opt-in release-mode benchmark now measures the Rust file-backed ledger verifier on valid and tampered long ledgers; machine-readable results record workload and environment metadata.
 - MCP report-template writes now use the existing signed trusted-execution flow, with a separate human approval request tool and pre-migrated executor store.
 
 ## [0.2.1] - 2026-06-10
