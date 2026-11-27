@@ -47,3 +47,22 @@ GitHub README and contribution-guide contents were checked on 2026-11-27:
 - [AIGov Core README](https://github.com/AIGovDev/aigov-core/blob/staging/README.md)
 
 The “not listed” observation is based on searching each checked README for AIGov, GovAI, and MonikaDvorackova; it is not a claim about every branch, file, or catalog.
+
+## Additional catalog check (2026-11-27)
+
+The following requested channels were checked against their current public contribution rules and repository metadata. No external submission was made in this review.
+
+| Resource | Eligibility / status | Decision |
+| --- | --- | --- |
+| [Awesome AI Agents Enhanced](https://github.com/DanWaheed/awesome-ai-agents-enhanced) | Publicly maintained; its contribution guide requests a public agent repository and observable agent behavior. The current AIGov Core repo is a governance/audit runtime rather than an agent or agent framework. | Do not submit; weak category fit. |
+| [Awesome MLOps](https://github.com/kelvins/awesome-mlops) | Public, not archived, active default-branch commits observed in October 2026. It curates MLOps tools and workflows; AIGov Core is adjacent but not primarily an MLOps platform. | Do not submit unless a specific existing category for governance evidence is confirmed with maintainers. |
+| [Awesome AI Governance Tools](https://github.com/aglio-lab/ai-governance-tools) | Direct topical fit, but repository metadata showed last push 2026-07-16 and the README's last review date is also 2026-07-16 despite its monthly review claim. A current maintenance cadence could not be verified. | Strongest candidate after confirming an active maintainer/review cycle. Neutral entry draft above is ready; no fork or PR yet. |
+| [Awesome GenAI Security](https://github.com/jassics/awesome-genai-security) | Relevant AI security scope and a contribution guide exists. The project should only be listed if the maintainers accept governance/audit evidence infrastructure in the tool categories; it is not a vulnerability scanner or red-team testing tool. | Ask the maintainer about fit before a PR; no submission. |
+| [Awesome Rust](https://github.com/rust-unofficial/awesome-rust) | Actively maintained, but its current policy requires at least 50 GitHub stars or 2,000 crate downloads, or equivalent evidence. AIGov Core's verified GitHub baseline is 2 stars and no qualifying crates.io download metric was established. | Ineligible on currently verified popularity requirements; do not submit. |
+| [Hugging Face AI Governance & Responsible AI collection](https://huggingface.co/collections/aigovdev/ai-governance-and-responsible-ai) | AIGov governance scenario Space and related assets already appear in the collection. The new Core evidence viewer is not verified as published or included. | Existing presence confirmed for related assets; add the viewer only after its public Space is live and account authorization is available. |
+| [AlternativeTo](https://alternativeto.net/faq/) | New software submissions require a verified account email, use a review queue, and may incur an optional paid priority-review fee. The site excludes unreleased/private-beta software and disallows link-filled promotional descriptions. | Potential later listing for the released open-source CLI/runtime, but requires an authenticated verified account; do not pay for priority. |
+| [OpenSSF Best Practices Badge](https://bestpractices.dev/en) | Free, voluntary self-certification is available to FLOSS projects. This is a project assessment, not a catalog PR and not an independent security audit. | Add as a separate evidence-led self-assessment after all current criteria have been checked; no badge currently claimed. |
+
+### Submission status
+
+Verified external catalog PRs: **0**. The AIGov Core PR #536 documents three catalog prospects but is internal research, not an external submission. No opportunity was submitted where fit, active maintenance, or the receiving project's eligibility gate was not verified. The priority next step is to ask the AI Governance Tools and Awesome GenAI Security maintainers whether they want a governance evidence runtime in scope; then prepare one focused fork/branch/PR per confirmed catalog.

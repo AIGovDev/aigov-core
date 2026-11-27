@@ -11,6 +11,7 @@ SOURCE = ROOT / "examples/reconstructible-agent-demo/viewer/index.html"
 SPACE = ROOT / "spaces/aigov-core-evidence-viewer"
 TARGET = SPACE / "index.html"
 README = SPACE / "README.md"
+SAMPLE = SPACE / "sample-evidence-export.json"
 FORBIDDEN = ("innerhtml", "outerhtml", "xmlhttprequest", "<script src=")
 
 
@@ -41,6 +42,19 @@ def check() -> list[str]:
     for required in ("sdk: static", "app_file: index.html"):
         if required not in readme:
             errors.append(f"Space README is missing configuration: {required}")
+    if not SAMPLE.is_file():
+        errors.append("Space sample evidence export is missing")
+    else:
+        try:
+            import json
+
+            sample = json.loads(SAMPLE.read_text(encoding="utf-8"))
+            if not isinstance(sample, dict) or not sample.get("evidence_events"):
+                errors.append("Space sample export must contain evidence_events")
+            if not sample.get("evidence_hashes", {}).get("log_chain"):
+                errors.append("Space sample export must contain a log_chain")
+        except (ValueError, OSError) as exc:
+            errors.append(f"Space sample export is not valid JSON: {exc}")
     return errors
 
 

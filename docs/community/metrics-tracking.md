@@ -50,6 +50,8 @@ GitHub does not expose per-download counts for source archives through the repos
 
 Store snapshots outside the repository unless there is a deliberate reason to publish a public time series. If published, include collection timestamps and preserve the status/source fields so missing data cannot be mistaken for zero. These metrics are not customer or unique-human adoption counts.
 
-## Manual cadence
+## Weekly reporting
 
-Run the command weekly or before and after a launch activity, retain the dated JSON snapshots, and compare with `--previous`. GitHub traffic endpoints expose only the recent rolling window, and PyPI Stats retains a limited time series, so retain snapshots regularly for longer-term comparisons. No scheduled workflow or external analytics account is required.
+The workflow in `.github/workflows/weekly-adoption-metrics.yml` runs every Monday at 09:15 UTC and can also be dispatched manually. It writes a dated JSON snapshot to a 90-day workflow artifact and a short summary to the Actions run. The GitHub-provided read-only token collects public counters; repository traffic stays unavailable unless the token has Administration: read permission. The workflow does not commit metrics or publish user identities.
+
+The initial verified snapshot is in [public-adoption-baseline-2026-11-27.md](public-adoption-baseline-2026-11-27.md). Compare future artifacts against saved snapshots with `--previous` to measure deltas. GitHub traffic endpoints expose only the recent rolling window, and PyPI Stats retains a limited time series, so retain snapshots regularly for longer-term comparisons.

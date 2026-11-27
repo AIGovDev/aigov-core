@@ -625,13 +625,19 @@ Hosted **Stripe billing** is supported for operator-managed pilots (checkout, we
 
 ## Community and Launch
 
-Publication-ready **channel playbooks**, **FAQ**, and **positioning** live under `docs/launch/` (see [launch checklist](docs/launch/launch-checklist.md)). **Integration examples** and **reference hubs** explain practical adoption paths without duplicating the canonical GitHub Action spec.
+Draft **channel announcements**, **FAQ**, **technical article**, **benchmark summary**, and **positioning** live under `docs/launch/` (see [launch checklist](docs/launch/launch-checklist.md)). They are not published announcements. The browser evidence viewer is packaged in `spaces/aigov-core-evidence-viewer/`; the public Space is pending authorized Hugging Face publication. **Integration examples** and **reference hubs** explain practical adoption paths without duplicating the canonical GitHub Action spec.
 
 **Launch materials**
 
 - [Product Hunt](docs/launch/product-hunt.md) · [Hacker News](docs/launch/hacker-news.md) · [Reddit](docs/launch/reddit.md) · [LinkedIn](docs/launch/linkedin.md)
 - [Community outreach](docs/launch/community-outreach.md) · [Design partners](docs/launch/design-partners.md)
-- [FAQ](docs/launch/faq.md) · [Competitive positioning](docs/launch/competitive-positioning.md) · [Launch checklist](docs/launch/launch-checklist.md)
+- [FAQ](docs/launch/faq.md) · [Technical article](docs/launch/technical-article.md) · [Benchmark report](docs/launch/benchmark-report.md)
+- [Competitive positioning](docs/launch/competitive-positioning.md) · [Launch checklist](docs/launch/launch-checklist.md)
+- [Adoption metrics baseline and weekly reporting](docs/community/public-adoption-baseline-2026-11-27.md) · [metrics process](docs/community/metrics-tracking.md)
+- [Independent security audit preparation](docs/security/external-audit-preparation.md)
+- [Audit funding eligibility and outreach drafts](docs/security/audit-funding-opportunities-2026-11-27.md)
+- [Third-party catalog submission research](docs/community/awesome-list-opportunities.md)
+- [Static evidence viewer package and synthetic export](spaces/aigov-core-evidence-viewer/README.md)
 
 **Reference examples**
 
