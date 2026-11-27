@@ -1,0 +1,67 @@
+//! Experimental storage primitive; not yet wired into HTTP authorization.
+use sha2::{Digest, Sha256};
+use sqlx::{PgPool, Row};
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AppendResult {
+    pub sequence: i64,
+    pub record_hash: String,
+    pub replay: bool,
+}
+
+pub async fn append(
+    pool: &PgPool,
+    tenant: &str,
+    event_id: &str,
+    event_json: &str,
+) -> Result<AppendResult, sqlx::Error> {
+    let invalid = |message: &str| sqlx::Error::Protocol(message.to_owned());
+    let event: serde_json::Value = serde_json::from_str(event_json)
+        .map_err(|_| invalid("invalid event JSON"))?;
+    if tenant.is_empty() || event_id.is_empty()
+        || event.get("event_id").and_then(|v| v.as_str()) != Some(event_id)
+    {
+        return Err(invalid("invalid tenant or event identity"));
+    }
+    let mut tx = pool.begin().await?;
+    sqlx::query("INSERT INTO core_ledger_heads VALUES ($1, 0, 'GENESIS') ON CONFLICT DO NOTHING")
+        .bind(tenant)
+        .execute(&mut *tx)
+        .await?;
+    let head = sqlx::query("SELECT seq, head_hash FROM core_ledger_heads WHERE tenant_id=$1 FOR UPDATE")
+        .bind(tenant)
+        .fetch_one(&mut *tx)
+        .await?;
+    if let Some(row) = sqlx::query("SELECT seq, event_json, record_hash FROM core_ledger_records WHERE tenant_id=$1 AND event_id=$2")
+        .bind(tenant)
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    {
+        if row.get::<String, _>("event_json") != event_json {
+            return Err(invalid("conflicting event replay"));
+        }
+        let result = AppendResult {
+            sequence: row.get("seq"),
+            record_hash: row.get("record_hash"),
+            replay: true,
+        };
+        tx.commit().await?;
+        return Ok(result);
+    }
+    let sequence = head.get::<i64, _>("seq").checked_add(1)
+        .ok_or_else(|| invalid("ledger sequence overflow"))?;
+    let previous: String = head.get("head_hash");
+    let mut hasher = Sha256::new();
+    hasher.update(previous.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(event_json.as_bytes());
+    let record_hash = hex::encode(hasher.finalize());
+    sqlx::query("INSERT INTO core_ledger_records (tenant_id,seq,event_id,event_json,prev_hash,record_hash) VALUES ($1,$2,$3,$4,$5,$6)")
+        .bind(tenant).bind(sequence).bind(event_id).bind(event_json)
+        .bind(&previous).bind(&record_hash).execute(&mut *tx).await?;
+    sqlx::query("UPDATE core_ledger_heads SET seq=$2, head_hash=$3 WHERE tenant_id=$1")
+        .bind(tenant).bind(sequence).bind(&record_hash).execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(AppendResult { sequence, record_hash, replay: false })
+}
