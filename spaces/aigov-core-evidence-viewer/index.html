@@ -168,7 +168,10 @@
         }
         expectedPrev = row.record_hash;
       }
-      if (declaredHead && declaredHead !== expectedPrev) {
+      if (typeof declaredHead !== "string" || !/^[0-9a-f]{64}$/.test(declaredHead)) {
+        return { ok: false, message: "The export is missing a valid declared chain head." };
+      }
+      if (declaredHead !== expectedPrev) {
         return { ok: false, message: "The declared chain head does not match the final record." };
       }
       return { ok: true, message: `Verified ${chain.length.toLocaleString()} record hash(es) and links.` };

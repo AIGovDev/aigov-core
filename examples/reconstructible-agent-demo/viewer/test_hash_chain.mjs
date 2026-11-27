@@ -20,6 +20,9 @@ const record = { prev_hash: "GENESIS", event_json: eventJson, record_hash: recor
 const valid = await verifyHashChain([record], recordHash);
 assert.equal(valid.ok, true, valid.message);
 
+const missingHead = await verifyHashChain([record], undefined);
+assert.equal(missingHead.ok, false, "a missing declared chain head must fail");
+
 const tampered = await verifyHashChain(
   [{ ...record, event_json: JSON.stringify({ event_type: "tampered" }) }],
   recordHash,
