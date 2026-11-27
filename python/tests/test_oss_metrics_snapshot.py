@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
-from pathlib import Path
 import sys
 import unittest
+from datetime import datetime, timezone
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from oss_metrics_snapshot import (  # noqa: E402
+from oss_metrics_snapshot import (
     GitHubAPIError,
     collect_snapshot,
     compare_snapshots,

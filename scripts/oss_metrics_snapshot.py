@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Collect a privacy-conscious, read-only GitHub adoption metrics snapshot."""
 from __future__ import annotations
 
@@ -9,7 +8,8 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
@@ -67,7 +67,7 @@ def _pages(
     while url:
         payload, headers = fetcher(url, token)
         if not isinstance(payload, list):
-            raise RuntimeError("GitHub API returned an unexpected paginated response")
+            raise TypeError("GitHub API returned an unexpected paginated response")
         yield from payload
         next_page = _next_url(headers.get("Link", headers.get("link", "")))
         if not next_page:
@@ -118,7 +118,7 @@ def collect_snapshot(
     repo_url = f"{API_ROOT}/repos/{encoded_repo}"
     metadata, _ = fetcher(repo_url, token)
     if not isinstance(metadata, dict):
-        raise RuntimeError("GitHub API returned unexpected repository metadata")
+        raise TypeError("GitHub API returned unexpected repository metadata")
     count_keys = {
         "stars": "stargazers_count",
         "forks": "forks_count",
@@ -144,7 +144,7 @@ def collect_snapshot(
                 "not a unique-human count. GitHub may cache this endpoint."
             ),
         )
-    except (GitHubAPIError, RuntimeError) as exc:
+    except (GitHubAPIError, RuntimeError, TypeError) as exc:
         reason = (
             _unavailable_reason(exc, token)
             if isinstance(exc, GitHubAPIError)
@@ -157,10 +157,10 @@ def collect_snapshot(
         release_assets = 0
         for release in _pages(f"{repo_url}/releases?per_page=100", token, fetcher):
             if not isinstance(release, dict):
-                raise RuntimeError("GitHub API returned an invalid release entry")
+                raise TypeError("GitHub API returned an invalid release entry")
             assets = release.get("assets", [])
             if not isinstance(assets, list):
-                raise RuntimeError("GitHub API returned invalid release assets")
+                raise TypeError("GitHub API returned invalid release assets")
             for asset in assets:
                 if not isinstance(asset, dict) or not _nonnegative_int(
                     asset.get("download_count")
@@ -177,7 +177,7 @@ def collect_snapshot(
                 "excludes source archives and package-registry downloads."
             ),
         )
-    except (GitHubAPIError, RuntimeError) as exc:
+    except (GitHubAPIError, RuntimeError, TypeError) as exc:
         reason = (
             _unavailable_reason(exc, token)
             if isinstance(exc, GitHubAPIError)
@@ -205,7 +205,7 @@ def collect_snapshot(
                 source,
                 "Rolling 14-day GitHub traffic window; adjacent snapshots overlap.",
             )
-        except (GitHubAPIError, RuntimeError) as exc:
+        except (GitHubAPIError, RuntimeError, TypeError) as exc:
             reason = (
                 _unavailable_reason(exc, token)
                 if isinstance(exc, GitHubAPIError)
@@ -276,7 +276,7 @@ def _load_snapshot(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Could not read previous snapshot: {path}") from exc
     if not isinstance(snapshot, dict):
-        raise ValueError("Previous snapshot must contain a JSON object")
+        raise TypeError("Previous snapshot must contain a JSON object")
     return snapshot
 
 
@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output.write_text(rendered, encoding="utf-8")
         else:
             sys.stdout.write(rendered)
-    except (ValueError, RuntimeError, GitHubAPIError) as exc:
+    except (ValueError, RuntimeError, TypeError, GitHubAPIError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     return 0
