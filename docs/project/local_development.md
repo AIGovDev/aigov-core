@@ -10,7 +10,7 @@ Concise path from clone to a working audit service, documentation gates, and tes
 ## 1. Clone
 
 ```bash
-git clone https://github.com/MonikaDvorackova/aigov-core.git
+git clone https://github.com/AIGovDev/aigov-core.git
 cd aigov-core
 ```
 

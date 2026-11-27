@@ -2,8 +2,8 @@
 
 **Date:** 2026-07-10  
 **Branch:** `fix/release-validation-v1-tag` → `staging`  
-**Repository:** `MonikaDvorackova/aigov-core`  
-**Failed run:** [29029918004](https://github.com/MonikaDvorackova/aigov-core/actions/runs/29029918004) (`release-artifacts` job)
+**Repository:** `AIGovDev/aigov-core`  
+**Failed run:** [29029918004](https://github.com/AIGovDev/aigov-core/actions/runs/29029918004) (`release-artifacts` job)
 
 ---
 
@@ -81,7 +81,7 @@ Post-merge verification:
 
 ```bash
 # After merge to staging, re-tag or workflow_dispatch release-validation
-gh workflow run release-validation.yml --repo MonikaDvorackova/aigov-core
+gh workflow run release-validation.yml --repo AIGovDev/aigov-core
 # Or push an annotated tag after policy files land on the tagged commit
 ```
 

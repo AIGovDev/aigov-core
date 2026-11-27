@@ -2,7 +2,7 @@
 
 Illustrative payloads and shell drivers for the **advisory** autonomous governance bundle under [`../../autonomous/autonomous-governance-manifest.json`](../../autonomous/autonomous-governance-manifest.json) and operator docs under [`../../docs/autonomous/`](../../docs/autonomous/).
 
-These artefacts do **not** change GovAI compliance verdict semantics or Rust runtime enforcement.
+These artefacts do **not** change AIGov Core compliance verdict semantics or Rust runtime enforcement.
 
 ## Commands
 

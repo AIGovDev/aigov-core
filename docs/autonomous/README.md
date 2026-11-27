@@ -2,7 +2,7 @@
 
 This section documents an **operator-facing governance framework** for systems where multiple agents act with partial autonomy: role models, delegation, approval boundaries, autonomy limits, intervention points, and offline validation tooling.
 
-The framework is **advisory**: it complements [`../agent-governance/README.md`](../agent-governance/README.md) and the enterprise [`../control-plane/README.md`](../control-plane/README.md) bundle without changing GovAI `VALID` / `INVALID` / `BLOCKED` semantics.
+The framework is **advisory**: it complements [`../agent-governance/README.md`](../agent-governance/README.md) and the enterprise [`../control-plane/README.md`](../control-plane/README.md) bundle without changing AIGov Core `VALID` / `INVALID` / `BLOCKED` semantics.
 
 ## Contents
 

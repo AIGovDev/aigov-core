@@ -40,8 +40,8 @@ RWCI_CSV_FIELDNAMES: tuple[str, ...] = (
     "error",
 )
 
-WORKFLOW_NATIVE = "GovAI Native Baseline"
-WORKFLOW_GOVAI = "GovAI Audit Injection"
+WORKFLOW_NATIVE = "AIGov Core Native Baseline"
+WORKFLOW_GOVAI = "AIGov Core Audit Injection"
 WORKFLOW_TIMEOUT_SEC = 600
 POLL_SEC = 15
 MAX_RETRIES = 3
@@ -206,7 +206,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Native baseline (no GovAI / no audit API)
+      - name: Native baseline (no AIGov Core / no audit API)
         shell: bash
         run: |
           set -euo pipefail
@@ -249,7 +249,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install GovAI (pinned)
+      - name: Install AIGov Core (pinned)
         run: |
 {pip_block}
 
@@ -278,7 +278,7 @@ jobs:
           set -euo pipefail
           python scripts/emit_scenario.py --scenario "{scenario}"
 
-      - name: Run GovAI check
+      - name: Run AIGov Core check
         shell: bash
         env:
           GOVAI_AUDIT_BASE_URL: {gh_secret_url}
@@ -349,7 +349,7 @@ def _clone_push_injection(
 
         _git(repo_dir, ["checkout", "-B", branch])
         _git(repo_dir, ["config", "user.email", "rwci-runner@local"])
-        _git(repo_dir, ["config", "user.name", "GovAI RWCI Runner"])
+        _git(repo_dir, ["config", "user.name", "AIGov Core RWCI Runner"])
         _git(
             repo_dir,
             [
@@ -360,7 +360,7 @@ def _clone_push_injection(
                 "scripts/native_baseline.py",
             ],
         )
-        _git(repo_dir, ["commit", "-m", f"ci: GovAI native + audit injection ({scenario})"])
+        _git(repo_dir, ["commit", "-m", f"ci: AIGov Core native + audit injection ({scenario})"])
 
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
@@ -509,7 +509,7 @@ METRIC_DEFINITIONS: dict[str, str] = {
         "by decision-level enforcement."
     ),
     "completed_rows": (
-        "Rows where both native and GovAI workflows completed and produced parseable outputs."
+        "Rows where both native and AIGov Core workflows completed and produced parseable outputs."
     ),
 }
 
@@ -579,7 +579,7 @@ def _select_case_studies(
     *,
     max_studies: int = 5,
 ) -> list[dict[str, Any]]:
-    """Pick representative runs: native CI succeeded while GovAI blocked (paper contrast)."""
+    """Pick representative runs: native CI succeeded while AIGov Core blocked (paper contrast)."""
     candidates: list[dict[str, Any]] = []
     for r in rows:
         if r.get("error"):
@@ -653,7 +653,7 @@ def _paper_consistency_errors(
     if not case_studies:
         errs.append(
             "RWCI paper check: no case_studies produced "
-            "(need native success + GovAI BLOCKED/INVALID with readable GovAI logs)."
+            "(need native success + AIGov Core BLOCKED/INVALID with readable AIGov Core logs)."
         )
     det = float(summary.get("govai_detection_rate_native_ci_only") or 0.0)
     if det < 0.95:

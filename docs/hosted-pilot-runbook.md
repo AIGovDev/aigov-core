@@ -25,7 +25,7 @@ Reference: `docs/hosted-backend-deployment.md`.
 - **`GOVAI_STRIPE_SECRET_KEY`** — Stripe secret key (test or live) for Checkout, portal, invoices, and metered usage API calls.
 - **`GOVAI_STRIPE_WEBHOOK_SECRET`** — signing secret from the Stripe Dashboard (or `stripe listen`); required for **`POST /stripe/webhook`**.
 - **Webhook URL** — `https://<audit-host>/stripe/webhook` with the event types listed in **[billing.md](billing.md)**.
-- **Price IDs ↔ billing units** — set `GOVAI_STRIPE_PRICE_*` env vars (per unit) as documented in **[billing.md](billing.md)** so subscription line items map to GovAI units.
+- **Price IDs ↔ billing units** — set `GOVAI_STRIPE_PRICE_*` env vars (per unit) as documented in **[billing.md](billing.md)** so subscription line items map to AIGov Core units.
 - **`GOVAI_BILLING_ENFORCEMENT`** — `off` (default) or `on` (`1` / `true` / `yes` / `on`) to gate billable hosted routes on an active/trialing subscription row.
 
 Full behaviour, endpoints, and limitations: **[billing.md](billing.md)**.
@@ -233,7 +233,7 @@ Collect:
   - Root cause: `GOVAI_API_KEY` secret not set or not passed.
   - Fix: set the secret and pass it to the action.
 
-- **GovAI check failed (cannot fetch verdict)**
+- **AIGov Core check failed (cannot fetch verdict)**
   - Root cause: invalid URL, auth rejected, or server not reachable.
   - Fix: curl `GET /health` and `GET /status`; verify the bearer token is a key in `GOVAI_API_KEYS_JSON` on the server.
 

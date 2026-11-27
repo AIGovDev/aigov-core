@@ -1,6 +1,6 @@
 # Examples (non-production)
 
-This directory holds **illustrative** scripts, compose snippets, and sample payloads for learning GovAI integration patterns.
+This directory holds **illustrative** scripts, compose snippets, and sample payloads for learning AIGov Core integration patterns.
 
 - **Not production configs** — defaults are for local study only.
 - **No secrets** — do not copy API keys or tokens into these files; use your own dev credentials.
@@ -28,7 +28,7 @@ This directory holds **illustrative** scripts, compose snippets, and sample payl
 | [conformity/](conformity/) | **AI Act conformity automation** — sample conformity assessment snapshot and aggregated `conformity_workflow_check.py` driver; `make conformity-workflow-check`, `make regulatory-workflow-check`. |
 | [research/](research/) | **Research and academic publication** — experimental plan sample, reproducibility drivers; `make research-package-check`, `make academic-publication-check`. |
 | [autonomous/](autonomous/) | **Autonomous and multi-agent governance** — role models, delegation and approval boundaries, autonomy limits, intervention points; validate with `python3 scripts/autonomous_governance_check.py`, `make autonomous-governance-check`, or `make multi-agent-governance-check` (see `docs/autonomous/`). |
-| [govai-functions-2/](govai-functions-2/) | **GovAI Functions 2.0** — flight-pack JSON fixture and validator wiring (`make functions-v2-check`); see `docs/govai-functions-2.md`. |
+| [govai-functions-2/](govai-functions-2/) | **AIGov Core Functions 2.0** — flight-pack JSON fixture and validator wiring (`make functions-v2-check`); see `docs/govai-functions-2.md`. |
 | `demo_govai.py`, `blocked_deployment.sh` | Small scripted demos (review before running). |
 
 **Adoption feedback:** if you tried these examples in a pilot or internal integration, use **[`docs/community/adoption-feedback-intake.md`](../docs/community/adoption-feedback-intake.md)** so maintainers can track docs and ergonomics gaps.

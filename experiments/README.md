@@ -1,6 +1,6 @@
 # Experiments
 
-Offline evaluation and replay harnesses for GovAI research artefacts. Outputs are not part of the production audit service.
+Offline evaluation and replay harnesses for AIGov Core research artefacts. Outputs are not part of the production audit service.
 
 ## Canonical vs generated
 

@@ -112,7 +112,7 @@ def test_rwci_runner_parse_verdict() -> None:
 
 def test_rwci_runner_govai_workflow_pinned_and_has_check() -> None:
     yml = rwci_runner_mod.govai_audit_workflow_yaml("missing_evidence")
-    assert "GovAI Audit Injection" in yml
+    assert "AIGov Core Audit Injection" in yml
     assert "pip install aigov-py==0.2.1" in yml
     assert "govai check" in yml
     assert "emit_scenario.py" in yml

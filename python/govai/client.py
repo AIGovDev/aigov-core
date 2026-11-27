@@ -6,7 +6,7 @@ import requests
 
 
 class GovAIError(Exception):
-    """Base error for the GovAI SDK."""
+    """Base error for the AIGov Core SDK (legacy public name retained for compatibility)."""
 
 
 class GovAIHTTPError(GovAIError):
@@ -53,7 +53,7 @@ def _is_run_not_found(status_code: int, payload: Any) -> bool:
 
 class GovAIClient:
     """
-    Thin HTTP client for the GovAI audit API (Rust core).
+    Thin HTTP client for the AIGov Core audit API (Rust core).
 
     ``base_url`` should be the origin only (e.g. ``http://127.0.0.1:8088``). Stable paths and
     JSON shapes are defined in the repo root ``api/govai-http-v1.openapi.yaml`` (v1 contract).

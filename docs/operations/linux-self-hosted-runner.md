@@ -5,7 +5,7 @@ Status as of this document: **BLOCKED — Linux runner not registered**.
 ## Current verified state
 
 GitHub API (`GET /repos/{owner}/{repo}/actions/runners`) for both
-`MonikaDvorackova/aigov-compliance-engine` and `MonikaDvorackova/aigov-core`
+`MonikaDvorackova/aigov-compliance-engine` and `AIGovDev/aigov-core`
 returns a single runner:
 
 | Field | Value |

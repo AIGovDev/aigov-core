@@ -140,6 +140,6 @@ The plugin is **not published**, **not approved**, and **not listed** in Cursor 
 - [use-cases.md](use-cases.md) — CTO, ML platform, compliance, enterprise, and OSS contributor workflows.
 - [assets/README.md](assets/README.md) — logo master, banners, screenshots, demo video guidance, branding, file naming.
 
-Commercial collateral for sales and customer success (pricing, OSS vs hosted matrix, enterprise features, support and SLA, onboarding playbook, sales one-pager, marketplace submission checklist) is a GovAI Platform concern and is not part of this Core repository.
+Commercial collateral for sales and customer success (pricing, OSS vs hosted matrix, enterprise features, support and SLA, onboarding playbook, sales one-pager, marketplace submission checklist) is a AIGov Platform concern and is not part of this Core repository.
 
 See also `marketplace.md` (submission index) and `docs/reports/cursor-marketplace-readiness.md` (readiness audit).

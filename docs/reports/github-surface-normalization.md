@@ -76,7 +76,7 @@ gh repo edit MonikaDvorackova/govai-core \
   --add-topic evidence-ledger \
   --add-topic rust \
   --add-topic python \
-  --homepage "https://github.com/MonikaDvorackova/govai-core#readme"
+  --homepage "https://github.com/AIGovDev/aigov-core#readme"
 ```
 
 Remove stale topics if present (adjust per `gh label list` / repo settings UI):

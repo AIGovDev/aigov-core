@@ -1,6 +1,6 @@
 # Developer integrations
 
-Guides for adopting GovAI from **Python**, **TypeScript**, popular **AI/ML stacks**, **observability**, and **CI/CD**. Behaviour remains defined by `api/govai-http-v1.openapi.yaml` and operator configuration; these pages are patterns, not legal claims.
+Guides for adopting AIGov Core from **Python**, **TypeScript**, popular **AI/ML stacks**, **observability**, and **CI/CD**. Behaviour remains defined by `api/govai-http-v1.openapi.yaml` and operator configuration; these pages are patterns, not legal claims.
 
 ## Start here
 

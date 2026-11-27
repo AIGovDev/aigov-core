@@ -1,4 +1,4 @@
-# GitHub Actions: GovAI artefact-bound compliance gate
+# GitHub Actions: AIGov Core artefact-bound compliance gate
 
 **See also:** [cli-reference.md](cli-reference.md) (`verify-evidence-pack`, `submit-evidence-pack`, exit codes), [api-reference.md](api-reference.md) (`/bundle-hash`, `/api/export/:run_id`, `/compliance-summary`), [customer-quickstart.md](customer-quickstart.md) (minimal curl + `govai check`).
 
@@ -10,7 +10,7 @@ preset: github-workflow
 preset: ci-artifacts
 ```
 
-This repository publishes a reusable **composite GitHub Action** that installs the GovAI CLI from **PyPI** (`aigov-py==0.2.1`, same version as `python/pyproject.toml`) and runs the **production semantic path**:
+This repository publishes a reusable **composite GitHub Action** that installs the AIGov Core CLI from **PyPI** (`aigov-py==0.2.1`, same version as `python/pyproject.toml`) and runs the **production semantic path**:
 
 1. `govai submit-evidence-pack` — replays CI-generated evidence events from `<artifacts_path>/<run_id>.json` to the hosted ledger.
 2. `govai verify-evidence-pack` — **mandatory:** hosted **`GET /bundle-hash`** digest **`events_content_sha256`** matches **`evidence_digest_manifest.json`**. By default the action also passes **`--require-export`**: cross-check **`GET /api/export/:run_id`** against that digest (set input **`require_export: false`** only if you accept a weaker audit cross-check). **Then** a **`VALID`** compliance verdict from **`GET /compliance-summary`**.
@@ -80,7 +80,7 @@ Publish path (example):
 |--------|----------|---------|
 | **`run_id`** | Yes | Must match the ledger id and CI artefact names: **`docs/reports/<run_id>.md`**, **`<run_id>.json`**, and the digest manifest. Composite-action callers supply any id they control (UUID, product id, etc.). **This repo’s `compliance.yml`** emits **`basename-${{ github.run_id }}-${{ github.run_attempt }}`** for hosted runs (one **`docs/reports/<basename>.md`** per PR; CI copies it to **`docs/reports/<run_id>.md`** before **`make run`**) so workflow reruns do not reuse a stale hosted ledger row for the same basename. |
 | **`artifacts_path`** | Yes | Directory containing **`evidence_digest_manifest.json`** and `<run_id>.json` (e.g. from **`actions/download-artifact`**). **`events_content_sha256`** in the manifest is the **source-of-truth** digest checked against **`GET /bundle-hash`**. |
-| **`base_url`** | Yes | GovAI audit base URL (**`GOVAI_AUDIT_BASE_URL`**). |
+| **`base_url`** | Yes | AIGov Core audit base URL (**`GOVAI_AUDIT_BASE_URL`**). |
 | **`api_key`** | Yes | Bearer token (**`GOVAI_API_KEY`** secret). |
 | **`project`** | No (default **`github-actions`**) | Sent as **`X-GovAI-Project`** (metadata / usage label). **Not** ledger tenant isolation (that comes from the API key only). |
 | **`require_export`** | No (default **`true`**) | When **`true`** (default), passes **`--require-export`** so a missing or failed **`/api/export`** cross-check fails the step (exit **1**). Set **`false`** only if you explicitly accept a weaker gate. |
@@ -104,7 +104,7 @@ jobs:
           name: evidence_packs
           path: artefacts
 
-      - name: Artefact-bound GovAI gate
+      - name: Artefact-bound AIGov Core gate
         uses: MonikaDvorackova/aigov-compliance-engine@v1
         with:
           run_id: ${{ vars.GOVAI_RUN_ID }}
@@ -150,7 +150,7 @@ jobs:
       # - artefacts/evidence_digest_manifest.json
       # - artefacts/<run_id>.json
 
-      - name: GovAI artefact-bound compliance gate
+      - name: AIGov Core artefact-bound compliance gate
         uses: MonikaDvorackova/aigov-compliance-engine@v1
         with:
           run_id: ${{ vars.GOVAI_RUN_ID }}

@@ -8,7 +8,7 @@ scope: docs-only
 
 Discovery v2 is a **deterministic repository scan** that produces **context signals** used to:
 
-- explain what GovAI thinks is happening in a repo (context awareness), and
+- explain what AIGov Core thinks is happening in a repo (context awareness), and
 - deterministically derive **additional `required_evidence`** (policy binding layer), without changing core decision semantics.
 
 Discovery v2 is **not** a model safety evaluator and does not make “safe/unsafe” claims.
@@ -67,7 +67,7 @@ Discovery v2 intentionally does **not** do the following:
 - no runtime monitoring or drift analysis (future roadmap only)
 - no deep inspection of proprietary model artifacts (beyond deterministic filename/extension hints)
 
-If you need model evaluation, that is **evidence** you generate and submit (for example `evaluation_reported`), not something GovAI infers.
+If you need model evaluation, that is **evidence** you generate and submit (for example `evaluation_reported`), not something AIGov Core infers.
 
 ---
 
@@ -75,7 +75,7 @@ If you need model evaluation, that is **evidence** you generate and submit (for 
 
 Tools that analyze models or prompts attempt to judge model behavior and quality.
 
-GovAI Discovery v2 is different:
+AIGov Core Discovery v2 is different:
 
 - it is **context detection**, not evaluation
 - it only emits **deterministic signals**

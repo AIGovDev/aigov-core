@@ -1,6 +1,6 @@
 # Manual evidence flow (advanced)
 
-This document shows how to manually submit GovAI evidence events without using the deterministic demo.
+This document shows how to manually submit AIGov Core evidence events without using the deterministic demo.
 
 ## Prereqs
 
@@ -12,7 +12,7 @@ export GOVAI_API_KEY="YOUR_API_KEY"
 export GOVAI_RUN_ID="YOUR_RUN_ID"
 ```
 
-GovAI expects **one** `GOVAI_RUN_ID` to be used end-to-end: evidence submission → `govai check` → `govai export-run`.
+AIGov Core expects **one** `GOVAI_RUN_ID` to be used end-to-end: evidence submission → `govai check` → `govai export-run`.
 
 ## Event sequence (what each event means)
 
@@ -52,7 +52,7 @@ Records promotion intent; policies typically accept this only after prerequisite
 
 ## Human Approval Gate (`human_approved`)
 
-Human approval is a **critical compliance gate** in GovAI. Many policies require explicit human sign-off before a model can be promoted to production.
+Human approval is a **critical compliance gate** in AIGov Core. Many policies require explicit human sign-off before a model can be promoted to production.
 
 ### Why Human Approval Matters
 Even if all technical evidence (data registration, training, evaluation, risk review) is complete, the compliance verdict will remain **`BLOCKED`** until a proper `human_approved` event is recorded for the `model_promoted` scope.

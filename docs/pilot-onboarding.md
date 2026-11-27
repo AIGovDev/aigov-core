@@ -1,4 +1,4 @@
-# GovAI Private Pilot Onboarding
+# AIGov Core Private Pilot Onboarding
 
 ## What you get
 
@@ -10,7 +10,7 @@
 
 ## Canonical customer onboarding (hosted)
 
-If you already have a hosted GovAI backend + API key, start with the canonical onboarding flow:
+If you already have a hosted AIGov Core backend + API key, start with the canonical onboarding flow:
 
 - [customer-onboarding-10min.md](customer-onboarding-10min.md)
 
@@ -106,7 +106,7 @@ Unauthorized / API key error
 
 ## Pilot success criteria
 
-- GovAI runs in CI
+- AIGov Core runs in CI
 - one pipeline covered
 - failures block release
 - export generated
@@ -117,7 +117,7 @@ Unauthorized / API key error
 - Metering is best-effort under concurrent CI runs
 - usage checks and evidence append are not atomic
 - parallel jobs may temporarily exceed limits or return inconsistent 429 responses
-- recommended: use one GovAI run per pipeline execution or avoid parallel evidence writes
+- recommended: use one AIGov Core run per pipeline execution or avoid parallel evidence writes
 - API key request limits are separate from evidence metering
 - 429 responses may come from request caps or evidence limits
 - both use the same audit endpoint but are enforced independently

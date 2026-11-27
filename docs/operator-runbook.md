@@ -213,7 +213,7 @@ scope: docs-only
 
 ## Purpose
 
-This runbook is for operators running the GovAI audit service (hosted or self-hosted). It focuses on:
+This runbook is for operators running the AIGov Core audit service (hosted or self-hosted). It focuses on:
 
 - startup readiness checks
 - required environment variables
@@ -279,7 +279,7 @@ If you run via Docker Compose, verify the Postgres container is healthy and cred
 
 ### 3) Migrations are applied
 
-GovAI is fail-fast: it should not accept traffic until migrations are in place. If `/ready` is not 200, treat it as a migrations/DB/ledger problem and inspect service logs.
+AIGov Core is fail-fast: it should not accept traffic until migrations are in place. If `/ready` is not 200, treat it as a migrations/DB/ledger problem and inspect service logs.
 
 Minimum operator expectation:
 
@@ -288,7 +288,7 @@ Minimum operator expectation:
 
 ### 4) Ledger directory exists and is writable
 
-GovAI uses an append-only, hash-chained ledger on disk (the “ledger directory”). Readiness requires this directory to exist and be writable by the service user.
+AIGov Core uses an append-only, hash-chained ledger on disk (the “ledger directory”). Readiness requires this directory to exist and be writable by the service user.
 
 Operator checklist:
 
@@ -320,7 +320,7 @@ Customer-visible (distributed to customers, not used for service boot):
 
 ### Tenant is derived from API key
 
-GovAI’s ledger isolation is derived from the bearer API key mapping (server-side `GOVAI_API_KEYS_JSON`).
+AIGov Core’s ledger isolation is derived from the bearer API key mapping (server-side `GOVAI_API_KEYS_JSON`).
 
 Important implications:
 

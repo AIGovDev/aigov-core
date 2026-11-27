@@ -1,6 +1,6 @@
 # Model risk, evaluation, and assurance
 
-Phase 20 adds **stdlib-only** tooling for model risk manifests, evaluation snapshots, deterministic scoring, aggregated diagnostics, and Markdown assurance reports. These artifacts support governance reviews; they are **not** legal conformity statements and do **not** change GovAI verdict semantics, billing, ledger storage, or database schemas.
+Phase 20 adds **stdlib-only** tooling for model risk manifests, evaluation snapshots, deterministic scoring, aggregated diagnostics, and Markdown assurance reports. These artifacts support governance reviews; they are **not** legal conformity statements and do **not** change AIGov Core verdict semantics, billing, ledger storage, or database schemas.
 
 ## Machine-readable index
 

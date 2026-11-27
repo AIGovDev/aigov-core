@@ -2,7 +2,7 @@
 
 This is a **local, repository-oriented demo** of the CI contract shape (`govai-compliance-gate` after `submit-evidence-pack` + `verify-evidence-pack`).
 
-If you are an **external customer onboarding to a hosted GovAI backend**, start here instead:
+If you are an **external customer onboarding to a hosted AIGov Core backend**, start here instead:
 
 - `docs/customer-onboarding-10min.md` (canonical customer entrypoint)
 - `docs/evidence-pack.md` (supported evidence pack commands + file shape)
@@ -11,7 +11,7 @@ A first-line **`VALID`** from `govai check` alone is **not** sufficient proof un
 
 ### Required components
 
-- Running **GovAI audit HTTP API** (Rust `aigov_audit`) with DB + writable ledger (**`GET /ready` = HTTP 200**).
+- Running **AIGov Core audit HTTP API** (Rust `aigov_audit`) with DB + writable ledger (**`GET /ready` = HTTP 200**).
 - **`govai` CLI** from this repo (`pip install -e "./python[dev]"` from the repository root) or an equivalent **`aigov-py`** pin.
 - Environment for CLI:
   - **`GOVAI_AUDIT_BASE_URL`** — audit base URL (no trailing ambiguity; strip trailing slashes in your head when comparing).
@@ -57,10 +57,10 @@ Immediately on stdout:
 VALID
 ```
 
-Trailing **`GovAI summary`** block ends with **`verdict: VALID`**:
+Trailing **`AIGov Core summary`** block ends with **`verdict: VALID`**:
 
 ```text
-GovAI summary
+AIGov Core summary
 verdict: VALID
 category: policy
 reason_codes: []

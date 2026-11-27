@@ -1,4 +1,4 @@
-# CI example: artefact-bound GovAI gate
+# CI example: artefact-bound AIGov Core gate
 
 [`govai-check.yml`](govai-check.yml) is a **copy-paste workflow** for **downstream** repositories. It is **not** under `.github/workflows/` in this repo, so GitHub does **not** execute it here.
 

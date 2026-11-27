@@ -92,4 +92,4 @@ Deeper operational context: [../docs/troubleshooting.md](../docs/troubleshooting
 ## Next steps
 
 - Personas and workflows: [use-cases.md](use-cases.md).
-- Commercial packaging and pricing: GovAI Platform concern, not documented in this Core repository.
+- Commercial packaging and pricing: AIGov Platform concern, not documented in this Core repository.

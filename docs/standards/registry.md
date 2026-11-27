@@ -1,6 +1,6 @@
 # Governance standards registry
 
-This registry lists **versioned interchange artefacts** supported by GovAI’s portable standards tooling. Each row is **immutable for that `schema_version`**: corrections ship as a new `schema_version` string and new schema file where applicable.
+This registry lists **versioned interchange artefacts** supported by AIGov Core’s portable standards tooling. Each row is **immutable for that `schema_version`**: corrections ship as a new `schema_version` string and new schema file where applicable.
 
 | `artifact_type` | `schema_version` | JSON Schema (repo path) | Python validator |
 | --- | --- | --- | --- |

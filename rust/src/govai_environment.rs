@@ -17,7 +17,7 @@
 use crate::schema::EvidenceEvent;
 use std::fmt;
 
-/// Tier this GovAI process enforces and stamps on evidence events.
+/// Tier this AIGov Core process enforces and stamps on evidence events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GovaiEnvironment {
     Dev,

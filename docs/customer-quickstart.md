@@ -4,9 +4,9 @@ This page is the **canonical integration overview** for the hosted audit API and
 
 **Public documentation** for readers is rendered on **govbase.dev** from this `docs/` tree (for example `/docs/quickstart`, `/docs/api-reference`). The canonical prose remains in GitHub so CI link checks and contributors edit one source.
 
-## What is GovAI
+## What is AIGov Core
 
-GovAI is an **audit-backed decision service**: you append structured evidence for a `run_id`, and the hosted API returns a single authoritative verdict (`VALID` / `INVALID` / `BLOCKED`) from `GET /compliance-summary`. Semantics are defined in [trust-model.md](trust-model.md).
+AIGov Core is an **audit-backed decision service**: you append structured evidence for a `run_id`, and the hosted API returns a single authoritative verdict (`VALID` / `INVALID` / `BLOCKED`) from `GET /compliance-summary`. Semantics are defined in [trust-model.md](trust-model.md).
 
 **CI** often calls `govai check` against the same `run_id` so merges or deploys fail unless the server verdict is `VALID`. **Production-style release gates** should use **`govai submit-evidence-pack`** followed by **`govai verify-evidence-pack`** (digest + optional export cross-check) as documented in [github-action.md](github-action.md)—`check` alone does not prove artefact continuity.
 
@@ -27,7 +27,7 @@ preset: evidence-demo
 ## Prerequisites
 
 - Python 3.10+
-- GOVAI_AUDIT_BASE_URL — base URL of your GovAI audit service
+- GOVAI_AUDIT_BASE_URL — base URL of your AIGov Core audit service
 - Optional: GOVAI_API_KEY if your endpoint requires a Bearer token
 
 Install pin must match version in python/pyproject.toml for the release you use.
@@ -36,7 +36,7 @@ Ledger tenant: which ledger you read/write is determined only by your API key (G
 
 ## Hosted billing (Stripe)
 
-If you use a hosted GovAI audit endpoint with Stripe, see billing.md for:
+If you use a hosted AIGov Core audit endpoint with Stripe, see billing.md for:
 
 - Checkout (POST /billing/checkout-session)
 - Billing status (GET /billing/status)
@@ -57,7 +57,7 @@ steps:
     command: |
       python -m pip install --upgrade pip
       python -m pip install "aigov-py==0.2.1"
-      govai --help >/dev/null && echo "GovAI CLI OK"
+      govai --help >/dev/null && echo "AIGov Core CLI OK"
     explain: Pin must match python/pyproject.toml for your release tag.
   - label: Configure endpoint
     command: |

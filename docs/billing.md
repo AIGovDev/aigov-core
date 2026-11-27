@@ -1,4 +1,4 @@
-# GovAI billing (Stripe + Postgres)
+# AIGov Core billing (Stripe + Postgres)
 
 This document describes the **minimal production-safe billing path**: ledger tenant ↔ Stripe customer/subscription, webhooks, Checkout, usage traces, metered reporting, and optional enforcement.
 

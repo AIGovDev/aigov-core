@@ -1,12 +1,12 @@
 # Overview
 
-The EU AI Act assigns providers and deployers concrete obligations across the lifecycle of high-risk AI systems. GovAI cannot grant conformity, but it can give regulatory, engineering, and operations teams a **shared, machine-readable structure** for the workflows that surround a conformity assessment.
+The EU AI Act assigns providers and deployers concrete obligations across the lifecycle of high-risk AI systems. AIGov Core cannot grant conformity, but it can give regulatory, engineering, and operations teams a **shared, machine-readable structure** for the workflows that surround a conformity assessment.
 
 This section couples narrative guides with the JSON artefacts indexed by [`../../conformity/regulatory-workflow-manifest.json`](../../conformity/regulatory-workflow-manifest.json) so dossiers, risk reviews, post-market monitoring, and incident reporting use the same vocabulary.
 
 ## Principles
 
-1. **Provider obligations are operator-owned** — GovAI structures the workflows; legal sufficiency is decided by counsel and competent authorities.
+1. **Provider obligations are operator-owned** — AIGov Core structures the workflows; legal sufficiency is decided by counsel and competent authorities.
 2. **Evidence over assertions** — Where a workflow step benefits from a reproducible artefact, the bundle points at the export script that can produce it.
 3. **Human approvals are explicit** — Each workflow phase names the roles expected to sign off, mirroring the role hierarchy used elsewhere in the repository.
 4. **Indicative, not exhaustive** — The AI Act and its implementing acts evolve; the bundle is a working aid that complements primary sources, not a substitute for them.

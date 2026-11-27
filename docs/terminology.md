@@ -7,7 +7,7 @@ Use these terms consistently in architecture reviews, RFPs, security questionnai
 | Term | Definition | Do not confuse with |
 |------|------------|---------------------|
 | **AIGov Core** | Portable audit runtime: ledger, policy at ingest, compliance verdict, export/replay | “Open core” as a vague label; generic logging |
-| **GovAI Platform** | Proprietary hosted SaaS, billing, onboarding, dashboard, enterprise control plane | AIGov Core alone |
+| **AIGov Platform** | Proprietary hosted SaaS, billing, onboarding, dashboard, enterprise control plane | AIGov Core alone |
 | **Hosted Professional** | Self-service hosted Platform tier with Stripe checkout and operator-managed runtime | Enterprise self-host |
 | **Enterprise** | Contracted tier: advanced control plane, isolation, and operational expectations per order form | Legal “enterprise” as certification |
 | **Strategic Advisory** | Advisory engagement tier (process and architecture guidance); not a separate runtime | Product license |
@@ -35,11 +35,11 @@ Use these terms consistently in architecture reviews, RFPs, security questionnai
 
 | Avoid | Prefer |
 |-------|--------|
-| “AI observability platform” (for GovAI product) | Audit-backed governance infrastructure |
+| “AI observability platform” (for AIGov Core product) | Audit-backed governance infrastructure |
 | “AI copilot governance” | Governance execution + audit evidence |
 | “Monitoring pass/fail” (for verdict) | Compliance verdict / governance gate |
 | “AI Act compliant” (product claim) | Indicative AI Act mapping; operator conformity process |
-| “Certified by GovAI” | Deterministic validators; evidence export for your assessors |
+| “Certified by AIGov Core” | Deterministic validators; evidence export for your assessors |
 
 ## Verdict glossary
 

@@ -1,14 +1,14 @@
-# GovAI Threat Model
+# AIGov Core Threat Model
 
 ## Purpose and Scope
 
-This document defines the formal threat model and trust assumptions for GovAI.
+This document defines the formal threat model and trust assumptions for AIGov Core.
 
-GovAI is a decision-level AI governance platform that enforces fail-closed compliance semantics over machine learning and AI deployment workflows. The purpose of this document is to explicitly identify protected assets, trust boundaries, threat scenarios, and mitigations.
+AIGov Core is a decision-level AI governance platform that enforces fail-closed compliance semantics over machine learning and AI deployment workflows. The purpose of this document is to explicitly identify protected assets, trust boundaries, threat scenarios, and mitigations.
 
 ## Security Objectives
 
-GovAI is designed to provide the following security properties:
+AIGov Core is designed to provide the following security properties:
 
 1. Integrity of audit evidence
 2. Integrity of compliance verdicts
@@ -34,7 +34,7 @@ The following assets are security-critical:
 
 ## Trust Boundaries
 
-GovAI includes the following trust boundaries:
+AIGov Core includes the following trust boundaries:
 
 1. Client to API boundary
 2. API server to PostgreSQL boundary
@@ -56,7 +56,7 @@ Potential threat actors include:
 
 ## Security Assumptions
 
-GovAI assumes:
+AIGov Core assumes:
 
 - Cryptographic hash functions remain collision resistant
 - API keys are protected by operators
@@ -101,7 +101,7 @@ The service is overwhelmed or made unavailable.
 
 ## Mitigations
 
-GovAI mitigates these threats through:
+AIGov Core mitigates these threats through:
 
 - SHA-256 digest continuity
 - Artifact-bound evidence verification
@@ -146,4 +146,4 @@ Planned security enhancements include:
 
 ## Summary
 
-GovAI is designed to preserve the integrity, traceability, and isolation of decision-level governance evidence. Security is enforced through fail-closed semantics, cryptographic artifact binding, immutable audit records, and strict tenant separation.
+AIGov Core is designed to preserve the integrity, traceability, and isolation of decision-level governance evidence. Security is enforced through fail-closed semantics, cryptographic artifact binding, immutable audit records, and strict tenant separation.

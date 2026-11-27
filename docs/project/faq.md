@@ -1,24 +1,24 @@
-# GovAI Frequently Asked Questions
+# AIGov Core Frequently Asked Questions
 
-## What is GovAI?
+## What is AIGov Core?
 
-GovAI is a decision-level AI governance platform that verifies whether deployment and governance decisions are supported by complete, verifiable, and auditable evidence.
+AIGov Core is a decision-level AI governance platform that verifies whether deployment and governance decisions are supported by complete, verifiable, and auditable evidence.
 
-## What problem does GovAI solve?
+## What problem does AIGov Core solve?
 
-GovAI addresses the auditability gap: the mismatch between model-centric validation and decision-level accountability.
+AIGov Core addresses the auditability gap: the mismatch between model-centric validation and decision-level accountability.
 
-## Is GovAI a model evaluation tool?
+## Is AIGov Core a model evaluation tool?
 
-No. GovAI does not replace model evaluation. It verifies whether governance and deployment decisions are supported by sufficient evidence.
+No. AIGov Core does not replace model evaluation. It verifies whether governance and deployment decisions are supported by sufficient evidence.
 
-## What does GovAI enforce?
+## What does AIGov Core enforce?
 
-GovAI enforces evidence completeness, evaluation status, approval requirements, artifact continuity, and tenant isolation.
+AIGov Core enforces evidence completeness, evaluation status, approval requirements, artifact continuity, and tenant isolation.
 
 ## What happens when evidence is missing?
 
-GovAI fails closed. Incomplete or unsupported decisions should result in BLOCKED rather than VALID.
+AIGov Core fails closed. Incomplete or unsupported decisions should result in BLOCKED rather than VALID.
 
 ## What are VALID, INVALID, and BLOCKED?
 
@@ -26,31 +26,31 @@ GovAI fails closed. Incomplete or unsupported decisions should result in BLOCKED
 - INVALID means evaluation failed.
 - BLOCKED means required evidence, approvals, or audit context is missing.
 
-## How does GovAI verify artifact integrity?
+## How does AIGov Core verify artifact integrity?
 
-GovAI uses digest continuity to bind audit records to concrete artifacts.
+AIGov Core uses digest continuity to bind audit records to concrete artifacts.
 
 ## How is tenant isolation enforced?
 
 Tenant identity is derived from server-owned API key mappings rather than request headers.
 
-## Can GovAI run locally?
+## Can AIGov Core run locally?
 
-Yes. GovAI supports local deployments and a Docker Compose demo.
+Yes. AIGov Core supports local deployments and a Docker Compose demo.
 
 ## Is a hosted service available?
 
-Yes. GovAI supports hosted compliance gate deployments and may be offered as a managed service.
+Yes. AIGov Core supports hosted compliance gate deployments and may be offered as a managed service.
 
-## Who is GovAI for?
+## Who is AIGov Core for?
 
-GovAI is intended for AI engineers, MLOps teams, security teams, compliance teams, auditors, and researchers.
+AIGov Core is intended for AI engineers, MLOps teams, security teams, compliance teams, auditors, and researchers.
 
-## Does GovAI guarantee legal compliance?
+## Does AIGov Core guarantee legal compliance?
 
-No. GovAI provides technical controls and evidence, but legal compliance depends on broader organizational and regulatory factors.
+No. AIGov Core provides technical controls and evidence, but legal compliance depends on broader organizational and regulatory factors.
 
-## How is GovAI monetized?
+## How is AIGov Core monetized?
 
 Potential monetization paths include hosted services, enterprise features, advisory work, and training.
 

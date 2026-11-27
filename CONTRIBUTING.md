@@ -23,7 +23,7 @@ Do not add to this repository:
 - Dashboard access control
 - Managed tenant provisioning beyond env/DB key maps documented for core
 
-Platform-only features belong in the **GovAI Platform** product, not in `aigov_audit`.
+Platform-only features belong in the **AIGov Platform** product, not in `aigov_audit`.
 
 ## Technical invariants (do not weaken)
 

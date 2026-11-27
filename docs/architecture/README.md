@@ -1,15 +1,15 @@
 # Enterprise architecture documentation
 
-This directory is the **canonical architecture entry** for enterprise architects, procurement and security reviewers, platform engineering teams, and AI governance leads evaluating GovAI.
+This directory is the **canonical architecture entry** for enterprise architects, procurement and security reviewers, platform engineering teams, and AI governance leads evaluating AIGov Core.
 
-GovAI is **evidence-grade AI governance infrastructure**: append-only audit evidence, deterministic policy evaluation, and a single authoritative **compliance verdict** per run. It is not generic AI observability, a copilot wrapper, or a marketing-only compliance SaaS.
+AIGov Core is **evidence-grade AI governance infrastructure**: append-only audit evidence, deterministic policy evaluation, and a single authoritative **compliance verdict** per run. It is not generic AI observability, a copilot wrapper, or a marketing-only compliance SaaS.
 
 ## Product split (read first)
 
 | Product | Role | Primary documentation |
 |---------|------|------------------------|
 | **AIGov Core** | Portable audit runtime: ledger, policy enforcement at ingest, compliance projection, export and replay semantics | [platform-vs-core-boundary.md](platform-vs-core-boundary.md), [../strong-core-contract-note.md](../strong-core-contract-note.md), [../../ARCHITECTURE.md](../../ARCHITECTURE.md) |
-| **GovAI Platform** | Proprietary hosted SaaS, enterprise control plane, billing, onboarding, dashboard, governance operations | [platform-vs-core-boundary.md](platform-vs-core-boundary.md), [../hosted-backend-deployment.md](../hosted-backend-deployment.md), [../../ENTERPRISE_LAYER.md](../../ENTERPRISE_LAYER.md) |
+| **AIGov Platform** | Proprietary hosted SaaS, enterprise control plane, billing, onboarding, dashboard, governance operations | [platform-vs-core-boundary.md](platform-vs-core-boundary.md), [../hosted-backend-deployment.md](../hosted-backend-deployment.md), [../../ENTERPRISE_LAYER.md](../../ENTERPRISE_LAYER.md) |
 
 Repository packaging is described in [../../OPEN_SOURCE_SCOPE.md](../../OPEN_SOURCE_SCOPE.md) (stable filename; describes Platform vs Core boundaries).
 

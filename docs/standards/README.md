@@ -1,6 +1,6 @@
-# GovAI ecosystem standards (Phase 5)
+# AIGov Core ecosystem standards (Phase 5)
 
-This directory describes **machine-readable standards** for interoperability around GovAI’s decision-centric governance model. Implementations live in Python under `aigov_py.standards` (validators, canonical digests, and a standalone CLI).
+This directory describes **machine-readable standards** for interoperability around AIGov Core’s decision-centric governance model. Implementations live in Python under `aigov_py.standards` (validators, canonical digests, and a standalone CLI).
 
 ## Documents
 
