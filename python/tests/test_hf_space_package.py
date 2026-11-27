@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-from generate_hf_space_sample import OUTPUT, build_sample  # noqa: E402
+from generate_hf_space_sample import OUTPUT, build_sample
 
 
 class HuggingFaceStaticSpaceTests(unittest.TestCase):
