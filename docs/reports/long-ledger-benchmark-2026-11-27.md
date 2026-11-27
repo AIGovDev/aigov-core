@@ -26,8 +26,10 @@ This PR requires maintainer review and approval before merge. No approval is
 claimed by this report.
 
 ## Verification
-- Full Rust integration compilation and tests: pending GitHub Actions on the PR
-  branch.
-- The benchmark workflow is manual and is not claimed to have produced a timing
-  baseline yet.
+- `cargo test --locked`, including the valid/tampered ledger regression: passed
+  in GitHub Actions on the implementation commit.
+- Report, developer-experience, security, dependency, and portable runtime gates:
+  passed on the implementation commit.
+- The manual timing workflow has not been run; no timing baseline or performance
+  comparison is claimed.
 - No performance numbers or cross-product comparisons are claimed here.
