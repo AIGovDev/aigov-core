@@ -88,7 +88,7 @@ def main():
         "schema_version": 1, "benchmark": "core-http-ingestion",
         "revision": os.getenv("AIGOV_BENCHMARK_REVISION"),
         "client_environment": platform.platform(),
-        "events": args.events, "workers": args.workers,
+        "run_id": run, "events": args.events, "workers": args.workers,
         "samples_ns": samples, "median_ns": statistics.median(samples),
         "p95_ns": percentile(samples, .95), "p99_ns": percentile(samples, .99),
         "wall_ns": elapsed, "events_per_second": args.events * 1e9 / elapsed,
