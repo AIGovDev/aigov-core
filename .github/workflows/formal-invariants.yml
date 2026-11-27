@@ -1,0 +1,27 @@
+name: Formal invariants
+on:
+  pull_request:
+    branches: [staging]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tlc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Fetch versioned TLC release
+        run: curl --fail --location --retry 3 https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar -o "$RUNNER_TEMP/tla2tools.jar"
+      - name: Check bounded safety invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd formal
+          java -cp "$RUNNER_TEMP/tla2tools.jar" tlc2.TLC -workers 2 -deadlock -config ApprovalLedger.cfg ApprovalLedger.tla | tee "$RUNNER_TEMP/tlc.log"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: formal-invariants-evidence
+          path: ${{ runner.temp }}/tlc.log
+          if-no-files-found: error
