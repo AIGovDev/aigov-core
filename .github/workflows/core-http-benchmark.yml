@@ -6,6 +6,7 @@ on:
       - 'scripts/benchmark_core_http.py'
       - '.github/workflows/core-http-benchmark.yml'
       - 'scripts/verify_benchmark_ledger.py'
+      - 'scripts/test_verify_benchmark_ledger.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -34,6 +35,7 @@ jobs:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca
       - run: python -m pip install -e ./python
+      - run: python -m unittest discover -s scripts -p test_verify_benchmark_ledger.py
       - run: cargo build --manifest-path rust/Cargo.toml --release --locked --bin aigov_audit
       - name: Benchmark disposable release Core
         env:
