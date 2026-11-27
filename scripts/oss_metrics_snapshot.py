@@ -1,4 +1,5 @@
 """Collect a privacy-conscious, read-only GitHub adoption metrics snapshot."""
+
 from __future__ import annotations
 
 import argparse
@@ -218,11 +219,7 @@ def collect_snapshot(
         timestamp = timestamp.replace(tzinfo=timezone.utc)
     return {
         "schema": SCHEMA,
-        "collected_at": (
-            timestamp.astimezone(timezone.utc)
-            .isoformat()
-            .replace("+00:00", "Z")
-        ),
+        "collected_at": timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
         "repository": repo,
         "metrics": metrics,
     }
