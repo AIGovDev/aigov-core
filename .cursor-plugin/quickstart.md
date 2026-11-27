@@ -70,7 +70,7 @@ Confirm the tool returns structured JSON with `ok: true` before you rely on the 
 
 ## Audit report generation
 
-1. Use the **`govai-generate-audit-report-template`** MCP tool (or CLI) with `dry_run: true` first to preview headings and structure.
+1. Use the **`govai-generate-audit-report-template`** MCP tool or CLI with `dry_run: true` first to preview headings and structure. A real CLI write also requires the approved run, call, and approval IDs.
 2. Write the final report under `docs/reports/<name>.md` including at least:
    - `## Evaluation gate`
    - `## Human approval gate`
