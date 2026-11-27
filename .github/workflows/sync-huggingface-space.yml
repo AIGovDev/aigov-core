@@ -1,0 +1,71 @@
+name: Sync static evidence viewer to Hugging Face
+
+on:
+  workflow_dispatch:
+    inputs:
+      space_id:
+        description: "Authorized Hugging Face owner/organization and Space name"
+        required: true
+        default: "aigovdev/aigov-core-evidence-viewer"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+
+      - name: Verify canonical package and viewer behavior
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare_hf_space.py --check
+          python3 -m unittest python.tests.test_hf_space_package -v
+          node examples/reconstructible-agent-demo/viewer/test_hash_chain.mjs
+
+      - name: Validate target and publish static files
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SPACE_ID: ${{ inputs.space_id }}
+        run: |
+          set -euo pipefail
+          if [[ "${SPACE_ID}" != "aigovdev/aigov-core-evidence-viewer" ]]; then
+            echo "Unexpected Space ID. Review and update this workflow before targeting another owner."
+            exit 1
+          fi
+          python -m pip install --disable-pip-version-check "huggingface_hub==1.3.3"
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          token = os.environ.get("HF_TOKEN")
+          if not token:
+              raise SystemExit("Configure the Hugging Face write token as the HF_TOKEN repository secret.")
+          repo_id = os.environ["SPACE_ID"]
+          api = HfApi(token=token)
+          api.create_repo(repo_id=repo_id, repo_type="space", private=False, exist_ok=True, space_sdk="static")
+          info = api.repo_info(repo_id=repo_id, repo_type="space")
+          if info.private:
+              raise SystemExit("Target Space exists but is private; refusing to claim public publication.")
+          if (info.cardData or {}).get("sdk") != "static":
+              raise SystemExit("Target repository is not configured as a Static Space; refusing upload.")
+          commit = api.upload_folder(
+              repo_id=repo_id,
+              repo_type="space",
+              folder_path="spaces/aigov-core-evidence-viewer",
+              commit_message="Sync verified AIGov Core evidence viewer",
+          )
+          print(f"Uploaded Space revision: {commit.oid}")
+          print(f"Space URL: https://huggingface.co/spaces/{repo_id}")
+          PY

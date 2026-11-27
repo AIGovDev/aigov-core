@@ -1,0 +1,36 @@
+{
+  "schema_version": "aigov.audit-export.v1",
+  "run": {
+    "run_id": "sample-run-001"
+  },
+  "policy_version": "demo-policy-1",
+  "environment": "synthetic-example",
+  "exported_at_utc": "2026-01-01T00:00:01Z",
+  "decision": {
+    "verdict": "VALID",
+    "evaluation_passed": true,
+    "blocked_reasons": [],
+    "promotion": {
+      "state": "not_requested"
+    }
+  },
+  "evidence_events": [
+    {
+      "event_id": "sample-run-001",
+      "event_type": "evaluation_passed",
+      "actor": "synthetic-demo",
+      "ts_utc": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "evidence_hashes": {
+    "log_chain": [
+      {
+        "prev_hash": "GENESIS",
+        "event_json": "{\"actor\":\"synthetic-demo\",\"event_id\":\"sample-run-001\",\"event_type\":\"evaluation_passed\",\"ts_utc\":\"2026-01-01T00:00:00Z\"}",
+        "record_hash": "50270b3819495dc374a6f7b75dfd29473b1e0c4e4eb57a56737b9d9f5530f76d"
+      }
+    ],
+    "chain_head_record_sha256": "50270b3819495dc374a6f7b75dfd29473b1e0c4e4eb57a56737b9d9f5530f76d"
+  },
+  "sample_notice": "Synthetic demonstration data; this does not attest to a real action."
+}

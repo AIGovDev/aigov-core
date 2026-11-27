@@ -625,13 +625,19 @@ Hosted **Stripe billing** is supported for operator-managed pilots (checkout, we
 
 ## Community and Launch
 
-Publication-ready **channel playbooks**, **FAQ**, and **positioning** live under `docs/launch/` (see [launch checklist](docs/launch/launch-checklist.md)). **Integration examples** and **reference hubs** explain practical adoption paths without duplicating the canonical GitHub Action spec.
+Draft **channel announcements**, **FAQ**, **technical article**, **benchmark summary**, and **positioning** live under `docs/launch/` (see [launch checklist](docs/launch/launch-checklist.md)). They are not published announcements. The browser evidence viewer is packaged in `spaces/aigov-core-evidence-viewer/`; the public Space is pending authorized Hugging Face publication. **Integration examples** and **reference hubs** explain practical adoption paths without duplicating the canonical GitHub Action spec.
 
 **Launch materials**
 
 - [Product Hunt](docs/launch/product-hunt.md) · [Hacker News](docs/launch/hacker-news.md) · [Reddit](docs/launch/reddit.md) · [LinkedIn](docs/launch/linkedin.md)
 - [Community outreach](docs/launch/community-outreach.md) · [Design partners](docs/launch/design-partners.md)
-- [FAQ](docs/launch/faq.md) · [Competitive positioning](docs/launch/competitive-positioning.md) · [Launch checklist](docs/launch/launch-checklist.md)
+- [FAQ](docs/launch/faq.md) · [Technical article](docs/launch/technical-article.md) · [Benchmark report](docs/launch/benchmark-report.md)
+- [Competitive positioning](docs/launch/competitive-positioning.md) · [Launch checklist](docs/launch/launch-checklist.md)
+- [Adoption metrics baseline and weekly reporting](docs/community/public-adoption-baseline-2026-11-27.md) · [metrics process](docs/community/metrics-tracking.md)
+- [Independent security audit preparation](docs/security/external-audit-preparation.md)
+- [Audit funding eligibility and outreach drafts](docs/security/audit-funding-opportunities-2026-11-27.md)
+- [Third-party catalog submission research](docs/community/awesome-list-opportunities.md)
+- [Static evidence viewer package and synthetic export](spaces/aigov-core-evidence-viewer/README.md)
 
 **Reference examples**
 
@@ -646,10 +652,6 @@ Publication-ready **channel playbooks**, **FAQ**, and **positioning** live under
 - [`examples/adoption/self-hosted-enterprise/`](examples/adoption/self-hosted-enterprise/) — Compose + `.env.example`
 - [`examples/adoption/ai-act-evidence-workflow/`](examples/adoption/ai-act-evidence-workflow/) — interchange JSON samples
 - [`examples/adoption/standards-conformance-kit/`](examples/adoption/standards-conformance-kit/) — offline `run-conformance.sh`
-
-**Contributor growth**
-
-- [First external contributor playbook](docs/community/first-external-contributor-playbook.md) · [Maintainer outreach checklist](docs/community/maintainer-outreach-checklist.md) · [Contributor recognition](docs/community/contributor-recognition.md)
 
 **Readiness checks**
 
@@ -684,11 +686,7 @@ Contributions to **AIGov Core** belong in this repository. See [`CONTRIBUTING.md
 
 ## Community operations
 
-Structured **contributor funnel**, **issue triage**, maintainer cadence, label playbooks (`good first issue`, `help wanted`), adoption feedback, and project-board routines:
-
-- [docs/community/contributor-funnel.md](docs/community/contributor-funnel.md)
-- [docs/community/issue-triage.md](docs/community/issue-triage.md)
-- [docs/community/maintainer-operating-model.md](docs/community/maintainer-operating-model.md)
+Use [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`GOVERNANCE.md`](GOVERNANCE.md) for contributor and maintainer processes. Adoption reporting is documented in [metrics tracking](docs/community/metrics-tracking.md) and the [weekly report template](docs/community/weekly-adoption-report-template.md).
 
 ## Project governance
 
