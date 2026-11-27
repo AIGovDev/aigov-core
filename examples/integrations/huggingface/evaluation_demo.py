@@ -1,4 +1,5 @@
 """CPU demo: synthetic dataset, local metric, pinned Hub model files."""
+import argparse
 import json
 import tempfile
 from pathlib import Path
@@ -18,7 +19,13 @@ FILES = ["config.json", "model.safetensors", "tokenizer.json", "tokenizer_config
 
 
 def main():
-    manifest = capture_hub_provenance(REPO, FILES, token=False)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--revision', required=True, help='Immutable Hub commit SHA')
+    args = parser.parse_args()
+    import re
+    if not re.fullmatch(r'[0-9a-f]{40}', args.revision):
+        parser.error('revision must be a 40-character commit SHA')
+    manifest = capture_hub_provenance(REPO, FILES, revision=args.revision, token=False)
     anchor = manifest_digest(manifest)
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -32,6 +39,8 @@ def main():
         model = AutoModelForSequenceClassification.from_pretrained(
             root, local_files_only=True, trust_remote_code=False, use_safetensors=True)
         model.eval()
+        if model.config.num_labels != 2:
+            raise RuntimeError('Expected binary classification model')
         import torch
         samples = ["a good day", "a bad day"]
         labels = [1, 0]
