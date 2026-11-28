@@ -35,6 +35,7 @@ RUN cargo build --locked --release --bin aigov_audit \
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
 
 RUN apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
