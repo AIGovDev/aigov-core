@@ -158,7 +158,7 @@ pub fn replay_determinism_digest(
     let bytes = serde_json::to_vec(&payload).expect("replay digest json");
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 pub fn replay_audit_export_json(
