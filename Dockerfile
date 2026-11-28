@@ -40,6 +40,7 @@ RUN apt-get update \
     ca-certificates \
     libssl3 \
     libpq5 \
+  && apt-get install -y --no-install-recommends --only-upgrade libpam0g libpam-modules libpam-modules-bin libpam-runtime \
   && rm -rf /var/lib/apt/lists/* \
   && groupadd --system --gid 1000 govai \
   && useradd --system --uid 1000 --gid govai --home-dir /nonexistent --shell /usr/sbin/nologin govai \

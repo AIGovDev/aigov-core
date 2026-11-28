@@ -1,6 +1,12 @@
 name: Rust ledger verification benchmark
 
 on:
+  pull_request:
+    branches: [staging]
+    paths:
+      - '.github/workflows/ledger-verification-benchmark.yml'
+      - 'rust/tests/long_ledger_benchmark.rs'
+      - 'rust/src/verify_chain.rs'
   workflow_dispatch:
     inputs:
       record_counts:
@@ -30,8 +36,8 @@ jobs:
         env:
           AIGOV_BENCHMARK_REVISION: ${{ github.sha }}
           AIGOV_LEDGER_BENCHMARK_OUT: ${{ runner.temp }}/ledger-verification.json
-          AIGOV_LEDGER_BENCHMARK_SIZES: ${{ inputs.record_counts }}
-          AIGOV_LEDGER_BENCHMARK_ITERATIONS: ${{ inputs.iterations }}
+          AIGOV_LEDGER_BENCHMARK_SIZES: ${{ inputs.record_counts || '1000,10000,100000' }}
+          AIGOV_LEDGER_BENCHMARK_ITERATIONS: ${{ inputs.iterations || '5' }}
         run: |
           set -euo pipefail
           cargo test --manifest-path rust/Cargo.toml --release --locked \

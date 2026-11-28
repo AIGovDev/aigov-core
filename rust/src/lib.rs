@@ -9,6 +9,7 @@ pub mod audit_export_verification;
 pub mod govai_environment;
 pub mod immutable_store;
 pub mod ledger_storage;
+pub mod transactional_ledger;
 pub mod policy;
 pub mod policy_config;
 pub mod policy_engine;

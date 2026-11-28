@@ -1,3 +1,6 @@
+{{- if ne (toString .Values.replicaCount) "1" }}
+{{- fail "AIGov Core requires exactly one replica until multi-host ledger consistency is supported" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +9,8 @@ metadata:
     {{- include "aigov-core.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "aigov-core.selectorLabels" . | nindent 6 }}
