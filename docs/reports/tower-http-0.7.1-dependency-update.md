@@ -1,15 +1,25 @@
 # tower-http 0.7.1 dependency update
 
+## Summary
+
+PR #540 upgrades the direct Rust runtime dependency `tower-http` from 0.6.11 to 0.7.1.
+
 ## Scope
 
-PR #540 upgrades the direct `tower-http` dependency of the Rust runtime from 0.6.11 to 0.7.1. This is a dependency-only change; the application code and HTTP behavior are unchanged.
+The change is limited to dependency metadata, generated lockfiles, and this validation report. Application source and public API contracts are unchanged.
 
-## Validation and correction
+## Evaluation gate
 
-The initial CI run built the runtime and passed its Rust unit and integration suite. The downstream Rust consumer smoke check then failed because its committed lockfile did not include the new direct dependency version. The consumer lockfile now records `tower-http 0.7.1` for `aigov_audit`, while retaining 0.6.11 for its separate transitive consumer.
+- The initial CI run built the runtime and passed the Rust unit and integration suite.
+- The initial downstream Rust consumer smoke failed because its committed lockfile did not include the newly direct `tower-http 0.7.1` dependency.
+- The downstream consumer lockfile now records 0.7.1 for `aigov_audit` and retains 0.6.11 for the separate transitive dependency.
+- CI is running again after this correction; final status is pending.
+- The initial container scan reported five HIGH Debian OS package findings, unrelated to this dependency update.
 
-The container image vulnerability scan also reported five HIGH Debian OS package findings. Those findings are in the image base packages and are unrelated to this Rust dependency update.
+## Human approval gate
 
-## Follow-up
+Status: pending maintainer review after the dependency and downstream lockfile correction.
 
-CI was rerun after the lockfile correction. Final downstream smoke and full workflow results are pending.
+## Validation
+
+GitHub Actions on PR #540 are the validation source. No local cargo executable was available in this workspace.
