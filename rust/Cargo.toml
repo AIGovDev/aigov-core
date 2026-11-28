@@ -54,7 +54,7 @@ path = "src/bin/signing_pubkey_from_seed_once.rs"
 
 [dependencies]
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", default-features = false, features = ["timeout"] }
+tower-http = { version = "0.7", default-features = false, features = ["timeout"] }
 axum = "0.8.9"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
