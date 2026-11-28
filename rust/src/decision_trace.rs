@@ -170,7 +170,7 @@ fn validate_artifact(a: &Value, profile: &str) -> Result<(), String> {
             }
             if has_content {
                 let bytes = canonical_json(a.get("content").expect("checked"));
-                let actual = format!("{:x}", Sha256::digest(bytes));
+                let actual = hex::encode(Sha256::digest(bytes));
                 if actual != digest.to_ascii_lowercase() { return Err("content sha256 does not match".into()); }
             }
         }
@@ -321,7 +321,7 @@ mod tests {
     }
     fn inv(profile:&str) -> Value {
         let content=json!({"messages":[{"role":"user","content":"review"}]});
-        let digest=format!("{:x}", Sha256::digest(canonical_json(&content)));
+        let digest=hex::encode(Sha256::digest(canonical_json(&content)));
         let artifact=|content:Option<Value>| { let mut a=json!({"sha256":digest,"availability":"retained"}); if let Some(c)=content { a["content"]=c; } else { a["artifact_ref"]="s3://audit/run/request.json".into(); } if profile=="redacted" {a["redacted"]=Value::Bool(true);} if profile=="digest_only" {a.as_object_mut().unwrap().remove("artifact_ref");} a };
         json!({"schema_version":"aigov.model_invocation.v1","invocation_id":"i1","provider":{"name":"example","endpoint":"https://api.example.test/v1/responses","requested_model":"model-x","reported_model":"model-x-2026-10-24","api_version":"2026-10-01","backend_fingerprint":"rev-42","provider_request_id":"req-1","determinism":{"status":"unknown","source":"unknown"}},"generation":{"temperature":0,"seed":7},"capture":{"profile":profile,"request":artifact(if profile=="full" {Some(content.clone())} else {None}),"response":artifact(None)}})
     }
