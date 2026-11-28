@@ -21,7 +21,7 @@ dependencies = [
   "requests>=2.34.2",
   "scikit-learn>=1.7.2",
   "joblib>=1.6.0",
-  "PyYAML>=6.0.0",
+  "PyYAML>=6.0.4",
   "PyNaCl>=1.6.2",
   "sigstore>=4.2.0"
 ]
@@ -46,7 +46,7 @@ dev = [
   "ruff>=0.17.6",
   "mypy>=2.4.1",
   "types-requests>=2.33.0.20261030",
-  "PyYAML>=6.0.0",
+  "PyYAML>=6.0.4",
 ]
 runs-postgres = [
   "psycopg[binary]>=3.3.9",
